@@ -53,6 +53,7 @@ export function TradeEntryForm() {
   const [isSaving, setIsSaving] = useState(false)
   const [showSuccess, setShowSuccess] = useState(false)
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleInputChange = (field: keyof TradeFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }))
     // Reset IPS score when trade details change
