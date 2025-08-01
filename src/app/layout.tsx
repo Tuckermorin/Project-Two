@@ -1,9 +1,13 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
+import { Roboto } from 'next/font/google'
+import { cn } from '@/lib/utils'
 import './globals.css'
 import { Navigation } from '@/components/navigation'
 
-const inter = Inter({ subsets: ['latin'] })
+const roboto = Roboto({
+  subsets: ['latin'],
+  weight: ['300', '400', '500', '700']
+})
 
 export const metadata: Metadata = {
   title: 'TenXiv - Paper Trading Tracker',
@@ -16,10 +20,10 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
+    <html lang="en" className="dark">
+      <body className={cn(roboto.className, 'bg-background text-foreground')}>
         <Navigation />
-        <main className="min-h-screen bg-gray-50">
+        <main className="min-h-screen">
           {children}
         </main>
       </body>
