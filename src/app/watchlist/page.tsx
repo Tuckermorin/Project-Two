@@ -60,9 +60,9 @@ export default function WatchlistPage() {
       <div className="mb-8">
         <div className="flex justify-between items-center">
           <div>
-            <h1 className="text-3xl font-bold">Watchlist</h1>
-            <p className="text-muted-foreground mt-2">
-              Track stocks you&apos;re monitoring for trading opportunities
+            <h1 className="text-3xl font-bold text-gray-900">Watchlist</h1>
+            <p className="text-gray-600 mt-2">
+              Track stocks you're monitoring for trading opportunities
             </p>
           </div>
           <Button onClick={() => setShowAddForm(!showAddForm)}>
@@ -81,7 +81,7 @@ export default function WatchlistPage() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
               <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Symbol *
                 </label>
                 <Input
@@ -91,7 +91,7 @@ export default function WatchlistPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Company Name
                 </label>
                 <Input
@@ -101,7 +101,7 @@ export default function WatchlistPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Sector
                 </label>
                 <Input
@@ -111,7 +111,7 @@ export default function WatchlistPage() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-muted-foreground mb-1">
+                <label className="block text-sm font-medium text-gray-700 mb-1">
                   Notes
                 </label>
                 <Input
@@ -137,9 +137,9 @@ export default function WatchlistPage() {
       {stocks.length === 0 ? (
         <Card>
           <CardContent className="text-center py-12">
-            <Eye className="h-16 w-16 text-muted-foreground mx-auto mb-4" />
-            <h3 className="text-xl font-semibold mb-2">No Stocks in Watchlist</h3>
-            <p className="text-muted-foreground mb-6">
+            <Eye className="h-16 w-16 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-xl font-semibold text-gray-900 mb-2">No Stocks in Watchlist</h3>
+            <p className="text-gray-500 mb-6">
               Add stocks you want to monitor for trading opportunities
             </p>
             <Button onClick={() => setShowAddForm(true)}>
@@ -155,9 +155,9 @@ export default function WatchlistPage() {
               <CardContent className="p-6">
                 <div className="flex justify-between items-start mb-4">
                   <div>
-                    <h3 className="text-lg font-bold">{stock.symbol}</h3>
+                    <h3 className="text-lg font-bold text-gray-900">{stock.symbol}</h3>
                     {stock.companyName && (
-                      <p className="text-sm text-muted-foreground">{stock.companyName}</p>
+                      <p className="text-sm text-gray-600">{stock.companyName}</p>
                     )}
                   </div>
                   <Button 
@@ -165,7 +165,7 @@ export default function WatchlistPage() {
                     size="sm"
                     onClick={() => handleRemoveStock(stock.id)}
                   >
-                    <Trash2 className="h-4 w-4 text-muted-foreground hover:text-red-500" />
+                    <Trash2 className="h-4 w-4 text-gray-400 hover:text-red-500" />
                   </Button>
                 </div>
 
@@ -176,16 +176,16 @@ export default function WatchlistPage() {
                 )}
 
                 <div className="mb-4">
-                  <p className="text-sm text-muted-foreground">Current Price</p>
-                  <p className="text-2xl font-bold">
+                  <p className="text-sm text-gray-600">Current Price</p>
+                  <p className="text-2xl font-bold text-gray-900">
                     {stock.currentPrice > 0 ? `$${stock.currentPrice.toFixed(2)}` : 'N/A'}
                   </p>
                 </div>
 
                 {stock.notes && (
                   <div className="mb-4">
-                    <p className="text-sm text-muted-foreground">Notes</p>
-                    <p className="text-sm">{stock.notes}</p>
+                    <p className="text-sm text-gray-600">Notes</p>
+                    <p className="text-sm text-gray-800">{stock.notes}</p>
                   </div>
                 )}
 
@@ -214,20 +214,20 @@ export default function WatchlistPage() {
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="text-center">
-                <p className="text-2xl font-bold">{stocks.length}</p>
-                <p className="text-sm text-muted-foreground">Total Stocks</p>
+                <p className="text-2xl font-bold text-gray-900">{stocks.length}</p>
+                <p className="text-sm text-gray-600">Total Stocks</p>
               </div>
               <div className="text-center">
-                <p className="text-2xl font-bold">
+                <p className="text-2xl font-bold text-gray-900">
                   {new Set(stocks.map(s => s.sector).filter(Boolean)).size}
                 </p>
-                <p className="text-sm text-muted-foreground">Sectors</p>
+                <p className="text-sm text-gray-600">Sectors</p>
               </div>
               <div className="text-center">
-                <p className="text-2xl font-bold">
+                <p className="text-2xl font-bold text-gray-900">
                   {stocks.filter(s => s.notes).length}
                 </p>
-                <p className="text-sm text-muted-foreground">With Notes</p>
+                <p className="text-sm text-gray-600">With Notes</p>
               </div>
             </div>
           </CardContent>
