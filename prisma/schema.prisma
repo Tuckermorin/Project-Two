@@ -1,15 +1,129 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
-  output   = "../src/generated/prisma"
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
+}
+
+model Trade {
+  id             String    @id @default(cuid())
+  type           String    // 'put-credit-spread' | 'long-call'
+  symbol         String
+  expirationDate DateTime
+  quantity       Int
+
+  // Put Credit Spread fields
+  shortStrike    Float?
+  longStrike     Float?
+  creditReceived Float?
+
+  // Long Call fields
+  callStrike     Float?
+  premiumPaid    Float?
+
+  // Trade management
+  status         String    @default("potential") // 'potential' | 'active' | 'closed' | 'expired'
+  entryDate      DateTime  @default(now())
+  exitDate       DateTime?
+  exitPrice      Float?
+  finalProfitLoss Float?
+
+  // IPS scoring
+  ipsScore       Int       @default(0)
+  ipsNotes       String    @default("")
+
+  // Analysis
+  notes          String?
+  lessons        String?
+
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@map("trades")
+}
+
+model IPSCriteria {
+  id                   String   @id @default(cuid())
+  name                 String   @default("My IPS") // Allow multiple IPS versions
+  
+  // PCS Setup Criteria
+  minIV                Float    // Minimum IV percentage (e.g., 40)
+  minIVRank            Int?     // Minimum IV Rank (e.g., 50)
+  maxBidAskSpread      Float    // Maximum bid-ask spread (e.g., 0.10)
+  minDeltaShortLeg     Float    // Minimum delta for short leg (e.g., 0.10)
+  maxDeltaShortLeg     Float    // Maximum delta for short leg (e.g., 0.25)
+  minPremiumPercent    Float    // Min premium as % of collateral (e.g., 20)
+  targetROI            Float    // Target ROI percentage (e.g., 6)
+  
+  // DTE Preferences
+  preferredDTE         String   @default("both") // "7dte", "14dte", or "both"
+  minDTE               Int      // Minimum days to expiration
+  maxDTE               Int      // Maximum days to expiration
+  
+  // Volume & Liquidity
+  minStockVolume       Int      // Min daily stock volume (e.g., 1000000)
+  minOptionsVolume     Int      // Min options volume (e.g., 10000)
+  minOpenInterest      Int      // Min open interest (e.g., 500)
+  
+  // Stock Selection
+  preferredSectors     String   @default("[]") // JSON array of preferred sectors
+  avoidedSectors       String   @default("[]") // JSON array of avoided sectors
+  avoidCorrelatedTickers Boolean @default(true) // Avoid stacking correlated positions
+  
+  // News & Earnings
+  avoidEarnings        Boolean  @default(true) // Avoid holding through earnings
+  earningsBuffer       Int      @default(0)    // Days buffer around earnings
+  
+  // Exit & Risk Management
+  targetProfitPercent  Float    @default(75)   // Close at X% of max gain
+  maxLossPercent       Float    @default(100)  // Max loss before exit
+  maxOpenPositions     Int      @default(3)    // Max simultaneous positions
+  maxCollateralPerTrade Float   @default(300)  // Max collateral per trade
+  positionSizeLimit    Int      @default(2)    // Max contracts per setup
+  
+  // Rolling Rules
+  rollEarlyDTE         Int      @default(3)    // When to consider rolling (3-4 DTE)
+  rollOnDeltaIncrease  Boolean  @default(true) // Roll if delta increases significantly
+  
+  // Strategy Specific
+  allowHybridStrategy  Boolean  @default(false) // PCS + Long Calls hybrid
+  maxEarningsExposure  Float    @default(50)   // Max % of portfolio in earnings plays
+  
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  isActive             Boolean  @default(true)  // Allow multiple IPS, mark active one
+
+  @@map("ips_criteria")
+}
+
+model WatchlistStock {
+  id           String   @id @default(cuid())
+  symbol       String   @unique
+  companyName  String
+  sector       String?
+  currentPrice Float?
+  notes        String?
+  addedDate    DateTime @default(now())
+  
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@map("watchlist_stocks")
+}
+
+model JournalEntry {
+  id        String   @id @default(cuid())
+  title     String
+  content   String
+  weekOf    DateTime // Monday of the week this entry is for
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("journal_entries")
 }
