@@ -76,7 +76,6 @@ export function IPSBuilderForm() {
   const [formData, setFormData] = useState<IPSFormData>(defaultFormData)
   const [activeTab, setActiveTab] = useState("setup")
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleInputChange = (field: keyof IPSFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
@@ -318,7 +317,7 @@ export function IPSBuilderForm() {
               <div className="flex items-center justify-between">
                 <div>
                   <Label htmlFor="avoidEarnings">Avoid Earnings</Label>
-                  <p className="text-xs text-gray-500">Don&apos;t hold PCS through earnings</p>
+                  <p className="text-xs text-gray-500">Don't hold PCS through earnings</p>
                 </div>
                 <Switch
                   id="avoidEarnings"

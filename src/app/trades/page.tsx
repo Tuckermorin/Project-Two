@@ -173,8 +173,8 @@ export default function TradesPage() {
               <CardContent className="text-center py-12">
                 <List className="h-16 w-16 text-gray-400 mx-auto mb-4" />
                 <h3 className="text-xl font-semibold text-gray-900 mb-2">No Active Trades</h3>
-                <p className="text-muted-foreground mb-6">
-                  Once you &quot;Execute&quot; trades from your potential list, they&apos;ll appear here for monitoring
+                <p className="text-gray-500 mb-6">
+                  Once you "Execute" trades from your potential list, they'll appear here for monitoring
                 </p>
                 <div className="flex flex-col sm:flex-row gap-4 justify-center">
                   <Button variant="outline" onClick={() => setActiveTab("potential")}>
