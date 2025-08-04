@@ -72,6 +72,24 @@ export function QuickStart({
             )
           })}
         </div>
+        
+        {/* Quick Action Buttons */}
+        <div className="mt-6 pt-4 border-t">
+          <div className="flex gap-3 justify-center">
+            <Button asChild size="sm">
+              <Link href="/trades">
+                <TrendingUp className="h-4 w-4 mr-2" />
+                Add New Trade
+              </Link>
+            </Button>
+            <Button asChild variant="outline" size="sm">
+              <Link href="/trades">
+                <TrendingUp className="h-4 w-4 mr-2" />
+                Trading
+              </Link>
+            </Button>
+          </div>
+        </div>
       </CardContent>
     </Card>
   )

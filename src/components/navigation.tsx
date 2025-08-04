@@ -16,7 +16,7 @@ import {
 const navigation = [
   { name: 'Dashboard', href: '/', icon: Home },
   { name: 'IPS Builder', href: '/ips', icon: FileText },
-  { name: 'New Trade', href: '/trades', icon: TrendingUp },
+  { name: 'Trades', href: '/trades', icon: TrendingUp },
   { name: 'Watchlist', href: '/watchlist', icon: Eye },
   { name: 'Journal', href: '/journal', icon: BookOpen },
   { name: 'History', href: '/history', icon: History },
