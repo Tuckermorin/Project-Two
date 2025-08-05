@@ -132,41 +132,19 @@ export default function IPSPage() {
   // Event handlers
   const handleActivateIPS = async (ipsId: string) => {
     try {
-      // Optimistic update - update UI immediately
-      setAllIPSs(prevIPSs => 
-        prevIPSs.map(ips => 
-          ips.id === ipsId 
-            ? { ...ips, is_active: true, last_modified: new Date().toISOString().split('T')[0] }
-            : ips
-        )
-      );
-      
-      // Then update on backend
       await ipsDataService.activateIPS(ipsId);
+      await loadInitialData(); // Refresh data
     } catch (error) {
       console.error('Error activating IPS:', error);
-      // Revert the optimistic update on error
-      await loadInitialData();
     }
   };
 
   const handleDeactivateIPS = async (ipsId: string) => {
     try {
-      // Optimistic update - update UI immediately
-      setAllIPSs(prevIPSs => 
-        prevIPSs.map(ips => 
-          ips.id === ipsId 
-            ? { ...ips, is_active: false, last_modified: new Date().toISOString().split('T')[0] }
-            : ips
-        )
-      );
-      
-      // Then update on backend
       await ipsDataService.deactivateIPS(ipsId);
+      await loadInitialData(); // Refresh data
     } catch (error) {
       console.error('Error deactivating IPS:', error);
-      // Revert the optimistic update on error
-      await loadInitialData();
     }
   };
 
@@ -190,11 +168,8 @@ export default function IPSPage() {
 
   const handleDuplicateIPS = async (ipsId: string, newName: string) => {
     try {
-      const newIPS = await ipsDataService.duplicateIPS(ipsId, newName);
-      if (newIPS) {
-        // Add the new IPS to state immediately
-        setAllIPSs(prevIPSs => [...prevIPSs, newIPS]);
-      }
+      await ipsDataService.duplicateIPS(ipsId, newName);
+      await loadInitialData(); // Refresh data
     } catch (error) {
       console.error('Error duplicating IPS:', error);
     }
@@ -202,36 +177,23 @@ export default function IPSPage() {
 
   const handleArchiveIPS = async (ipsId: string) => {
     try {
-      // Optimistic update
-      setAllIPSs(prevIPSs => 
-        prevIPSs.map(ips => 
-          ips.id === ipsId 
-            ? { ...ips, is_active: false, last_modified: new Date().toISOString().split('T')[0] }
-            : ips
-        )
-      );
-      
       await ipsDataService.deactivateIPS(ipsId);
+      await loadInitialData(); // Refresh data
     } catch (error) {
       console.error('Error archiving IPS:', error);
-      await loadInitialData(); // Revert on error
     }
   };
 
   const handleDeleteIPS = async (ipsId: string) => {
     try {
-      // Optimistic update - remove from UI immediately
-      setAllIPSs(prevIPSs => prevIPSs.filter(ips => ips.id !== ipsId));
-      
+      await ipsDataService.deleteIPS(ipsId);
+      await loadInitialData(); // Refresh data
       // Close expanded view if this IPS was expanded
       if (expandedIPS === ipsId) {
         setExpandedIPS(null);
       }
-      
-      await ipsDataService.deleteIPS(ipsId);
     } catch (error) {
       console.error('Error deleting IPS:', error);
-      await loadInitialData(); // Revert on error
     }
   };
 
@@ -264,22 +226,14 @@ export default function IPSPage() {
 
   const handleSaveIPS = async (ipsData: any) => {
     try {
-      let ipsConfig: IPSConfiguration;
+      let ipsConfig;
       
       if (state.currentIPSId) {
         // Update existing
         ipsConfig = await ipsDataService.updateIPS(state.currentIPSId, ipsData);
-        // Update in local state
-        setAllIPSs(prevIPSs => 
-          prevIPSs.map(ips => 
-            ips.id === state.currentIPSId ? { ...ips, ...ipsConfig } : ips
-          )
-        );
       } else {
         // Create new
         ipsConfig = await ipsDataService.createIPS(userId, ipsData);
-        // Add to local state
-        setAllIPSs(prevIPSs => [...prevIPSs, ipsConfig]);
       }
       
       // Save factor configurations
@@ -297,6 +251,8 @@ export default function IPSPage() {
       
       setState(prev => ({ ...prev, step: 'list', currentIPSId: null }));
       
+      // Reload data to get fresh state
+      await loadInitialData();
     } catch (error) {
       console.error('Error saving IPS:', error);
       alert('Failed to save IPS. Please try again.');

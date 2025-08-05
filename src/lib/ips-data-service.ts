@@ -1,5 +1,5 @@
 /**
- * IPS Data Access Layer - Clean Version
+ * Enhanced IPS Data Access Layer - Multiple IPS Support
  * Copy this into: src/lib/ips-data-service.ts
  */
 
@@ -17,6 +17,18 @@ interface IPSConfiguration {
   total_weight?: number;
   avg_weight?: number;
   created_at: string;
+  last_modified?: string;
+  performance?: {
+    winRate: number;
+    avgROI: number;
+    totalTrades: number;
+  };
+  criteria?: {
+    minIV: number;
+    maxDelta: number;
+    targetROI: number;
+    maxPositions: number;
+  };
 }
 
 interface FactorDefinition {
@@ -30,6 +42,70 @@ interface FactorDefinition {
 }
 
 export class IPSDataService {
+  // Enhanced mock data with multiple IPSs
+  private mockIPSs: IPSConfiguration[] = [
+    {
+      id: 'ips-1',
+      user_id: 'demo-user-id',
+      name: 'Conservative PCS Strategy',
+      description: 'Low-risk put credit spreads with high probability of success',
+      is_active: true,
+      total_factors: 12,
+      active_factors: 10,
+      total_weight: 62,
+      avg_weight: 6.2,
+      created_at: '2025-07-01T00:00:00Z',
+      last_modified: '2025-08-01',
+      performance: { winRate: 85, avgROI: 4.2, totalTrades: 24 },
+      criteria: {
+        minIV: 40,
+        maxDelta: 0.20,
+        targetROI: 6,
+        maxPositions: 3
+      }
+    },
+    {
+      id: 'ips-2',
+      user_id: 'demo-user-id',
+      name: 'Aggressive Growth IPS',
+      description: 'Higher risk tolerance with aggressive profit targets',
+      is_active: false,
+      total_factors: 15,
+      active_factors: 13,
+      total_weight: 101,
+      avg_weight: 7.8,
+      created_at: '2025-06-15T00:00:00Z',
+      last_modified: '2025-07-15',
+      performance: { winRate: 72, avgROI: 8.1, totalTrades: 18 },
+      criteria: {
+        minIV: 30,
+        maxDelta: 0.35,
+        targetROI: 12,
+        maxPositions: 5
+      }
+    },
+    {
+      id: 'ips-3',
+      user_id: 'demo-user-id',
+      name: 'Earnings Play Strategy',
+      description: 'Specialized strategy for pre-earnings volatility plays',
+      is_active: false,
+      total_factors: 8,
+      active_factors: 6,
+      total_weight: 51,
+      avg_weight: 8.5,
+      created_at: '2025-05-20T00:00:00Z',
+      last_modified: '2025-06-20',
+      performance: { winRate: 65, avgROI: 15.3, totalTrades: 12 },
+      criteria: {
+        minIV: 60,
+        maxDelta: 0.25,
+        targetROI: 20,
+        maxPositions: 2
+      }
+    }
+  ];
+
   // Real factor definitions from Excel file
   private mockFactorDefinitions: FactorDefinition[] = [
     // Quantitative Factors - Income Statement
@@ -52,48 +128,28 @@ export class IPSDataService {
 
     // Quantitative Factors - Cash Flow
     { id: 'quant-operating-cash-flow', name: 'Operating Cash Flow', type: 'quantitative', category: 'Cash Flow', data_type: 'numeric', unit: '$' },
-    { id: 'quant-capex', name: 'CapEx', type: 'quantitative', category: 'Cash Flow', data_type: 'numeric', unit: '$' },
     { id: 'quant-free-cash-flow', name: 'Free Cash Flow', type: 'quantitative', category: 'Cash Flow', data_type: 'numeric', unit: '$' },
-    { id: 'quant-fcf-yield', name: 'FCF Yield', type: 'quantitative', category: 'Cash Flow', data_type: 'percentage', unit: '%' },
-    { id: 'quant-cash-conversion', name: 'Cash Conversion', type: 'quantitative', category: 'Cash Flow', data_type: 'percentage', unit: '%' },
-    { id: 'quant-financing-cash-flows', name: 'Financing Cash Flows', type: 'quantitative', category: 'Cash Flow', data_type: 'numeric', unit: '$' },
+    { id: 'quant-capex', name: 'CapEx', type: 'quantitative', category: 'Cash Flow', data_type: 'numeric', unit: '$' },
+    { id: 'quant-cash-flow-per-share', name: 'Cash Flow per Share', type: 'quantitative', category: 'Cash Flow', data_type: 'numeric', unit: '$' },
+    { id: 'quant-working-capital', name: 'Working Capital', type: 'quantitative', category: 'Cash Flow', data_type: 'numeric', unit: '$' },
 
-    // Quantitative Factors - Valuation
-    { id: 'quant-pe-ratio', name: 'P/E Ratio', type: 'quantitative', category: 'Valuation', data_type: 'ratio', unit: 'ratio' },
-    { id: 'quant-peg-ratio', name: 'PEG Ratio', type: 'quantitative', category: 'Valuation', data_type: 'ratio', unit: 'ratio' },
-    { id: 'quant-evebitda', name: 'EV/EBITDA', type: 'quantitative', category: 'Valuation', data_type: 'ratio', unit: 'ratio' },
-    { id: 'quant-evsales', name: 'EV/Sales', type: 'quantitative', category: 'Valuation', data_type: 'ratio', unit: 'ratio' },
-    { id: 'quant-pb-ratio', name: 'P/B Ratio', type: 'quantitative', category: 'Valuation', data_type: 'ratio', unit: 'ratio' },
-    { id: 'quant-pfcf', name: 'P/FCF', type: 'quantitative', category: 'Valuation', data_type: 'ratio', unit: 'ratio' },
-    { id: 'quant-dividend-yield', name: 'Dividend Yield', type: 'quantitative', category: 'Valuation', data_type: 'percentage', unit: '%' },
-    { id: 'quant-payout-ratio', name: 'Payout Ratio', type: 'quantitative', category: 'Valuation', data_type: 'percentage', unit: '%' },
+    // Quantitative Factors - Valuation Metrics
+    { id: 'quant-pe-ratio', name: 'P/E Ratio', type: 'quantitative', category: 'Valuation Metrics', data_type: 'ratio', unit: 'ratio' },
+    { id: 'quant-pb-ratio', name: 'P/B Ratio', type: 'quantitative', category: 'Valuation Metrics', data_type: 'ratio', unit: 'ratio' },
+    { id: 'quant-ps-ratio', name: 'P/S Ratio', type: 'quantitative', category: 'Valuation Metrics', data_type: 'ratio', unit: 'ratio' },
+    { id: 'quant-peg-ratio', name: 'PEG Ratio', type: 'quantitative', category: 'Valuation Metrics', data_type: 'ratio', unit: 'ratio' },
+    { id: 'quant-ev-ebitda', name: 'EV/EBITDA', type: 'quantitative', category: 'Valuation Metrics', data_type: 'ratio', unit: 'ratio' },
+    { id: 'quant-price-to-fcf', name: 'Price to FCF', type: 'quantitative', category: 'Valuation Metrics', data_type: 'ratio', unit: 'ratio' },
+    { id: 'quant-market-cap', name: 'Market Cap', type: 'quantitative', category: 'Valuation Metrics', data_type: 'numeric', unit: '$' },
 
-    // Quantitative Factors - Profitability
-    { id: 'quant-roe', name: 'ROE', type: 'quantitative', category: 'Profitability', data_type: 'percentage', unit: '%' },
-    { id: 'quant-roa', name: 'ROA', type: 'quantitative', category: 'Profitability', data_type: 'percentage', unit: '%' },
-    { id: 'quant-roic', name: 'ROIC', type: 'quantitative', category: 'Profitability', data_type: 'percentage', unit: '%' },
-
-    // Quantitative Factors - Efficiency
-    { id: 'quant-asset-turnover', name: 'Asset Turnover', type: 'quantitative', category: 'Efficiency', data_type: 'ratio', unit: 'ratio' },
-    { id: 'quant-inventory-turnover', name: 'Inventory Turnover', type: 'quantitative', category: 'Efficiency', data_type: 'ratio', unit: 'ratio' },
-    { id: 'quant-receivables-turnover', name: 'Receivables Turnover', type: 'quantitative', category: 'Efficiency', data_type: 'ratio', unit: 'ratio' },
-    { id: 'quant-dso', name: 'DSO', type: 'quantitative', category: 'Efficiency', data_type: 'numeric', unit: 'days' },
-    { id: 'quant-dio', name: 'DIO', type: 'quantitative', category: 'Efficiency', data_type: 'numeric', unit: 'days' },
-
-    // Quantitative Factors - Leverage & Liquidity
-    { id: 'quant-debt-to-equity', name: 'Debt-to-Equity', type: 'quantitative', category: 'Leverage & Liquidity', data_type: 'ratio', unit: 'ratio' },
-    { id: 'quant-interest-coverage', name: 'Interest Coverage', type: 'quantitative', category: 'Leverage & Liquidity', data_type: 'ratio', unit: 'ratio' },
-    { id: 'quant-altman-z-score', name: 'Altman Z-score', type: 'quantitative', category: 'Leverage & Liquidity', data_type: 'numeric', unit: 'score' },
-
-    // Quantitative Factors - Growth
-    { id: 'quant-revenue-cagr', name: 'Revenue CAGR', type: 'quantitative', category: 'Growth', data_type: 'percentage', unit: '%' },
-    { id: 'quant-ebitda-cagr', name: 'EBITDA CAGR', type: 'quantitative', category: 'Growth', data_type: 'percentage', unit: '%' },
-    { id: 'quant-eps-cagr', name: 'EPS CAGR', type: 'quantitative', category: 'Growth', data_type: 'percentage', unit: '%' },
-    { id: 'quant-fcf-cagr', name: 'FCF CAGR', type: 'quantitative', category: 'Growth', data_type: 'percentage', unit: '%' },
-    { id: 'quant-analyst-forecasts', name: 'Analyst Forecasts', type: 'quantitative', category: 'Growth', data_type: 'percentage', unit: '%' },
+    // Quantitative Factors - Growth Metrics
+    { id: 'quant-revenue-growth', name: 'Revenue Growth', type: 'quantitative', category: 'Growth Metrics', data_type: 'percentage', unit: '%' },
+    { id: 'quant-earnings-growth', name: 'Earnings Growth', type: 'quantitative', category: 'Growth Metrics', data_type: 'percentage', unit: '%' },
+    { id: 'quant-operating-leverage', name: 'Operating Leverage', type: 'quantitative', category: 'Growth Metrics', data_type: 'ratio', unit: 'ratio' },
+    { id: 'quant-eps-growth', name: 'EPS Growth', type: 'quantitative', category: 'Growth Metrics', data_type: 'percentage', unit: '%' },
+    { id: 'quant-book-value-growth', name: 'Book Value Growth', type: 'quantitative', category: 'Growth Metrics', data_type: 'percentage', unit: '%' },
 
     // Quantitative Factors - Market & Trading
-    { id: 'quant-market-cap', name: 'Market Cap', type: 'quantitative', category: 'Market & Trading', data_type: 'numeric', unit: '$' },
     { id: 'quant-beta', name: 'Beta', type: 'quantitative', category: 'Market & Trading', data_type: 'numeric', unit: 'ratio' },
     { id: 'quant-short-interest', name: 'Short Interest', type: 'quantitative', category: 'Market & Trading', data_type: 'percentage', unit: '%' },
     { id: 'quant-avg-daily-volume', name: 'Avg Daily Volume', type: 'quantitative', category: 'Market & Trading', data_type: 'numeric', unit: 'shares' },
@@ -114,42 +170,17 @@ export class IPSDataService {
     // Qualitative Factors - Business Model & Industry
     { id: 'qual-business-model-clarity', name: 'Business Model Clarity', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
     { id: 'qual-competitive-moat', name: 'Competitive Moat', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-industry-trends', name: 'Industry Trends', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-cyclicality', name: 'Cyclicality', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-diversification', name: 'Diversification', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-recurring-revenue', name: 'Recurring Revenue', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-secular-trends', name: 'Secular Trends', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-supply-chain-resilience', name: 'Supply Chain Resilience', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-pricing-power', name: 'Pricing Power', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-
-    // Qualitative Factors - Product & Innovation
-    { id: 'qual-product-pipeline', name: 'Product Pipeline', type: 'qualitative', category: 'Product & Innovation', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-patents-ip', name: 'Patents/IP', type: 'qualitative', category: 'Product & Innovation', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-customer-feedback', name: 'Customer Feedback', type: 'qualitative', category: 'Product & Innovation', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-differentiation', name: 'Differentiation', type: 'qualitative', category: 'Product & Innovation', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-innovation-speed', name: 'Innovation Speed', type: 'qualitative', category: 'Product & Innovation', data_type: 'rating', unit: '1-5' },
-
-    // Qualitative Factors - ESG & Intangibles
-    { id: 'qual-environmental-impact', name: 'Environmental Impact', type: 'qualitative', category: 'ESG & Intangibles', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-social-reputation', name: 'Social Reputation', type: 'qualitative', category: 'ESG & Intangibles', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-governance-quality', name: 'Governance Quality', type: 'qualitative', category: 'ESG & Intangibles', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-litigation-risk', name: 'Litigation Risk', type: 'qualitative', category: 'ESG & Intangibles', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-brand-strength', name: 'Brand Strength', type: 'qualitative', category: 'ESG & Intangibles', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-media-reputation', name: 'Media Reputation', type: 'qualitative', category: 'ESG & Intangibles', data_type: 'rating', unit: '1-5' },
-
-    // Qualitative Factors - Macro & External
-    { id: 'qual-regulatory-risk', name: 'Regulatory Risk', type: 'qualitative', category: 'Macro & External', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-interest-rate-sensitivity', name: 'Interest Rate Sensitivity', type: 'qualitative', category: 'Macro & External', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-fx-exposure', name: 'FX Exposure', type: 'qualitative', category: 'Macro & External', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-supply-chain-dependency', name: 'Supply Chain Dependency', type: 'qualitative', category: 'Macro & External', data_type: 'rating', unit: '1-5' },
-    { id: 'qual-commodity-exposure', name: 'Commodity Exposure', type: 'qualitative', category: 'Macro & External', data_type: 'rating', unit: '1-5' },
+    { id: 'qual-industry-position', name: 'Industry Position', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
+    { id: 'qual-market-share', name: 'Market Share', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
+    { id: 'qual-innovation-rd', name: 'Innovation & R&D', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
+    { id: 'qual-regulatory-environment', name: 'Regulatory Environment', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
+    { id: 'qual-esg-factors', name: 'ESG Factors', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
 
     // Options Factors - Options Metrics
-    { id: 'opt-implied-volatility-iv', name: 'Implied Volatility (IV)', type: 'options', category: 'Options Metrics', data_type: 'percentage', unit: '%' },
-    { id: 'opt-historical-volatility', name: 'Historical Volatility', type: 'options', category: 'Options Metrics', data_type: 'percentage', unit: '%' },
+    { id: 'opt-iv', name: 'Implied Volatility', type: 'options', category: 'Options Metrics', data_type: 'percentage', unit: '%' },
     { id: 'opt-delta', name: 'Delta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
-    { id: 'opt-theta', name: 'Theta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
     { id: 'opt-gamma', name: 'Gamma', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
+    { id: 'opt-theta', name: 'Theta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
     { id: 'opt-vega', name: 'Vega', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
     { id: 'opt-open-interest', name: 'Open Interest', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'contracts' },
     { id: 'opt-volume', name: 'Volume', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'contracts' },
@@ -162,43 +193,135 @@ export class IPSDataService {
     { id: 'opt-iv-rank-iv-percentile', name: 'IV Rank / IV Percentile', type: 'options', category: 'Sentiment & Flow', data_type: 'percentile', unit: '%' }
   ];
 
-  private mockIPS: IPSConfiguration | null = null;
+  // **NEW METHODS FOR MULTIPLE IPS SUPPORT**
+
+  async getAllUserIPSs(userId: string): Promise<IPSConfiguration[]> {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return this.mockIPSs.filter(ips => ips.user_id === userId);
+  }
+
+  async getActiveIPSs(userId: string): Promise<IPSConfiguration[]> {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return this.mockIPSs.filter(ips => ips.user_id === userId && ips.is_active);
+  }
+
+  async getInactiveIPSs(userId: string): Promise<IPSConfiguration[]> {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    return this.mockIPSs.filter(ips => ips.user_id === userId && !ips.is_active);
+  }
+
+  async activateIPS(ipsId: string): Promise<IPSConfiguration | null> {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    const ips = this.mockIPSs.find(i => i.id === ipsId);
+    if (ips) {
+      ips.is_active = true;
+      ips.last_modified = new Date().toISOString().split('T')[0];
+    }
+    return ips || null;
+  }
+
+  async deactivateIPS(ipsId: string): Promise<IPSConfiguration | null> {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    const ips = this.mockIPSs.find(i => i.id === ipsId);
+    if (ips) {
+      ips.is_active = false;
+      ips.last_modified = new Date().toISOString().split('T')[0];
+    }
+    return ips || null;
+  }
+
+  async duplicateIPS(ipsId: string, newName: string): Promise<IPSConfiguration | null> {
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    const originalIPS = this.mockIPSs.find(i => i.id === ipsId);
+    if (!originalIPS) return null;
+
+    const duplicatedIPS: IPSConfiguration = {
+      ...originalIPS,
+      id: 'ips-' + Date.now(),
+      name: newName,
+      is_active: false, // New duplicates start as inactive
+      created_at: new Date().toISOString(),
+      last_modified: new Date().toISOString().split('T')[0]
+    };
+
+    this.mockIPSs.push(duplicatedIPS);
+    return duplicatedIPS;
+  }
+
+  async deleteIPS(ipsId: string): Promise<boolean> {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    
+    const index = this.mockIPSs.findIndex(i => i.id === ipsId);
+    if (index > -1) {
+      this.mockIPSs.splice(index, 1);
+      return true;
+    }
+    return false;
+  }
+
+  // **UPDATED EXISTING METHODS**
 
   async getActiveIPS(userId: string): Promise<IPSConfiguration | null> {
-    // Simulate API delay
+    // Return the first active IPS (for backward compatibility)
     await new Promise(resolve => setTimeout(resolve, 500));
-    return this.mockIPS;
+    const activeIPSs = this.mockIPSs.filter(ips => ips.user_id === userId && ips.is_active);
+    return activeIPSs.length > 0 ? activeIPSs[0] : null;
+  }
+
+  async getIPSById(ipsId: string): Promise<IPSConfiguration | null> {
+    await new Promise(resolve => setTimeout(resolve, 300));
+    return this.mockIPSs.find(ips => ips.id === ipsId) || null;
   }
 
   async createIPS(userId: string, ipsData: any): Promise<IPSConfiguration> {
     await new Promise(resolve => setTimeout(resolve, 500));
     
-    this.mockIPS = {
+    const newIPS: IPSConfiguration = {
       id: 'ips-' + Date.now(),
       user_id: userId,
       name: ipsData.name,
       description: ipsData.description,
-      is_active: true,
+      is_active: true, // New IPSs start as active
       total_factors: 0,
       active_factors: 0,
       total_weight: 0,
       avg_weight: 0,
-      created_at: new Date().toISOString()
+      created_at: new Date().toISOString(),
+      last_modified: new Date().toISOString().split('T')[0],
+      performance: { winRate: 0, avgROI: 0, totalTrades: 0 },
+      criteria: {
+        minIV: ipsData.criteria?.minIV || 40,
+        maxDelta: ipsData.criteria?.maxDelta || 0.25,
+        targetROI: ipsData.criteria?.targetROI || 6,
+        maxPositions: ipsData.criteria?.maxPositions || 3
+      }
     };
     
-    return this.mockIPS;
+    this.mockIPSs.push(newIPS);
+    return newIPS;
   }
 
   async updateIPS(ipsId: string, ipsData: any): Promise<IPSConfiguration> {
     await new Promise(resolve => setTimeout(resolve, 500));
     
-    if (this.mockIPS) {
-      this.mockIPS.name = ipsData.name;
-      this.mockIPS.description = ipsData.description;
+    const ips = this.mockIPSs.find(i => i.id === ipsId);
+    if (!ips) throw new Error('IPS not found');
+
+    ips.name = ipsData.name;
+    ips.description = ipsData.description;
+    ips.last_modified = new Date().toISOString().split('T')[0];
+    
+    if (ipsData.criteria) {
+      ips.criteria = { ...ips.criteria, ...ipsData.criteria };
     }
     
-    return this.mockIPS!;
+    return ips;
   }
+
+  // **EXISTING METHODS (unchanged)**
 
   async getFactorDefinitions(filters: any = {}) {
     await new Promise(resolve => setTimeout(resolve, 300));
@@ -231,15 +354,17 @@ export class IPSDataService {
     await new Promise(resolve => setTimeout(resolve, 500));
     
     // Update mock IPS stats
-    if (this.mockIPS) {
-      this.mockIPS.total_factors = factorConfigs.length;
-      this.mockIPS.active_factors = factorConfigs.filter(c => c.enabled).length;
-      this.mockIPS.total_weight = factorConfigs
+    const ips = this.mockIPSs.find(i => i.id === ipsId);
+    if (ips) {
+      ips.total_factors = factorConfigs.length;
+      ips.active_factors = factorConfigs.filter(c => c.enabled).length;
+      ips.total_weight = factorConfigs
         .filter(c => c.enabled)
         .reduce((sum, c) => sum + c.weight, 0);
-      this.mockIPS.avg_weight = (this.mockIPS.active_factors ?? 0) > 0 
-        ? (this.mockIPS.total_weight ?? 0) / (this.mockIPS.active_factors ?? 1)
+      ips.avg_weight = (ips.active_factors ?? 0) > 0 
+        ? (ips.total_weight ?? 0) / (ips.active_factors ?? 1)
         : 0;
+      ips.last_modified = new Date().toISOString().split('T')[0];
     }
     
     return factorConfigs;
@@ -273,8 +398,9 @@ export class IPSDataService {
   async exportIPSConfiguration(ipsId: string) {
     await new Promise(resolve => setTimeout(resolve, 300));
     
+    const ips = this.mockIPSs.find(i => i.id === ipsId);
     return {
-      ips: this.mockIPS,
+      ips: ips,
       factors: [],
       exportedAt: new Date().toISOString(),
       version: '1.0'
