@@ -33,13 +33,17 @@ model Trade {
   exitPrice      Float?
   finalProfitLoss Float?
 
-  // IPS scoring
+  // IPS tracking (UPDATED)
   ipsScore       Int       @default(0)
+  ipsName        String?   // Name of IPS used for this trade
   ipsNotes       String    @default("")
 
   // Analysis
   notes          String?
   lessons        String?
+
+  // Relations
+  snapshots      TradeSnapshot[]
 
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt
@@ -107,8 +111,15 @@ model WatchlistStock {
   companyName  String
   sector       String?
   currentPrice Float?
+  previousClose Float?   // Track price changes
+  priceChange  Float?    // $ change from previous close
+  priceChangePercent Float? // % change
+  volume       Int?      // Current volume
+  avgVolume    Int?      // Average volume
+  marketCap    Float?    // Market capitalization
   notes        String?
   addedDate    DateTime @default(now())
+  lastUpdated  DateTime @default(now()) // Track when price was last updated
   
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
@@ -126,4 +137,67 @@ model JournalEntry {
   updatedAt DateTime @updatedAt
 
   @@map("journal_entries")
+}
+
+// NEW: Trade snapshots for market open, midday, close
+model TradeSnapshot {
+  id          String   @id @default(cuid())
+  tradeId     String   // Foreign key to Trade
+  ipsName     String?  // Which IPS this snapshot is under
+  timestamp   DateTime
+  snapshotType String  // 'market_open' | 'midday' | 'market_close'
+  
+  // Current market data at snapshot time
+  currentPrice    Float
+  premium         Float
+  delta           Float?
+  theta           Float?
+  gamma           Float?
+  vega            Float?
+  rho             Float?
+  impliedVol      Float?
+  
+  // P&L at this moment
+  unrealizedPL    Float
+  unrealizedPLPercent Float
+  
+  // Position Greeks summary
+  positionDelta   Float?
+  positionTheta   Float?
+  
+  trade Trade @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  
+  createdAt DateTime @default(now())
+  
+  @@map("trade_snapshots")
+  @@index([tradeId])
+  @@index([timestamp])
+}
+
+// NEW: API sync tracking
+model APISync {
+  id           String   @id @default(cuid())
+  dataType     String   // 'trades' | 'market_data' | 'watchlist'
+  lastSyncAt   DateTime
+  syncStatus   String   // 'success' | 'error' | 'in_progress'
+  errorMessage String?
+  recordsProcessed Int @default(0)
+  
+  createdAt    DateTime @default(now())
+  
+  @@map("api_syncs")
+}
+
+// NEW: Archive tracking for yearly exports
+model ArchiveLog {
+  id        String   @id @default(cuid())
+  year      Int
+  dataType  String   // 'trade_snapshots' | 'watchlist_history'
+  filePath  String   // Where the data was exported
+  recordCount Int    // How many records were archived
+  fileSize  Int?     // Size in bytes
+  createdAt DateTime @default(now())
+  
+  @@map("archive_logs")
+  @@index([year, dataType])
 }

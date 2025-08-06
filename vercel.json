@@ -1,0 +1,20 @@
+{
+  "crons": [
+    {
+      "path": "/api/jobs/daily-sync",
+      "schedule": "0 22 * * 1-5"
+    },
+    {
+      "path": "/api/jobs/snapshot-sync",
+      "schedule": "30 14 * * 1-5"
+    },
+    {
+      "path": "/api/jobs/snapshot-sync", 
+      "schedule": "0 18 * * 1-5"
+    },
+    {
+      "path": "/api/jobs/snapshot-sync",
+      "schedule": "0 21 * * 1-5"
+    }
+  ]
+}
