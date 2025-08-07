@@ -12,7 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { useRouter } from 'next/navigation'
 
 // Import services
-import { ipsDataService, type IPSConfiguration, type TradingStrategy } from '@/lib/ips-data-service'
+import { ipsDataService, type IPSConfiguration, type TradingStrategy } from '@/lib/services/ips-data-service'
 
 // Types
 interface TradeFormData {

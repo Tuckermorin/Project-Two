@@ -49,7 +49,7 @@ import { IPSSummary } from '@/components/ips/ips-summary';
 import { TradeScoreDisplay } from '@/components/ips/trade-score-display';
 
 // Import services
-import { ipsDataService, type IPSConfiguration, type TradingStrategy } from '@/lib/ips-data-service';
+import { ipsDataService, type IPSConfiguration, type TradingStrategy } from '@/lib/services/ips-data-service';
 import { TradeScorer } from '@/lib/trade-scorer';
 
 // Types
@@ -85,12 +85,20 @@ export default function IPSPage() {
       setState(prev => ({ ...prev, isLoading: true }));
       
       try {
-        const [userIPSs, strategies] = await Promise.all([
+        const [userIPSs, strategiesRaw] = await Promise.all([
           ipsDataService.getAllUserIPSs(userId),
           Promise.resolve(ipsDataService.getAvailableStrategies())
         ]);
         
         setAllIPSs(userIPSs);
+        // Fix requiredFactorTypes typing
+        const strategies = strategiesRaw.map(s => ({
+          ...s,
+          requiredFactorTypes: (s.requiredFactorTypes ?? []).filter(
+            (t: string): t is "qualitative" | "options" | "quantitative" =>
+              ["qualitative", "options", "quantitative"].includes(t)
+          )
+        }));
         setAvailableStrategies(strategies);
         
       } catch (error) {

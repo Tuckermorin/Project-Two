@@ -1,6 +1,7 @@
+// src/components/ips/ips-builder-form.tsx
 "use client"
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,10 +10,13 @@ import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Switch } from '@/components/ui/switch'
-import { Save, Calculator, Shield, Target, Settings } from 'lucide-react'
+import { Save, Calculator, Shield, Target, Settings, Loader2 } from 'lucide-react'
+import { toast } from 'sonner'
+import { ipsDataService } from '@/lib/services/ips-data-service'
 
 interface IPSFormData {
   name: string
+  description: string
   // PCS Setup Criteria
   minIV: number
   minIVRank: number
@@ -49,6 +53,7 @@ interface IPSFormData {
 
 const defaultFormData: IPSFormData = {
   name: "My Trading IPS",
+  description: "A comprehensive investment policy statement for systematic trading",
   minIV: 40,
   minIVRank: 50,
   maxBidAskSpread: 0.10,
@@ -72,57 +77,189 @@ const defaultFormData: IPSFormData = {
   rollOnDeltaIncrease: true
 }
 
-export function IPSBuilderForm() {
+interface IPSBuilderFormProps {
+  onSave?: (ipsData: any) => void;
+  existingIPS?: any;
+  selectedStrategies?: string[];
+}
+
+export function IPSBuilderForm({ onSave, existingIPS, selectedStrategies = [] }: IPSBuilderFormProps) {
   const [formData, setFormData] = useState<IPSFormData>(defaultFormData)
   const [activeTab, setActiveTab] = useState("setup")
+  const [isSaving, setIsSaving] = useState(false)
+
+  // Load existing IPS data if editing
+  useEffect(() => {
+    if (existingIPS) {
+      setFormData({
+        name: existingIPS.name || defaultFormData.name,
+        description: existingIPS.description || defaultFormData.description,
+        minIV: existingIPS.criteria?.minIV || defaultFormData.minIV,
+        minIVRank: existingIPS.criteria?.minIVRank || defaultFormData.minIVRank,
+        maxBidAskSpread: existingIPS.criteria?.maxBidAskSpread || defaultFormData.maxBidAskSpread,
+        minDeltaShortLeg: existingIPS.criteria?.minDeltaShortLeg || defaultFormData.minDeltaShortLeg,
+        maxDeltaShortLeg: existingIPS.criteria?.maxDeltaShortLeg || defaultFormData.maxDeltaShortLeg,
+        minPremiumPercent: existingIPS.criteria?.minPremiumPercent || defaultFormData.minPremiumPercent,
+        targetROI: existingIPS.criteria?.targetROI || defaultFormData.targetROI,
+        preferredDTE: existingIPS.criteria?.preferredDTE || defaultFormData.preferredDTE,
+        minDTE: existingIPS.criteria?.minDTE || defaultFormData.minDTE,
+        maxDTE: existingIPS.criteria?.maxDTE || defaultFormData.maxDTE,
+        minStockVolume: existingIPS.criteria?.minStockVolume || defaultFormData.minStockVolume,
+        minOptionsVolume: existingIPS.criteria?.minOptionsVolume || defaultFormData.minOptionsVolume,
+        minOpenInterest: existingIPS.criteria?.minOpenInterest || defaultFormData.minOpenInterest,
+        maxOpenPositions: existingIPS.criteria?.maxOpenPositions || defaultFormData.maxOpenPositions,
+        maxCollateralPerTrade: existingIPS.criteria?.maxCollateralPerTrade || defaultFormData.maxCollateralPerTrade,
+        positionSizeLimit: existingIPS.criteria?.positionSizeLimit || defaultFormData.positionSizeLimit,
+        targetProfitPercent: existingIPS.criteria?.targetProfitPercent || defaultFormData.targetProfitPercent,
+        avoidEarnings: existingIPS.criteria?.avoidEarnings ?? defaultFormData.avoidEarnings,
+        earningsBuffer: existingIPS.criteria?.earningsBuffer || defaultFormData.earningsBuffer,
+        rollEarlyDTE: existingIPS.criteria?.rollEarlyDTE || defaultFormData.rollEarlyDTE,
+        rollOnDeltaIncrease: existingIPS.criteria?.rollOnDeltaIncrease ?? defaultFormData.rollOnDeltaIncrease
+      })
+    }
+  }, [existingIPS])
 
   const handleInputChange = (field: keyof IPSFormData, value: any) => {
     setFormData(prev => ({ ...prev, [field]: value }))
   }
 
-  const handleSave = () => {
-    // TODO: Save to database
-    console.log("Saving IPS:", formData)
+  const handleSave = async () => {
+    if (!formData.name.trim()) {
+      toast.error("IPS name is required")
+      return
+    }
+
+    setIsSaving(true)
+    
+    try {
+      // Prepare the complete IPS data
+      const ipsData = {
+        name: formData.name.trim(),
+        description: formData.description.trim(),
+        strategies: selectedStrategies,
+        criteria: {
+          minIV: formData.minIV,
+          minIVRank: formData.minIVRank,
+          maxBidAskSpread: formData.maxBidAskSpread,
+          minDeltaShortLeg: formData.minDeltaShortLeg,
+          maxDeltaShortLeg: formData.maxDeltaShortLeg,
+          minPremiumPercent: formData.minPremiumPercent,
+          targetROI: formData.targetROI,
+          preferredDTE: formData.preferredDTE,
+          minDTE: formData.minDTE,
+          maxDTE: formData.maxDTE,
+          minStockVolume: formData.minStockVolume,
+          minOptionsVolume: formData.minOptionsVolume,
+          minOpenInterest: formData.minOpenInterest,
+          maxOpenPositions: formData.maxOpenPositions,
+          maxCollateralPerTrade: formData.maxCollateralPerTrade,
+          positionSizeLimit: formData.positionSizeLimit,
+          targetProfitPercent: formData.targetProfitPercent,
+          avoidEarnings: formData.avoidEarnings,
+          earningsBuffer: formData.earningsBuffer,
+          rollEarlyDTE: formData.rollEarlyDTE,
+          rollOnDeltaIncrease: formData.rollOnDeltaIncrease
+        }
+      }
+
+      // Call the parent component's save handler
+      if (onSave) {
+        await onSave(ipsData)
+      }
+
+      toast.success(`IPS "${formData.name}" has been saved successfully`)
+      
+    } catch (error) {
+      console.error('Error saving IPS:', error)
+      toast.error(error instanceof Error ? error.message : "Failed to save IPS")
+    } finally {
+      setIsSaving(false)
+    }
   }
 
   return (
     <div className="max-w-4xl mx-auto">
-      <div className="mb-6">
-        <Input
-          placeholder="IPS Name (e.g., Conservative PCS Strategy)"
-          value={formData.name}
-          onChange={(e) => handleInputChange('name', e.target.value)}
-          className="text-lg font-semibold"
-        />
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold">
+            {existingIPS ? 'Edit IPS Configuration' : 'Create New IPS'}
+          </h1>
+          <p className="text-gray-600 mt-1">
+            Configure your Investment Policy Statement parameters
+          </p>
+        </div>
+        <Button 
+          onClick={handleSave} 
+          disabled={isSaving}
+          className="flex items-center gap-2"
+        >
+          {isSaving ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <Save className="h-4 w-4" />
+          )}
+          {isSaving ? 'Saving...' : 'Save IPS'}
+        </Button>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="setup" className="flex items-center gap-2">
-            <Calculator className="h-4 w-4" />
-            Setup Criteria
-          </TabsTrigger>
-          <TabsTrigger value="risk" className="flex items-center gap-2">
-            <Shield className="h-4 w-4" />
-            Risk Management
-          </TabsTrigger>
-          <TabsTrigger value="management" className="flex items-center gap-2">
-            <Target className="h-4 w-4" />
-            Trade Management
-          </TabsTrigger>
-          <TabsTrigger value="advanced" className="flex items-center gap-2">
-            <Settings className="h-4 w-4" />
-            Advanced
-          </TabsTrigger>
-        </TabsList>
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Settings className="h-5 w-5" />
+            IPS Configuration
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {/* Basic Information */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div>
+              <Label htmlFor="name">IPS Name *</Label>
+              <Input
+                id="name"
+                value={formData.name}
+                onChange={(e) => handleInputChange('name', e.target.value)}
+                placeholder="My Trading Strategy"
+                className="mt-1"
+              />
+            </div>
+            <div>
+              <Label htmlFor="description">Description</Label>
+              <Textarea
+                id="description"
+                value={formData.description}
+                onChange={(e) => handleInputChange('description', e.target.value)}
+                placeholder="Brief description of this IPS..."
+                className="mt-1"
+                rows={3}
+              />
+            </div>
+          </div>
 
-        <TabsContent value="setup" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>PCS Setup Criteria</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-4">
+          {/* Selected Strategies Display */}
+          {selectedStrategies.length > 0 && (
+            <div className="mb-6">
+              <Label>Selected Strategies</Label>
+              <div className="flex flex-wrap gap-2 mt-2">
+                {selectedStrategies.map(strategy => (
+                  <Badge key={strategy} variant="secondary">
+                    {strategy.replace('-', ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="grid w-full grid-cols-5">
+              <TabsTrigger value="setup">Setup</TabsTrigger>
+              <TabsTrigger value="dte">DTE</TabsTrigger>
+              <TabsTrigger value="liquidity">Liquidity</TabsTrigger>
+              <TabsTrigger value="risk">Risk</TabsTrigger>
+              <TabsTrigger value="management">Management</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="setup" className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="minIV">Minimum IV (%)</Label>
                   <Input
@@ -130,21 +267,19 @@ export function IPSBuilderForm() {
                     type="number"
                     value={formData.minIV}
                     onChange={(e) => handleInputChange('minIV', Number(e.target.value))}
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Your target: ≥ 40%</p>
                 </div>
-                
                 <div>
-                  <Label htmlFor="minIVRank">Minimum IV Rank</Label>
+                  <Label htmlFor="minIVRank">Minimum IV Rank (%)</Label>
                   <Input
                     id="minIVRank"
                     type="number"
                     value={formData.minIVRank}
                     onChange={(e) => handleInputChange('minIVRank', Number(e.target.value))}
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">0-100 scale, your target: &gt; 50</p>
                 </div>
-
                 <div>
                   <Label htmlFor="maxBidAskSpread">Max Bid-Ask Spread ($)</Label>
                   <Input
@@ -153,55 +288,66 @@ export function IPSBuilderForm() {
                     step="0.01"
                     value={formData.maxBidAskSpread}
                     onChange={(e) => handleInputChange('maxBidAskSpread', Number(e.target.value))}
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">For liquid contracts: ≤ $0.10</p>
+                </div>
+                <div>
+                  <Label htmlFor="targetROI">Target ROI (%)</Label>
+                  <Input
+                    id="targetROI"
+                    type="number"
+                    value={formData.targetROI}
+                    onChange={(e) => handleInputChange('targetROI', Number(e.target.value))}
+                    className="mt-1"
+                  />
                 </div>
               </div>
-
-              <div className="space-y-4">
-                <div>
-                  <Label htmlFor="minDeltaShortLeg">Min Delta (Short Leg)</Label>
-                  <Input
-                    id="minDeltaShortLeg"
-                    type="number"
-                    step="0.01"
-                    value={formData.minDeltaShortLeg}
-                    onChange={(e) => handleInputChange('minDeltaShortLeg', Number(e.target.value))}
-                  />
-                </div>
-
-                <div>
-                  <Label htmlFor="maxDeltaShortLeg">Max Delta (Short Leg)</Label>
-                  <Input
-                    id="maxDeltaShortLeg"
-                    type="number"
-                    step="0.01"
-                    value={formData.maxDeltaShortLeg}
-                    onChange={(e) => handleInputChange('maxDeltaShortLeg', Number(e.target.value))}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Your range: 0.10-0.25</p>
-                </div>
-
-                <div>
-                  <Label htmlFor="minPremiumPercent">Min Premium (% of collateral)</Label>
-                  <Input
-                    id="minPremiumPercent"
-                    type="number"
-                    value={formData.minPremiumPercent}
-                    onChange={(e) => handleInputChange('minPremiumPercent', Number(e.target.value))}
-                  />
-                  <p className="text-xs text-gray-500 mt-1">Your target: ≥ 20%</p>
+              
+              <div className="border-t pt-4">
+                <h3 className="font-medium mb-3">Delta Range for Short Leg</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="minDeltaShortLeg">Minimum Delta</Label>
+                    <Input
+                      id="minDeltaShortLeg"
+                      type="number"
+                      step="0.01"
+                      value={formData.minDeltaShortLeg}
+                      onChange={(e) => handleInputChange('minDeltaShortLeg', Number(e.target.value))}
+                      className="mt-1"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="maxDeltaShortLeg">Maximum Delta</Label>
+                    <Input
+                      id="maxDeltaShortLeg"
+                      type="number"
+                      step="0.01"
+                      value={formData.maxDeltaShortLeg}
+                      onChange={(e) => handleInputChange('maxDeltaShortLeg', Number(e.target.value))}
+                      className="mt-1"
+                    />
+                  </div>
                 </div>
               </div>
-            </CardContent>
-          </Card>
+            </TabsContent>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>DTE & Volume Requirements</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-4">
+            <TabsContent value="dte" className="space-y-4">
+              <div>
+                <Label htmlFor="preferredDTE">Preferred DTE Strategy</Label>
+                <select
+                  id="preferredDTE"
+                  value={formData.preferredDTE}
+                  onChange={(e) => handleInputChange('preferredDTE', e.target.value)}
+                  className="w-full mt-1 p-2 border rounded-md"
+                >
+                  <option value="weekly">Weekly (0-7 DTE)</option>
+                  <option value="monthly">Monthly (14-45 DTE)</option>
+                  <option value="both">Both Weekly & Monthly</option>
+                </select>
+              </div>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="minDTE">Minimum DTE</Label>
                   <Input
@@ -209,9 +355,9 @@ export function IPSBuilderForm() {
                     type="number"
                     value={formData.minDTE}
                     onChange={(e) => handleInputChange('minDTE', Number(e.target.value))}
+                    className="mt-1"
                   />
                 </div>
-
                 <div>
                   <Label htmlFor="maxDTE">Maximum DTE</Label>
                   <Input
@@ -219,12 +365,14 @@ export function IPSBuilderForm() {
                     type="number"
                     value={formData.maxDTE}
                     onChange={(e) => handleInputChange('maxDTE', Number(e.target.value))}
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Your preference: 2-5 (weekly), 10-14 (bi-weekly)</p>
                 </div>
               </div>
+            </TabsContent>
 
-              <div className="space-y-4">
+            <TabsContent value="liquidity" className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="minStockVolume">Min Stock Volume</Label>
                   <Input
@@ -232,10 +380,9 @@ export function IPSBuilderForm() {
                     type="number"
                     value={formData.minStockVolume}
                     onChange={(e) => handleInputChange('minStockVolume', Number(e.target.value))}
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Your target: &gt; 1M daily</p>
                 </div>
-
                 <div>
                   <Label htmlFor="minOptionsVolume">Min Options Volume</Label>
                   <Input
@@ -243,21 +390,34 @@ export function IPSBuilderForm() {
                     type="number"
                     value={formData.minOptionsVolume}
                     onChange={(e) => handleInputChange('minOptionsVolume', Number(e.target.value))}
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Your target: &gt; 10k</p>
+                </div>
+                <div>
+                  <Label htmlFor="minOpenInterest">Min Open Interest</Label>
+                  <Input
+                    id="minOpenInterest"
+                    type="number"
+                    value={formData.minOpenInterest}
+                    onChange={(e) => handleInputChange('minOpenInterest', Number(e.target.value))}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="minPremiumPercent">Min Premium (%)</Label>
+                  <Input
+                    id="minPremiumPercent"
+                    type="number"
+                    value={formData.minPremiumPercent}
+                    onChange={(e) => handleInputChange('minPremiumPercent', Number(e.target.value))}
+                    className="mt-1"
+                  />
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
+            </TabsContent>
 
-        <TabsContent value="risk" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Position & Risk Limits</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              <div className="space-y-4">
+            <TabsContent value="risk" className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="maxOpenPositions">Max Open Positions</Label>
                   <Input
@@ -265,10 +425,9 @@ export function IPSBuilderForm() {
                     type="number"
                     value={formData.maxOpenPositions}
                     onChange={(e) => handleInputChange('maxOpenPositions', Number(e.target.value))}
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Your limit: 3 positions</p>
                 </div>
-
                 <div>
                   <Label htmlFor="maxCollateralPerTrade">Max Collateral per Trade ($)</Label>
                   <Input
@@ -276,23 +435,19 @@ export function IPSBuilderForm() {
                     type="number"
                     value={formData.maxCollateralPerTrade}
                     onChange={(e) => handleInputChange('maxCollateralPerTrade', Number(e.target.value))}
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Your limit: $300</p>
                 </div>
-              </div>
-
-              <div className="space-y-4">
                 <div>
-                  <Label htmlFor="positionSizeLimit">Max Contracts per Setup</Label>
+                  <Label htmlFor="positionSizeLimit">Position Size Limit ($)</Label>
                   <Input
                     id="positionSizeLimit"
                     type="number"
                     value={formData.positionSizeLimit}
                     onChange={(e) => handleInputChange('positionSizeLimit', Number(e.target.value))}
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Your limit: 1-2 contracts</p>
                 </div>
-
                 <div>
                   <Label htmlFor="targetProfitPercent">Target Profit (%)</Label>
                   <Input
@@ -300,81 +455,85 @@ export function IPSBuilderForm() {
                     type="number"
                     value={formData.targetProfitPercent}
                     onChange={(e) => handleInputChange('targetProfitPercent', Number(e.target.value))}
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Close at X% of max gain (50-75%)</p>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
 
-        <TabsContent value="management" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Trade Management Rules</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="avoidEarnings">Avoid Earnings</Label>
-                  <p className="text-xs text-gray-500">Don't hold PCS through earnings</p>
+              <div className="border-t pt-4">
+                <h3 className="font-medium mb-3">Earnings Management</h3>
+                <div className="flex items-center space-x-2 mb-4">
+                  <Switch
+                    id="avoidEarnings"
+                    checked={formData.avoidEarnings}
+                    onCheckedChange={(checked) => handleInputChange('avoidEarnings', checked)}
+                  />
+                  <Label htmlFor="avoidEarnings">Avoid Earnings Announcements</Label>
                 </div>
-                <Switch
-                  id="avoidEarnings"
-                  checked={formData.avoidEarnings}
-                  onCheckedChange={(checked) => handleInputChange('avoidEarnings', checked)}
-                />
+                
+                {formData.avoidEarnings && (
+                  <div>
+                    <Label htmlFor="earningsBuffer">Earnings Buffer (days)</Label>
+                    <Input
+                      id="earningsBuffer"
+                      type="number"
+                      value={formData.earningsBuffer}
+                      onChange={(e) => handleInputChange('earningsBuffer', Number(e.target.value))}
+                      className="mt-1"
+                      placeholder="0"
+                    />
+                  </div>
+                )}
               </div>
+            </TabsContent>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <TabsContent value="management" className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <Label htmlFor="rollEarlyDTE">Roll Early DTE</Label>
+                  <Label htmlFor="rollEarlyDTE">Roll Early at DTE</Label>
                   <Input
                     id="rollEarlyDTE"
                     type="number"
                     value={formData.rollEarlyDTE}
                     onChange={(e) => handleInputChange('rollEarlyDTE', Number(e.target.value))}
+                    className="mt-1"
                   />
-                  <p className="text-xs text-gray-500 mt-1">Consider rolling at X DTE (3-4 days)</p>
                 </div>
-
-                <div className="flex items-center justify-between">
-                  <div>
-                    <Label htmlFor="rollOnDeltaIncrease">Roll on Delta Increase</Label>
-                    <p className="text-xs text-gray-500">Roll if delta increases significantly</p>
-                  </div>
+                <div className="flex items-center space-x-2">
                   <Switch
                     id="rollOnDeltaIncrease"
                     checked={formData.rollOnDeltaIncrease}
                     onCheckedChange={(checked) => handleInputChange('rollOnDeltaIncrease', checked)}
                   />
+                  <Label htmlFor="rollOnDeltaIncrease">Roll on Delta Increase</Label>
                 </div>
               </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
 
-        <TabsContent value="advanced" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Advanced Settings</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-gray-500 text-center py-8">
-                Advanced settings like sector preferences, correlation filters, and custom scoring weights will be added here.
-              </p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      <div className="mt-8 flex justify-end gap-4">
-        <Button variant="outline">Cancel</Button>
-        <Button onClick={handleSave}>
-          <Save className="h-4 w-4 mr-2" />
-          Save IPS
-        </Button>
-      </div>
+              <div className="border-t pt-4">
+                <h3 className="font-medium mb-3">Summary</h3>
+                <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+                  <div className="flex justify-between">
+                    <span>Target ROI:</span>
+                    <span className="font-medium">{formData.targetROI}%</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Max Positions:</span>
+                    <span className="font-medium">{formData.maxOpenPositions}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>DTE Range:</span>
+                    <span className="font-medium">{formData.minDTE} - {formData.maxDTE} days</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span>Delta Range:</span>
+                    <span className="font-medium">{formData.minDeltaShortLeg} - {formData.maxDeltaShortLeg}</span>
+                  </div>
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
     </div>
   )
 }
