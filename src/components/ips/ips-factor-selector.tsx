@@ -1,15 +1,16 @@
 /**
- * IPS Factor Selector Component
+ * Enhanced IPS Factor Selector with Search and Strategy Filtering
  * Copy this into: src/components/ips/ips-factor-selector.tsx
  */
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { ChevronRight, Calculator, Users, TrendingUp, ArrowLeft } from 'lucide-react';
+import { ChevronRight, Calculator, Users, TrendingUp, ArrowLeft, Search, Star, Database } from 'lucide-react';
 
 interface FactorDefinition {
   id: string;
@@ -17,17 +18,22 @@ interface FactorDefinition {
   type: 'quantitative' | 'qualitative' | 'options';
   category: string;
   description?: string;
+  source?: string;
+  data_type?: string;
+  unit?: string;
 }
 
 interface IPSFactorSelectorProps {
   factorDefinitions: {
     raw: FactorDefinition[];
     grouped: Record<string, Record<string, FactorDefinition[]>>;
+    recommendedFactors?: string[];
   } | null;
   selectedFactors: Set<string>;
   onFactorSelection: (selectedFactors: Set<string>) => void;
   onNext: () => void;
   onBack?: () => void;
+  selectedStrategies?: string[];
 }
 
 export function IPSFactorSelector({
@@ -35,9 +41,50 @@ export function IPSFactorSelector({
   selectedFactors,
   onFactorSelection,
   onNext,
-  onBack
+  onBack,
+  selectedStrategies = []
 }: IPSFactorSelectorProps) {
   const [activeTab, setActiveTab] = useState("quantitative");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [showRecommendedOnly, setShowRecommendedOnly] = useState(false);
+
+  // Filter factors based on search query
+  const filteredFactors = useMemo(() => {
+    if (!factorDefinitions) return null;
+    
+    let factors = factorDefinitions.raw;
+    
+    // Apply search filter
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      factors = factors.filter(factor => 
+        factor.name.toLowerCase().includes(query) ||
+        factor.category.toLowerCase().includes(query) ||
+        (factor.description && factor.description.toLowerCase().includes(query))
+      );
+    }
+    
+    // Apply recommended filter
+    if (showRecommendedOnly && factorDefinitions.recommendedFactors) {
+      factors = factors.filter(factor => 
+        factorDefinitions.recommendedFactors!.includes(factor.name)
+      );
+    }
+    
+    // Group filtered factors
+    const grouped = factors.reduce((acc: any, factor) => {
+      if (!acc[factor.type]) acc[factor.type] = {};
+      if (!acc[factor.type][factor.category]) acc[factor.type][factor.category] = [];
+      acc[factor.type][factor.category].push(factor);
+      return acc;
+    }, {});
+
+    return {
+      raw: factors,
+      grouped,
+      recommendedFactors: factorDefinitions.recommendedFactors
+    };
+  }, [factorDefinitions, searchQuery, showRecommendedOnly]);
 
   const handleFactorToggle = (factorName: string) => {
     const newSelected = new Set(selectedFactors);
@@ -49,13 +96,51 @@ export function IPSFactorSelector({
     onFactorSelection(newSelected);
   };
 
-  const getSelectedCountByType = (type: string) => {
-    if (!factorDefinitions?.grouped[type]) return 0;
+  const selectAllRecommended = () => {
+    if (!filteredFactors?.recommendedFactors) return;
     
-    return Object.values(factorDefinitions.grouped[type])
+    const newSelected = new Set(selectedFactors);
+    filteredFactors.recommendedFactors.forEach(factorName => {
+      // Only add if the factor exists in our filtered results
+      const factorExists = filteredFactors.raw.some(f => f.name === factorName);
+      if (factorExists) {
+        newSelected.add(factorName);
+      }
+    });
+    onFactorSelection(newSelected);
+  };
+
+  const clearAllSelections = () => {
+    onFactorSelection(new Set());
+  };
+
+  const getSelectedCountByType = (type: string) => {
+    if (!filteredFactors?.grouped[type]) return 0;
+    
+    return Object.values(filteredFactors.grouped[type])
       .flat()
       .filter(factor => selectedFactors.has(factor.name))
       .length;
+  };
+
+  const getTabIcon = (type: string) => {
+    switch (type) {
+      case 'quantitative': return <Calculator className="h-4 w-4" />;
+      case 'qualitative': return <Users className="h-4 w-4" />;
+      case 'options': return <TrendingUp className="h-4 w-4" />;
+      default: return <Database className="h-4 w-4" />;
+    }
+  };
+
+  const getSourceBadge = (source?: string) => {
+    if (source === 'alpha_vantage') {
+      return <Badge variant="outline" className="text-xs bg-green-50 text-green-700">Alpha Vantage</Badge>;
+    }
+    return null;
+  };
+
+  const isFactorRecommended = (factorName: string) => {
+    return filteredFactors?.recommendedFactors?.includes(factorName) || false;
   };
 
   const renderFactorSection = (title: string, categories: Record<string, FactorDefinition[]>, icon: React.ReactNode) => (
@@ -68,42 +153,83 @@ export function IPSFactorSelector({
         </Badge>
       </div>
       
-      {Object.entries(categories).map(([category, factors]) => (
-        <Card key={category} className="border-l-4 border-l-blue-500">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-medium text-gray-700">
-              {category}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {factors.map((factor) => (
-                <div key={factor.id} className="flex items-center space-x-3">
-                  <Checkbox
-                    id={factor.id}
-                    checked={selectedFactors.has(factor.name)}
-                    onCheckedChange={() => handleFactorToggle(factor.name)}
-                    className="data-[state=checked]:bg-blue-600"
-                  />
-                  <label
-                    htmlFor={factor.id}
-                    className="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70 cursor-pointer"
-                  >
-                    {factor.name}
-                  </label>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      ))}
+      {Object.keys(categories).length === 0 ? (
+        <div className="text-center py-8 text-gray-500">
+          <Database className="h-12 w-12 mx-auto mb-3 opacity-50" />
+          <p>No {title.toLowerCase()} factors available for selected strategies</p>
+          {searchQuery && <p className="text-sm">Try adjusting your search terms</p>}
+        </div>
+      ) : (
+        Object.entries(categories).map(([category, factors]) => (
+          <Card key={category} className="border-l-4 border-l-blue-500">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-medium text-gray-700 flex items-center justify-between">
+                {category}
+                <Badge variant="outline" className="text-xs">
+                  {factors.filter(f => selectedFactors.has(f.name)).length}/{factors.length} selected
+                </Badge>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div className="grid grid-cols-1 gap-3">
+                {factors.map((factor) => {
+                  const isRecommended = isFactorRecommended(factor.name);
+                  const isSelected = selectedFactors.has(factor.name);
+                  
+                  return (
+                    <div 
+                      key={factor.id} 
+                      className={`flex items-center justify-between p-3 rounded-lg border transition-colors ${
+                        isSelected ? 'bg-blue-50 border-blue-200' : 'hover:bg-gray-50'
+                      } ${isRecommended ? 'ring-1 ring-yellow-300' : ''}`}
+                    >
+                      <div className="flex items-center space-x-3 flex-1">
+                        <Checkbox
+                          id={factor.id}
+                          checked={isSelected}
+                          onCheckedChange={() => handleFactorToggle(factor.name)}
+                        />
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <label 
+                              htmlFor={factor.id}
+                              className="text-sm font-medium cursor-pointer"
+                            >
+                              {factor.name}
+                            </label>
+                            {isRecommended && (
+                              <Star className="h-3 w-3 text-yellow-500 fill-current" />
+                            )}
+                            {getSourceBadge(factor.source)}
+                          </div>
+                          {factor.description && (
+                            <p className="text-xs text-gray-500 mt-1">{factor.description}</p>
+                          )}
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge variant="outline" className="text-xs">
+                              {factor.data_type || 'numeric'}
+                            </Badge>
+                            {factor.unit && (
+                              <span className="text-xs text-gray-400">Unit: {factor.unit}</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </CardContent>
+          </Card>
+        ))
+      )}
     </div>
   );
 
-  if (!factorDefinitions) {
+  if (!filteredFactors) {
     return (
-      <div className="flex items-center justify-center min-h-[400px]">
-        <div className="text-center">
+      <div className="max-w-4xl mx-auto">
+        <div className="text-center py-12">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
           <p className="text-gray-600">Loading factor definitions...</p>
         </div>
@@ -112,118 +238,136 @@ export function IPSFactorSelector({
   }
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">
-          Select IPS Monitoring Factors
-        </h1>
-        <p className="text-gray-600">
-          Choose the factors you want to monitor and score for your investment decisions
-        </p>
+    <div className="max-w-6xl mx-auto space-y-6">
+      {/* Header with Search and Controls */}
+      <div className="space-y-4">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold mb-2">Select Factors</h2>
+          <p className="text-gray-600">
+            Choose the factors that will determine your investment decisions
+          </p>
+        </div>
+
+        {/* Search and Filter Controls */}
+        <div className="flex flex-col sm:flex-row gap-4 items-center">
+          <div className="relative flex-1 max-w-md">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Search factors..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-10"
+            />
+          </div>
+          
+          <div className="flex items-center gap-4">
+            {filteredFactors.recommendedFactors && filteredFactors.recommendedFactors.length > 0 && (
+              <>
+                <div className="flex items-center space-x-2">
+                  <Checkbox
+                    id="show-recommended"
+                    checked={showRecommendedOnly}
+                    onCheckedChange={setShowRecommendedOnly}
+                  />
+                  <label htmlFor="show-recommended" className="text-sm font-medium">
+                    Recommended only
+                  </label>
+                </div>
+                
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={selectAllRecommended}
+                  className="flex items-center gap-1"
+                >
+                  <Star className="h-3 w-3" />
+                  Select Recommended
+                </Button>
+              </>
+            )}
+            
+            <Button 
+              variant="outline" 
+              size="sm"
+              onClick={clearAllSelections}
+            >
+              Clear All
+            </Button>
+          </div>
+        </div>
+
+        {/* Selection Summary */}
+        <div className="bg-gray-50 rounded-lg p-4">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-medium">
+              Total Selected: {selectedFactors.size} factors
+            </span>
+            <div className="flex gap-4">
+              {Object.keys(filteredFactors.grouped).map(type => (
+                <span key={type} className="text-gray-600">
+                  {type.charAt(0).toUpperCase() + type.slice(1)}: {getSelectedCountByType(type)}
+                </span>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
 
-      {/* Selected Factors Summary */}
-      {selectedFactors.size > 0 && (
-        <Card className="mb-6 bg-blue-50 border-blue-200">
-          <CardContent className="pt-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold text-blue-900">
-                  {selectedFactors.size} Factors Selected
-                </h3>
-                <p className="text-sm text-blue-700">
-                  Ready to configure weights and target values
-                </p>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
+      {/* Factor Selection Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="quantitative" className="flex items-center gap-2">
-            <Calculator className="h-4 w-4" />
-            Quantitative ({getSelectedCountByType('quantitative')})
-          </TabsTrigger>
-          <TabsTrigger value="qualitative" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Qualitative ({getSelectedCountByType('qualitative')})
-          </TabsTrigger>
-          <TabsTrigger value="options" className="flex items-center gap-2">
-            <TrendingUp className="h-4 w-4" />
-            Options ({getSelectedCountByType('options')})
-          </TabsTrigger>
+          {Object.keys(filteredFactors.grouped).map(type => {
+            const Icon = getTabIcon(type);
+            const count = getSelectedCountByType(type);
+            const total = Object.values(filteredFactors.grouped[type] || {}).flat().length;
+            
+            return (
+              <TabsTrigger 
+                key={type} 
+                value={type} 
+                className="flex items-center gap-2"
+              >
+                {Icon}
+                <span className="hidden sm:inline">
+                  {type.charAt(0).toUpperCase() + type.slice(1)}
+                </span>
+                <Badge variant="secondary" className="ml-1">
+                  {count}/{total}
+                </Badge>
+              </TabsTrigger>
+            );
+          })}
         </TabsList>
 
-        <TabsContent value="quantitative" className="mt-6">
-          {factorDefinitions.grouped.quantitative && renderFactorSection(
-            "Quantitative Factors",
-            factorDefinitions.grouped.quantitative,
-            <Calculator className="h-5 w-5 text-blue-600" />
-          )}
-        </TabsContent>
-
-        <TabsContent value="qualitative" className="mt-6">
-          {factorDefinitions.grouped.qualitative && renderFactorSection(
-            "Qualitative Factors",
-            factorDefinitions.grouped.qualitative,
-            <Users className="h-5 w-5 text-green-600" />
-          )}
-        </TabsContent>
-
-        <TabsContent value="options" className="mt-6">
-          {factorDefinitions.grouped.options && renderFactorSection(
-            "Options Factors",
-            factorDefinitions.grouped.options,
-            <TrendingUp className="h-5 w-5 text-purple-600" />
-          )}
-        </TabsContent>
+        {Object.entries(filteredFactors.grouped).map(([type, categories]) => (
+          <TabsContent key={type} value={type} className="mt-6">
+            {renderFactorSection(
+              `${type.charAt(0).toUpperCase() + type.slice(1)} Factors`,
+              categories as Record<string, FactorDefinition[]>,
+              getTabIcon(type)
+            )}
+          </TabsContent>
+        ))}
       </Tabs>
 
-      {/* Debug Info */}
-      {selectedFactors.size > 0 && (
-        <Card className="mt-8 bg-gray-50">
-          <CardHeader>
-            <CardTitle className="text-sm">Selected Factors Preview</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-2">
-              {Array.from(selectedFactors).map(factorName => {
-                const factor = factorDefinitions.raw.find(f => f.name === factorName);
-                return (
-                  <div key={factorName} className="flex justify-between text-sm">
-                    <span>{factorName}</span>
-                    <div className="flex gap-2">
-                      <Badge variant="outline" className="text-xs">
-                        {factor?.type}
-                      </Badge>
-                      <Badge variant="secondary" className="text-xs">
-                        {factor?.category}
-                      </Badge>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Action Buttons */}
-      <div className="flex items-center justify-between mt-8 pt-6 border-t">
-        <Button variant="outline" onClick={onBack}>
-          <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Overview
+      {/* Navigation */}
+      <div className="flex justify-between pt-6">
+        <Button 
+          variant="outline" 
+          onClick={onBack}
+          className="flex items-center gap-2"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to Strategies
         </Button>
         
         <Button 
-          className="bg-blue-600 hover:bg-blue-700"
-          disabled={selectedFactors.size === 0}
           onClick={onNext}
+          disabled={selectedFactors.size === 0}
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700"
         >
-          Configure Factors
-          <ChevronRight className="ml-2 h-4 w-4" />
+          Configure Factors ({selectedFactors.size})
+          <ChevronRight className="h-4 w-4" />
         </Button>
       </div>
     </div>

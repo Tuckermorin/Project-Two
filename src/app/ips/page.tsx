@@ -1,5 +1,5 @@
 /**
- * Enhanced IPS Page with Multiple IPS Support (Error-Free Version)
+ * Enhanced IPS Page with Strategy Selection - Complete Version
  * Copy this into: src/app/ips/page.tsx
  */
 
@@ -29,56 +29,43 @@ import {
   Archive,
   MoreVertical,
   TrendingUp,
-  Shield
+  Shield,
+  Layers,
+  Trash2
 } from 'lucide-react';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 
-// Import existing components
+// Import components
+import { IPSStrategySelector } from '@/components/ips/ips-strategy-selector';
 import { IPSFactorSelector } from '@/components/ips/ips-factor-selector';
 import { IPSFactorConfiguration } from '@/components/ips/ips-factor-configuration'; 
 import { IPSSummary } from '@/components/ips/ips-summary';
 import { TradeScoreDisplay } from '@/components/ips/trade-score-display';
 
 // Import services
-import { ipsDataService } from '@/lib/ips-data-service';
+import { ipsDataService, type IPSConfiguration, type TradingStrategy } from '@/lib/ips-data-service';
 import { TradeScorer } from '@/lib/trade-scorer';
 
 // Types
 interface IPSFlowState {
-  step: 'list' | 'selection' | 'configuration' | 'summary' | 'scoring';
+  step: 'list' | 'strategies' | 'selection' | 'configuration' | 'summary' | 'scoring';
+  selectedStrategies: string[];
   selectedFactors: Set<string>;
   factorConfigurations: Record<string, any>;
   currentIPSId: string | null;
   isLoading: boolean;
 }
 
-interface IPSConfiguration {
-  id: string;
-  user_id: string;
-  name: string;
-  description?: string;
-  is_active: boolean;
-  total_factors?: number;
-  active_factors?: number;
-  total_weight?: number;
-  avg_weight?: number;
-  created_at: string;
-  last_modified?: string;
-  performance?: {
-    winRate: number;
-    avgROI: number;
-    totalTrades: number;
-  };
-  criteria?: {
-    minIV: number;
-    maxDelta: number;
-    targetROI: number;
-    maxPositions: number;
-  };
-}
-
 export default function IPSPage() {
   const [state, setState] = useState<IPSFlowState>({
     step: 'list',
+    selectedStrategies: [],
     selectedFactors: new Set(),
     factorConfigurations: {},
     currentIPSId: null,
@@ -87,167 +74,82 @@ export default function IPSPage() {
 
   const [allIPSs, setAllIPSs] = useState<IPSConfiguration[]>([]);
   const [showInactive, setShowInactive] = useState(false);
-  const [expandedIPS, setExpandedIPS] = useState<string | null>(null);
+  const [availableStrategies, setAvailableStrategies] = useState<TradingStrategy[]>([]);
   const [factorDefinitions, setFactorDefinitions] = useState<any>(null);
-  const [userId] = useState('demo-user-id'); // Get from auth context
 
-  // Load initial data
+  const userId = 'user-123'; // Replace with actual user ID from auth
+
+  // Load data on component mount
   useEffect(() => {
-    loadInitialData();
-  }, []);
-
-  const loadInitialData = async () => {
-    try {
+    const loadData = async () => {
       setState(prev => ({ ...prev, isLoading: true }));
       
-      // Load all user IPSs (use new method if available, fallback to existing)
-      let userIPSs: IPSConfiguration[] = [];
       try {
-        userIPSs = await ipsDataService.getAllUserIPSs(userId);
+        const [userIPSs, strategies] = await Promise.all([
+          ipsDataService.getAllUserIPSs(userId),
+          Promise.resolve(ipsDataService.getAvailableStrategies())
+        ]);
+        
+        setAllIPSs(userIPSs);
+        setAvailableStrategies(strategies);
+        
       } catch (error) {
-        // Fallback to single IPS method
-        const singleIPS = await ipsDataService.getActiveIPS(userId);
-        if (singleIPS) {
-          userIPSs = [singleIPS];
-        }
+        console.error('Error loading IPS data:', error);
+      } finally {
+        setState(prev => ({ ...prev, isLoading: false }));
       }
-      setAllIPSs(userIPSs);
-      
-      // Load factor definitions
-      const factors = await ipsDataService.getFactorDefinitions();
+    };
+
+    loadData();
+  }, [userId]);
+
+  // Load factor definitions when strategies are selected
+  useEffect(() => {
+    if (state.selectedStrategies.length > 0) {
+      const factors = ipsDataService.getFactorsForStrategies(state.selectedStrategies);
       setFactorDefinitions(factors);
-      
-      setState(prev => ({ ...prev, isLoading: false }));
-    } catch (error) {
-      console.error('Error loading initial data:', error);
-      setState(prev => ({ ...prev, isLoading: false }));
+    } else {
+      setFactorDefinitions(null);
     }
-  };
+  }, [state.selectedStrategies]);
 
-  // Filter IPSs based on active/inactive toggle
-  const activeIPSs = allIPSs.filter(ips => ips.is_active);
-  const inactiveIPSs = allIPSs.filter(ips => !ips.is_active);
-  const displayedIPSs = showInactive ? [...activeIPSs, ...inactiveIPSs] : activeIPSs;
-
-  // Event handlers
-  const handleActivateIPS = async (ipsId: string) => {
-    try {
-      // Optimistic update - update UI immediately
-      setAllIPSs(prevIPSs => 
-        prevIPSs.map(ips => 
-          ips.id === ipsId 
-            ? { ...ips, is_active: true, last_modified: new Date().toISOString().split('T')[0] }
-            : ips
-        )
-      );
-      
-      // Then update on backend
-      await ipsDataService.activateIPS(ipsId);
-    } catch (error) {
-      console.error('Error activating IPS:', error);
-      // Revert the optimistic update on error
-      await loadInitialData();
-    }
-  };
-
-  const handleDeactivateIPS = async (ipsId: string) => {
-    try {
-      // Optimistic update - update UI immediately
-      setAllIPSs(prevIPSs => 
-        prevIPSs.map(ips => 
-          ips.id === ipsId 
-            ? { ...ips, is_active: false, last_modified: new Date().toISOString().split('T')[0] }
-            : ips
-        )
-      );
-      
-      // Then update on backend
-      await ipsDataService.deactivateIPS(ipsId);
-    } catch (error) {
-      console.error('Error deactivating IPS:', error);
-      // Revert the optimistic update on error
-      await loadInitialData();
-    }
-  };
-
-  const handleEditIPS = (ipsId: string) => {
-    setState(prev => ({ ...prev, step: 'configuration', currentIPSId: ipsId }));
-  };
-
+  // Navigation handlers
   const handleCreateNew = () => {
-    setState(prev => ({ 
-      ...prev, 
-      step: 'selection', 
-      currentIPSId: null,
+    setState(prev => ({
+      ...prev,
+      step: 'strategies',
+      selectedStrategies: [],
       selectedFactors: new Set(),
-      factorConfigurations: {}
+      factorConfigurations: {},
+      currentIPSId: null
     }));
   };
 
-  const handleIPSClick = (ipsId: string) => {
-    setExpandedIPS(expandedIPS === ipsId ? null : ipsId);
-  };
-
-  const handleDuplicateIPS = async (ipsId: string, newName: string) => {
-    try {
-      const newIPS = await ipsDataService.duplicateIPS(ipsId, newName);
-      if (newIPS) {
-        // Add the new IPS to state immediately
-        setAllIPSs(prevIPSs => [...prevIPSs, newIPS]);
-      }
-    } catch (error) {
-      console.error('Error duplicating IPS:', error);
+  const handleEditIPS = (ipsId: string) => {
+    const ips = allIPSs.find(i => i.id === ipsId);
+    if (ips) {
+      setState(prev => ({
+        ...prev,
+        step: 'strategies',
+        selectedStrategies: ips.strategies || [],
+        selectedFactors: new Set(),
+        factorConfigurations: {},
+        currentIPSId: ipsId
+      }));
     }
   };
 
-  const handleArchiveIPS = async (ipsId: string) => {
-    try {
-      // Optimistic update
-      setAllIPSs(prevIPSs => 
-        prevIPSs.map(ips => 
-          ips.id === ipsId 
-            ? { ...ips, is_active: false, last_modified: new Date().toISOString().split('T')[0] }
-            : ips
-        )
-      );
-      
-      await ipsDataService.deactivateIPS(ipsId);
-    } catch (error) {
-      console.error('Error archiving IPS:', error);
-      await loadInitialData(); // Revert on error
-    }
+  const handleStepNavigation = (step: IPSFlowState['step']) => {
+    setState(prev => ({ ...prev, step }));
   };
 
-  const handleDeleteIPS = async (ipsId: string) => {
-    try {
-      // Optimistic update - remove from UI immediately
-      setAllIPSs(prevIPSs => prevIPSs.filter(ips => ips.id !== ipsId));
-      
-      // Close expanded view if this IPS was expanded
-      if (expandedIPS === ipsId) {
-        setExpandedIPS(null);
-      }
-      
-      await ipsDataService.deleteIPS(ipsId);
-    } catch (error) {
-      console.error('Error deleting IPS:', error);
-      await loadInitialData(); // Revert on error
-    }
-  };
-
-  const handleViewAnalytics = (ipsId: string) => {
-    console.log(`Viewing analytics for IPS: ${ipsId}`);
-    // In real app: router.push(`/ips/${ipsId}/analytics`);
-  };
-
-  const handleExportIPS = async (ipsId: string) => {
-    try {
-      const exportData = await ipsDataService.exportIPSConfiguration(ipsId);
-      console.log('Exporting IPS:', exportData);
-      // In real app, trigger download
-    } catch (error) {
-      console.error('Error exporting IPS:', error);
-    }
+  const handleStrategySelection = (selectedStrategies: string[]) => {
+    setState(prev => ({
+      ...prev,
+      selectedStrategies,
+      selectedFactors: new Set(), // Reset factor selection when strategies change
+      factorConfigurations: {}
+    }));
   };
 
   const handleFactorSelection = (selectedFactors: Set<string>) => {
@@ -258,18 +160,18 @@ export default function IPSPage() {
     setState(prev => ({ ...prev, factorConfigurations: configurations }));
   };
 
-  const handleStepNavigation = (newStep: string) => {
-    setState(prev => ({ ...prev, step: newStep as any }));
-  };
-
   const handleSaveIPS = async (ipsData: any) => {
     try {
+      const completeIPSData = {
+        ...ipsData,
+        strategies: state.selectedStrategies
+      };
+
       let ipsConfig: IPSConfiguration;
       
       if (state.currentIPSId) {
         // Update existing
-        ipsConfig = await ipsDataService.updateIPS(state.currentIPSId, ipsData);
-        // Update in local state
+        ipsConfig = await ipsDataService.updateIPS(state.currentIPSId, completeIPSData);
         setAllIPSs(prevIPSs => 
           prevIPSs.map(ips => 
             ips.id === state.currentIPSId ? { ...ips, ...ipsConfig } : ips
@@ -277,8 +179,7 @@ export default function IPSPage() {
         );
       } else {
         // Create new
-        ipsConfig = await ipsDataService.createIPS(userId, ipsData);
-        // Add to local state
+        ipsConfig = await ipsDataService.createIPS(userId, completeIPSData);
         setAllIPSs(prevIPSs => [...prevIPSs, ipsConfig]);
       }
       
@@ -295,13 +196,59 @@ export default function IPSPage() {
       
       await ipsDataService.saveFactorConfigurations(ipsConfig.id, factorConfigs);
       
-      setState(prev => ({ ...prev, step: 'list', currentIPSId: null }));
+      setState(prev => ({ 
+        ...prev, 
+        step: 'list', 
+        currentIPSId: null,
+        selectedStrategies: [],
+        selectedFactors: new Set(),
+        factorConfigurations: {}
+      }));
       
     } catch (error) {
       console.error('Error saving IPS:', error);
       alert('Failed to save IPS. Please try again.');
     }
   };
+
+  // IPS Action handlers
+  const handleToggleIPSStatus = async (ipsId: string) => {
+    try {
+      const updatedIPS = await ipsDataService.toggleIPSStatus(ipsId);
+      setAllIPSs(prevIPSs => 
+        prevIPSs.map(ips => 
+          ips.id === ipsId ? updatedIPS : ips
+        )
+      );
+    } catch (error) {
+      console.error('Error toggling IPS status:', error);
+    }
+  };
+
+  const handleDuplicateIPS = async (ipsId: string) => {
+    try {
+      const duplicatedIPS = await ipsDataService.duplicateIPS(ipsId, userId);
+      setAllIPSs(prevIPSs => [...prevIPSs, duplicatedIPS]);
+    } catch (error) {
+      console.error('Error duplicating IPS:', error);
+    }
+  };
+
+  const handleDeleteIPS = async (ipsId: string) => {
+    if (confirm('Are you sure you want to delete this IPS? This action cannot be undone.')) {
+      try {
+        await ipsDataService.deleteIPS(ipsId);
+        setAllIPSs(prevIPSs => prevIPSs.filter(ips => ips.id !== ipsId));
+      } catch (error) {
+        console.error('Error deleting IPS:', error);
+      }
+    }
+  };
+
+  // Filter IPSs
+  const activeIPSs = allIPSs.filter(ips => ips.is_active);
+  const inactiveIPSs = allIPSs.filter(ips => !ips.is_active);
+  const displayedIPSs = showInactive ? allIPSs : activeIPSs;
 
   // Loading state
   if (state.isLoading) {
@@ -319,8 +266,8 @@ export default function IPSPage() {
 
   // IPS Builder Flow (when creating/editing)
   if (state.step !== 'list') {
-    // Step Progress Indicator
     const steps = [
+      { id: 'strategies', name: 'Strategies', icon: Layers },
       { id: 'selection', name: 'Factor Selection', icon: Target },
       { id: 'configuration', name: 'Configuration', icon: Settings },
       { id: 'summary', name: 'Summary', icon: CheckCircle },
@@ -331,7 +278,7 @@ export default function IPSPage() {
 
     const renderStepIndicator = () => (
       <div className="mb-8">
-        <div className="flex items-center justify-between max-w-3xl mx-auto mb-4">
+        <div className="flex items-center justify-between max-w-4xl mx-auto mb-4">
           {steps.map((step, index) => {
             const Icon = step.icon;
             const isActive = state.step === step.id;
@@ -349,31 +296,22 @@ export default function IPSPage() {
                 >
                   <Icon className="h-5 w-5" />
                 </div>
-                <span className={`ml-2 text-sm font-medium ${isActive ? 'text-blue-600' : 'text-gray-500'}`}>
+                <span className={`ml-2 text-sm font-medium ${isActive ? 'text-blue-600' : isCompleted ? 'text-green-600' : 'text-gray-500'}`}>
                   {step.name}
                 </span>
                 {index < steps.length - 1 && (
-                  <div className={`w-12 h-0.5 ml-4 ${isCompleted ? 'bg-green-600' : 'bg-gray-300'}`} />
+                  <div className={`w-8 h-0.5 mx-4 ${isCompleted ? 'bg-green-600' : 'bg-gray-300'}`} />
                 )}
               </div>
             );
           })}
         </div>
-        <Progress value={(currentStepIndex + 1) / steps.length * 100} className="max-w-3xl mx-auto" />
       </div>
     );
 
     return (
       <div className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <Button 
-            variant="outline" 
-            onClick={() => setState(prev => ({ ...prev, step: 'list' }))}
-            className="mb-4"
-          >
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to IPS List
-          </Button>
+        <div className="mb-8 text-center">
           <h1 className="text-3xl font-bold text-gray-900">
             {state.currentIPSId ? 'Edit IPS' : 'Create New IPS'}
           </h1>
@@ -385,13 +323,24 @@ export default function IPSPage() {
         {renderStepIndicator()}
 
         {/* Render appropriate step component */}
+        {state.step === 'strategies' && (
+          <IPSStrategySelector
+            availableStrategies={availableStrategies}
+            selectedStrategies={state.selectedStrategies}
+            onStrategySelection={handleStrategySelection}
+            onNext={() => handleStepNavigation('selection')}
+            onBack={() => handleStepNavigation('list')}
+          />
+        )}
+
         {state.step === 'selection' && (
           <IPSFactorSelector
             selectedFactors={state.selectedFactors}
             onFactorSelection={handleFactorSelection}
             onNext={() => handleStepNavigation('configuration')}
-            onBack={() => handleStepNavigation('list')}
+            onBack={() => handleStepNavigation('strategies')}
             factorDefinitions={factorDefinitions}
+            selectedStrategies={state.selectedStrategies}
           />
         )}
 
@@ -458,253 +407,241 @@ export default function IPSPage() {
               Show inactive IPSs ({inactiveIPSs.length})
             </label>
           </div>
-          {showInactive ? (
-            <Badge variant="outline" className="flex items-center gap-1">
-              <Eye className="h-3 w-3" />
-              Showing all IPSs
-            </Badge>
-          ) : (
-            <Badge variant="outline" className="flex items-center gap-1">
-              <EyeOff className="h-3 w-3" />
-              Active only
-            </Badge>
-          )}
         </div>
       </div>
 
-      {/* IPS List */}
-      <div className="space-y-4">
-        {displayedIPSs.length === 0 ? (
-          <Card>
-            <CardContent className="p-12 text-center">
-              <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
-              <h3 className="text-xl font-semibold text-gray-900 mb-2">No IPSs Found</h3>
-              <p className="text-gray-600 mb-6">
-                {showInactive 
-                  ? "You haven't created any Investment Policy Statements yet."
-                  : "You don't have any active IPSs. Toggle to see inactive ones or create a new one."}
-              </p>
-              <Button onClick={handleCreateNew} className="bg-blue-600 hover:bg-blue-700">
-                <PlusCircle className="h-4 w-4 mr-2" />
-                Create Your First IPS
-              </Button>
-            </CardContent>
-          </Card>
-        ) : (
-          displayedIPSs.map((ips) => (
-            <Card 
-              key={ips.id} 
-              className={`${ips.is_active ? 'ring-2 ring-blue-200' : 'opacity-75'} cursor-pointer transition-all hover:shadow-md`}
-            >
-              {/* Compact Header - Always Visible */}
-              <CardHeader 
-                className="pb-4"
-                onClick={() => handleIPSClick(ips.id)}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`h-3 w-3 rounded-full ${ips.is_active ? 'bg-green-500' : 'bg-gray-400'}`} />
-                    <div>
-                      <CardTitle className="text-lg">{ips.name}</CardTitle>
-                      <p className="text-sm text-gray-600 mt-1">{ips.description}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    {/* Compact Stats */}
-                    <div className="flex items-center gap-4 text-sm">
-                      <span className="text-gray-600">
-                        <Target className="h-4 w-4 inline mr-1" />
-                        {ips.performance?.winRate || 0}% win rate
-                      </span>
-                      <span className="text-gray-600">
-                        <TrendingUp className="h-4 w-4 inline mr-1" />
-                        {ips.performance?.avgROI || 0}% ROI
-                      </span>
-                      <span className="text-gray-600">
-                        {ips.active_factors || 0}/{ips.total_factors || 0} factors
-                      </span>
-                    </div>
-                    <Badge variant={ips.is_active ? 'default' : 'secondary'}>
-                      {ips.is_active ? 'Active' : 'Inactive'}
-                    </Badge>
-                    {/* Simple menu button for now */}
-                    <Button 
-                      variant="ghost" 
+      {/* IPS Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+        {displayedIPSs.map((ips) => (
+          <Card key={ips.id} className={`relative ${!ips.is_active ? 'opacity-75' : ''}`}>
+            <CardHeader className="pb-3">
+              <div className="flex items-start justify-between">
+                <div className="flex-1">
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    {ips.name}
+                    {!ips.is_active && <EyeOff className="h-4 w-4 text-gray-400" />}
+                  </CardTitle>
+                  {ips.description && (
+                    <p className="text-sm text-gray-600 mt-1 line-clamp-2">
+                      {ips.description}
+                    </p>
+                  )}
+                </div>
+                
+                {/* IPS Actions Dropdown */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button
+                      variant="ghost"
                       size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleEditIPS(ips.id);
-                      }}
+                      className="h-8 w-8 p-0"
                     >
-                      <Edit className="h-4 w-4" />
+                      <MoreVertical className="h-4 w-4" />
                     </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem onClick={() => handleEditIPS(ips.id)}>
+                      <Edit className="h-4 w-4 mr-2" />
+                      Edit
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={() => handleDuplicateIPS(ips.id)}>
+                      <Copy className="h-4 w-4 mr-2" />
+                      Duplicate
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem 
+                      onClick={() => handleToggleIPSStatus(ips.id)}
+                      className={ips.is_active ? 'text-orange-600' : 'text-green-600'}
+                    >
+                      {ips.is_active ? (
+                        <>
+                          <EyeOff className="h-4 w-4 mr-2" />
+                          Deactivate
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="h-4 w-4 mr-2" />
+                          Activate
+                        </>
+                      )}
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem 
+                      onClick={() => handleDeleteIPS(ips.id)}
+                      className="text-red-600"
+                    >
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+              
+              {/* Strategy Badges */}
+              {ips.strategies && ips.strategies.length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {ips.strategies.map(strategyId => {
+                    const strategy = availableStrategies.find(s => s.id === strategyId);
+                    return strategy ? (
+                      <Badge key={strategyId} variant="outline" className="text-xs">
+                        {strategy.name}
+                      </Badge>
+                    ) : null;
+                  })}
+                </div>
+              )}
+            </CardHeader>
+            
+            <CardContent className="space-y-4">
+              {/* Performance Metrics */}
+              {ips.performance && (
+                <div className="grid grid-cols-3 gap-3 text-center">
+                  <div>
+                    <p className="text-lg font-semibold text-green-600">
+                      {ips.performance.winRate}%
+                    </p>
+                    <p className="text-xs text-gray-500">Win Rate</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-semibold text-blue-600">
+                      {ips.performance.avgROI}%
+                    </p>
+                    <p className="text-xs text-gray-500">Avg ROI</p>
+                  </div>
+                  <div>
+                    <p className="text-lg font-semibold text-gray-700">
+                      {ips.performance.totalTrades}
+                    </p>
+                    <p className="text-xs text-gray-500">Trades</p>
                   </div>
                 </div>
-              </CardHeader>
-              
-              {/* Expanded Details - Only show when clicked */}
-              {expandedIPS === ips.id && (
-                <CardContent className="pt-0">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-                    {/* Factor Configuration */}
-                    <div>
-                      <h4 className="font-medium text-gray-900 mb-2">Factor Configuration</h4>
-                      <div className="space-y-1 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Total Factors:</span>
-                          <span className="font-medium">{ips.total_factors || 0}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Active Factors:</span>
-                          <span className="font-medium text-green-600">{ips.active_factors || 0}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Avg Weight:</span>
-                          <span className="font-medium">{ips.avg_weight || 0}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Key Criteria */}
-                    <div>
-                      <h4 className="font-medium text-gray-900 mb-2">Key Criteria</h4>
-                      <div className="space-y-1 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Min IV:</span>
-                          <span className="font-medium">{ips.criteria?.minIV || 0}%</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Max Delta:</span>
-                          <span className="font-medium">{ips.criteria?.maxDelta || 0}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Target ROI:</span>
-                          <span className="font-medium">{ips.criteria?.targetROI || 0}%</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Performance */}
-                    <div>
-                      <h4 className="font-medium text-gray-900 mb-2">Performance</h4>
-                      <div className="space-y-1 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Win Rate:</span>
-                          <span className="font-medium text-green-600">{ips.performance?.winRate || 0}%</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Avg ROI:</span>
-                          <span className="font-medium">{ips.performance?.avgROI || 0}%</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Total Trades:</span>
-                          <span className="font-medium">{ips.performance?.totalTrades || 0}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Risk Management */}
-                    <div>
-                      <h4 className="font-medium text-gray-900 mb-2">Risk Limits</h4>
-                      <div className="space-y-1 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Max Positions:</span>
-                          <span className="font-medium">{ips.criteria?.maxPositions || 0}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-gray-600">Last Modified:</span>
-                          <span className="font-medium">{ips.last_modified || 'Never'}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Action Buttons */}
-                  <div className="flex items-center justify-between pt-4 border-t">
-                    <div className="flex gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleEditIPS(ips.id);
-                        }}
-                      >
-                        <Edit className="h-4 w-4 mr-1" />
-                        Edit
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDuplicateIPS(ips.id, `${ips.name} (Copy)`);
-                        }}
-                      >
-                        <Copy className="h-4 w-4 mr-1" />
-                        Duplicate
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm" 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleViewAnalytics(ips.id);
-                        }}
-                      >
-                        <BarChart3 className="h-4 w-4 mr-1" />
-                        Analytics
-                      </Button>
-                    </div>
-                    
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-gray-600">
-                        {ips.is_active ? 'Currently active' : 'Inactive'}
-                      </span>
-                      <Switch
-                        checked={ips.is_active}
-                        onCheckedChange={(checked) => {
-                          checked ? handleActivateIPS(ips.id) : handleDeactivateIPS(ips.id);
-                        }}
-                        onClick={(e) => e.stopPropagation()}
-                      />
-                    </div>
-                  </div>
-                </CardContent>
               )}
+
+              {/* Factor Summary */}
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-gray-600">
+                  {ips.active_factors || 0} / {ips.total_factors || 0} factors active
+                </span>
+                <span className="text-gray-600">
+                  Weight: {ips.total_weight || 0}%
+                </span>
+              </div>
+
+              {/* Progress Bar */}
+              <Progress 
+                value={(ips.active_factors || 0) / Math.max(ips.total_factors || 1, 1) * 100} 
+                className="h-2"
+              />
+
+              {/* Criteria Summary */}
+              {ips.criteria && (
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div className="bg-gray-50 p-2 rounded">
+                    <span className="text-gray-500">Min IV:</span>
+                    <span className="font-medium ml-1">{ips.criteria.minIV}%</span>
+                  </div>
+                  <div className="bg-gray-50 p-2 rounded">
+                    <span className="text-gray-500">Max Δ:</span>
+                    <span className="font-medium ml-1">{ips.criteria.maxDelta}</span>
+                  </div>
+                  <div className="bg-gray-50 p-2 rounded">
+                    <span className="text-gray-500">Target ROI:</span>
+                    <span className="font-medium ml-1">{ips.criteria.targetROI}%</span>
+                  </div>
+                  <div className="bg-gray-50 p-2 rounded">
+                    <span className="text-gray-500">Max Pos:</span>
+                    <span className="font-medium ml-1">{ips.criteria.maxPositions}</span>
+                  </div>
+                </div>
+              )}
+
+              {/* Action Buttons */}
+              <div className="flex items-center gap-2 pt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => console.log('View details for', ips.id)}
+                  className="flex-1"
+                >
+                  <Eye className="h-3 w-3 mr-1" />
+                  View Details
+                </Button>
+              </div>
+
+              {/* Meta Information */}
+              <div className="text-xs text-gray-400 pt-2 border-t">
+                <div className="flex justify-between">
+                  <span>Created: {new Date(ips.created_at).toLocaleDateString()}</span>
+                  <span>Modified: {ips.last_modified}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+        
+        {/* Empty State */}
+        {displayedIPSs.length === 0 && (
+          <div className="col-span-full">
+            <Card className="text-center py-12">
+              <CardContent>
+                <FileText className="h-16 w-16 text-gray-300 mx-auto mb-4" />
+                <h3 className="text-xl font-semibold text-gray-700 mb-2">
+                  {showInactive ? 'No inactive IPSs found' : 'No active IPSs found'}
+                </h3>
+                <p className="text-gray-500 mb-6">
+                  {showInactive 
+                    ? 'All your IPSs are currently active.'
+                    : 'Create your first Investment Policy Statement to get started.'
+                  }
+                </p>
+                {!showInactive && (
+                  <Button onClick={handleCreateNew} className="bg-blue-600 hover:bg-blue-700">
+                    <PlusCircle className="h-4 w-4 mr-2" />
+                    Create Your First IPS
+                  </Button>
+                )}
+              </CardContent>
             </Card>
-          ))
+          </div>
         )}
       </div>
 
-      {/* Quick Actions Footer */}
-      {displayedIPSs.length > 0 && (
-        <Card className="mt-8">
-          <CardContent className="p-6">
-            <div className="flex items-center justify-between">
-              <div>
-                <h3 className="font-semibold text-gray-900">Quick Actions</h3>
-                <p className="text-sm text-gray-600 mt-1">
-                  Manage your IPS configurations efficiently
-                </p>
-              </div>
-              <div className="flex gap-3">
-                <Button variant="outline">
-                  <Archive className="h-4 w-4 mr-2" />
-                  Archive Old IPSs
-                </Button>
-                <Button variant="outline">
-                  <Download className="h-4 w-4 mr-2" />
-                  Export All IPSs
-                </Button>
-                <Button onClick={handleCreateNew} className="bg-blue-600 hover:bg-blue-700">
-                  <PlusCircle className="h-4 w-4 mr-2" />
-                  Create New IPS
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+      {/* Quick Stats */}
+      {allIPSs.length > 0 && (
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-4 gap-4">
+          <Card>
+            <CardContent className="p-4 text-center">
+              <p className="text-2xl font-bold text-blue-600">{activeIPSs.length}</p>
+              <p className="text-sm text-gray-600">Active IPSs</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 text-center">
+              <p className="text-2xl font-bold text-green-600">
+                {activeIPSs.reduce((sum, ips) => sum + (ips.performance?.totalTrades || 0), 0)}
+              </p>
+              <p className="text-sm text-gray-600">Total Trades</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 text-center">
+              <p className="text-2xl font-bold text-purple-600">
+                {activeIPSs.length > 0 
+                  ? Math.round(activeIPSs.reduce((sum, ips) => sum + (ips.performance?.winRate || 0), 0) / activeIPSs.length)
+                  : 0}%
+              </p>
+              <p className="text-sm text-gray-600">Avg Win Rate</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="p-4 text-center">
+              <p className="text-2xl font-bold text-orange-600">
+                {Array.from(new Set(availableStrategies.map(s => s.id))).length}
+              </p>
+              <p className="text-sm text-gray-600">Available Strategies</p>
+            </CardContent>
+          </Card>
+        </div>
       )}
     </div>
   );
