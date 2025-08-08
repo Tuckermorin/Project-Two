@@ -1,427 +1,719 @@
-"use client"
+/**
+ * Enhanced Trade Entry Form with IPS Factor Integration
+ * Copy this into: src/components/trades/trade-entry-form.tsx
+ */
 
-import { useState } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Textarea } from '@/components/ui/textarea'
-import { Badge } from '@/components/ui/badge'
-import { Calculator, TrendingUp, AlertTriangle, CheckCircle } from 'lucide-react'
-import { useTradesStore } from '@/lib/stores/trades-store'
-import { useRouter } from 'next/navigation'
+import React, { useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Separator } from '@/components/ui/separator';
+import { 
+  Calculator, 
+  TrendingUp, 
+  Target, 
+  AlertCircle, 
+  CheckCircle,
+  Clock,
+  DollarSign,
+  BarChart3,
+  Users,
+  Sparkles
+} from 'lucide-react';
+
+interface IPSConfiguration {
+  id: string;
+  name: string;
+  strategies: string[];
+  factors?: Record<string, any>;
+}
+
+interface FactorDefinition {
+  id: string;
+  name: string;
+  type: 'quantitative' | 'qualitative' | 'options';
+  category: string;
+  data_type: string;
+  unit: string;
+  source?: string;
+}
 
 interface TradeFormData {
-  type: 'put-credit-spread' | 'long-call'
-  symbol: string
-  expirationDate: string
-  quantity: number
+  // Basic Trade Info
+  name: string;
+  symbol: string;
+  currentPrice: number;
+  expirationDate: string;
+  contractType: 'put-credit-spread' | 'call-credit-spread' | 'long-call' | 'long-put' | 'iron-condor' | 'covered-call';
+  numberOfContracts: number;
+  shortStrike: number;
+  longStrike: number;
+  creditReceived: number;
+  sector: string;
   
-  // Put Credit Spread fields
-  shortStrike?: number
-  longStrike?: number
-  creditReceived?: number
+  // Calculated Fields (auto-filled or calculated)
+  dte: number;
+  spreadWidth: number;
+  maxGain: number;
+  maxLoss: number;
+  percentCurrentToShort: number;
+  deltaShortLeg: number;
+  theta: number;
+  vega: number;
+  ivAtEntry: number;
   
-  // Long Call fields
-  callStrike?: number
-  premiumPaid?: number
-  
-  // Optional analysis fields
-  currentPrice?: number
-  iv?: number
-  delta?: number
-  
-  notes?: string
+  // IPS Factor Values (manual inputs for non-API factors)
+  ipsFactors: Record<string, any>;
 }
 
-const initialFormData: TradeFormData = {
-  type: 'put-credit-spread',
-  symbol: '',
-  expirationDate: '',
-  quantity: 1,
-  notes: ''
+interface TradeEntryFormProps {
+  selectedIPS: IPSConfiguration;
+  availableFactors: FactorDefinition[];
+  onSubmit: (tradeData: TradeFormData) => void;
+  onCalculateScore: (tradeData: TradeFormData) => void;
+  onCancel: () => void;
 }
 
-export function TradeEntryForm() {
-  const [formData, setFormData] = useState<TradeFormData>(initialFormData)
-  const [ipsScore, setIpsScore] = useState<number | null>(null)
-  const [isCalculating, setIsCalculating] = useState(false)
+export function TradeEntryForm({
+  selectedIPS,
+  availableFactors,
+  onSubmit,
+  onCalculateScore,
+  onCancel
+}: TradeEntryFormProps) {
+  const [formData, setFormData] = useState<TradeFormData>({
+    name: '',
+    symbol: '',
+    currentPrice: 0,
+    expirationDate: '',
+    contractType: 'put-credit-spread',
+    numberOfContracts: 1,
+    shortStrike: 0,
+    longStrike: 0,
+    creditReceived: 0,
+    sector: '',
+    dte: 0,
+    spreadWidth: 0,
+    maxGain: 0,
+    maxLoss: 0,
+    percentCurrentToShort: 0,
+    deltaShortLeg: 0,
+    theta: 0,
+    vega: 0,
+    ivAtEntry: 0,
+    ipsFactors: {}
+  });
 
-    const { addTrade } = useTradesStore()
-  const router = useRouter()
-  const [isSaving, setIsSaving] = useState(false)
-  const [showSuccess, setShowSuccess] = useState(false)
+  const [activeTab, setActiveTab] = useState('trade-details');
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [completionScore, setCompletionScore] = useState(0);
+
+  // Calculate DTE when expiration date changes
+  useEffect(() => {
+    if (formData.expirationDate) {
+      const expDate = new Date(formData.expirationDate);
+      const today = new Date();
+      const timeDiff = expDate.getTime() - today.getTime();
+      const daysDiff = Math.ceil(timeDiff / (1000 * 3600 * 24));
+      setFormData(prev => ({ ...prev, dte: daysDiff }));
+    }
+  }, [formData.expirationDate]);
+
+  // Calculate spread metrics when strikes change
+  useEffect(() => {
+    if (formData.shortStrike && formData.longStrike && formData.creditReceived) {
+      const spreadWidth = Math.abs(formData.shortStrike - formData.longStrike);
+      const maxGain = formData.creditReceived * 100 * formData.numberOfContracts;
+      const maxLoss = (spreadWidth * 100 * formData.numberOfContracts) - maxGain;
+      
+      setFormData(prev => ({
+        ...prev,
+        spreadWidth,
+        maxGain,
+        maxLoss
+      }));
+    }
+  }, [formData.shortStrike, formData.longStrike, formData.creditReceived, formData.numberOfContracts]);
+
+  // Calculate % current to short strike
+  useEffect(() => {
+    if (formData.currentPrice && formData.shortStrike) {
+      const percentToShort = ((formData.currentPrice - formData.shortStrike) / formData.shortStrike) * 100;
+      setFormData(prev => ({ ...prev, percentCurrentToShort: percentToShort }));
+    }
+  }, [formData.currentPrice, formData.shortStrike]);
+
+  // Calculate completion score
+  useEffect(() => {
+    const requiredFields = [
+      'name', 'symbol', 'currentPrice', 'expirationDate', 'contractType',
+      'numberOfContracts', 'shortStrike', 'longStrike', 'creditReceived', 'sector'
+    ];
+    
+    const completedFields = requiredFields.filter(field => {
+      const value = formData[field as keyof TradeFormData];
+      return value !== '' && value !== 0;
+    }).length;
+
+    const manualFactors = getManualFactors();
+    const completedFactors = manualFactors.filter(factor => 
+      formData.ipsFactors[factor.name] !== undefined && formData.ipsFactors[factor.name] !== ''
+    ).length;
+
+    const totalRequired = requiredFields.length + manualFactors.length;
+    const totalCompleted = completedFields + completedFactors;
+    
+    setCompletionScore((totalCompleted / totalRequired) * 100);
+  }, [formData, availableFactors]);
 
   const handleInputChange = (field: keyof TradeFormData, value: any) => {
-    setFormData(prev => ({ ...prev, [field]: value }))
-    // Reset IPS score when trade details change
-    setIpsScore(null)
-  }
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
 
-  const calculateIPSScore = async () => {
-    setIsCalculating(true)
-    
-    // TODO: Implement actual IPS scoring logic
-    // For now, simulate calculation
-    await new Promise(resolve => setTimeout(resolve, 1000))
-    
-    // Mock scoring based on some basic criteria
-    let score = 70 // Base score
-    
-    if (formData.iv && formData.iv >= 40) score += 10
-    if (formData.delta && formData.delta >= 0.10 && formData.delta <= 0.25) score += 10
-    if (formData.symbol && formData.symbol.length > 0) score += 5
-    
-    // Add some randomness for demo
-    score += Math.floor(Math.random() * 10) - 5
-    score = Math.max(0, Math.min(100, score))
-    
-    setIpsScore(score)
-    setIsCalculating(false)
-  }
+  const handleFactorChange = (factorName: string, value: any) => {
+    setFormData(prev => ({
+      ...prev,
+      ipsFactors: { ...prev.ipsFactors, [factorName]: value }
+    }));
+  };
 
-  const getScoreColor = (score: number) => {
-    if (score >= 80) return 'text-green-600'
-    if (score >= 60) return 'text-yellow-600'
-    return 'text-red-600'
-  }
+  const getManualFactors = () => {
+    return availableFactors.filter(factor => !factor.source);
+  };
 
-  const getScoreBadge = (score: number) => {
-    if (score >= 80) return { variant: 'default' as const, text: 'Excellent Fit' }
-    if (score >= 60) return { variant: 'secondary' as const, text: 'Good Fit' }
-    return { variant: 'destructive' as const, text: 'Poor Fit' }
-  }
+  const getApiFactors = () => {
+    return availableFactors.filter(factor => factor.source === 'alpha_vantage');
+  };
 
-  const isPutCreditSpread = formData.type === 'put-credit-spread'
+  const handleCalculateScore = async () => {
+    setIsCalculating(true);
+    try {
+      await onCalculateScore(formData);
+    } finally {
+      setIsCalculating(false);
+    }
+  };
+
+  const isFormValid = () => {
+    const requiredFields = [
+      'name', 'symbol', 'currentPrice', 'expirationDate', 'contractType',
+      'numberOfContracts', 'shortStrike', 'longStrike', 'creditReceived', 'sector'
+    ];
+    
+    const basicFieldsComplete = requiredFields.every(field => {
+      const value = formData[field as keyof TradeFormData];
+      return value !== '' && value !== 0;
+    });
+
+    const manualFactors = getManualFactors();
+    const factorsComplete = manualFactors.every(factor => 
+      formData.ipsFactors[factor.name] !== undefined && formData.ipsFactors[factor.name] !== ''
+    );
+
+    return basicFieldsComplete && factorsComplete;
+  };
+
+  const renderFactorInput = (factor: FactorDefinition) => {
+    const value = formData.ipsFactors[factor.name] || '';
+
+    if (factor.type === 'qualitative') {
+      return (
+        <Select
+          value={value.toString()}
+          onValueChange={(val) => handleFactorChange(factor.name, parseInt(val))}
+        >
+          <SelectTrigger>
+            <SelectValue placeholder="Select rating" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="1">1 - Poor</SelectItem>
+            <SelectItem value="2">2 - Below Average</SelectItem>
+            <SelectItem value="3">3 - Average</SelectItem>
+            <SelectItem value="4">4 - Good</SelectItem>
+            <SelectItem value="5">5 - Excellent</SelectItem>
+          </SelectContent>
+        </Select>
+      );
+    }
+
+    return (
+      <Input
+        type={factor.data_type === 'percentage' ? 'number' : 'text'}
+        value={value}
+        onChange={(e) => handleFactorChange(factor.name, e.target.value)}
+        placeholder={`Enter ${factor.name.toLowerCase()}`}
+        step={factor.data_type === 'percentage' ? '0.01' : undefined}
+      />
+    );
+  };
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      {/* Trade Entry Form */}
-      <div className="lg:col-span-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>Trade Details</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            {/* Strategy Type */}
-            <div>
-              <Label>Strategy Type</Label>
-              <Select 
-                value={formData.type} 
-                onValueChange={(value: 'put-credit-spread' | 'long-call') => 
-                  handleInputChange('type', value)
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="put-credit-spread">Put Credit Spread</SelectItem>
-                  <SelectItem value="long-call">Long Call</SelectItem>
-                </SelectContent>
-              </Select>
+    <div className="max-w-6xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold">New Trade Entry</h2>
+          <p className="text-gray-600">IPS: {selectedIPS.name}</p>
+        </div>
+        <div className="flex items-center gap-4">
+          <div className="text-right">
+            <div className="text-sm text-gray-600">Completion</div>
+            <div className="flex items-center gap-2">
+              <Progress value={completionScore} className="w-24" />
+              <span className="text-sm font-medium">{Math.round(completionScore)}%</span>
             </div>
+          </div>
+        </div>
+      </div>
 
-            {/* Basic Details */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="symbol">Symbol</Label>
-                <Input
-                  id="symbol"
-                  placeholder="e.g., AAPL"
-                  value={formData.symbol}
-                  onChange={(e) => handleInputChange('symbol', e.target.value.toUpperCase())}
-                />
-              </div>
-              
-              <div>
-                <Label htmlFor="quantity">Quantity (Contracts)</Label>
-                <Input
-                  id="quantity"
-                  type="number"
-                  min="1"
-                  value={formData.quantity}
-                  onChange={(e) => handleInputChange('quantity', parseInt(e.target.value) || 1)}
-                />
-              </div>
-            </div>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="trade-details" className="flex items-center gap-2">
+            <TrendingUp className="h-4 w-4" />
+            Trade Details
+          </TabsTrigger>
+          <TabsTrigger value="ips-factors" className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4" />
+            IPS Factors ({getManualFactors().length})
+          </TabsTrigger>
+          <TabsTrigger value="review" className="flex items-center gap-2">
+            <Target className="h-4 w-4" />
+            Review & Submit
+          </TabsTrigger>
+        </TabsList>
 
-            <div>
-              <Label htmlFor="expirationDate">Expiration Date</Label>
-              <Input
-                id="expirationDate"
-                type="date"
-                value={formData.expirationDate}
-                onChange={(e) => handleInputChange('expirationDate', e.target.value)}
-              />
-            </div>
-
-            {/* Strategy-Specific Fields */}
-            {isPutCreditSpread ? (
-              <div className="space-y-4">
-                <h3 className="font-semibold">Put Credit Spread Details</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <Label htmlFor="shortStrike">Short Strike</Label>
-                    <Input
-                      id="shortStrike"
-                      type="number"
-                      step="0.50"
-                      placeholder="e.g., 150"
-                      value={formData.shortStrike || ''}
-                      onChange={(e) => handleInputChange('shortStrike', parseFloat(e.target.value) || undefined)}
-                    />
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="longStrike">Long Strike (Protection)</Label>
-                    <Input
-                      id="longStrike"
-                      type="number"
-                      step="0.50"
-                      placeholder="e.g., 145"
-                      value={formData.longStrike || ''}
-                      onChange={(e) => handleInputChange('longStrike', parseFloat(e.target.value) || undefined)}
-                    />
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="creditReceived">Credit Received</Label>
-                    <Input
-                      id="creditReceived"
-                      type="number"
-                      step="0.01"
-                      placeholder="e.g., 0.85"
-                      value={formData.creditReceived || ''}
-                      onChange={(e) => handleInputChange('creditReceived', parseFloat(e.target.value) || undefined)}
-                    />
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <h3 className="font-semibold">Long Call Details</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="callStrike">Strike Price</Label>
-                    <Input
-                      id="callStrike"
-                      type="number"
-                      step="0.50"
-                      placeholder="e.g., 155"
-                      value={formData.callStrike || ''}
-                      onChange={(e) => handleInputChange('callStrike', parseFloat(e.target.value) || undefined)}
-                    />
-                  </div>
-                  
-                  <div>
-                    <Label htmlFor="premiumPaid">Premium Paid</Label>
-                    <Input
-                      id="premiumPaid"
-                      type="number"
-                      step="0.01"
-                      placeholder="e.g., 2.50"
-                      value={formData.premiumPaid || ''}
-                      onChange={(e) => handleInputChange('premiumPaid', parseFloat(e.target.value) || undefined)}
-                    />
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {/* Optional Analysis Fields */}
-            <div className="space-y-4">
-              <h3 className="font-semibold">Analysis (Optional)</h3>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        {/* Trade Details Tab */}
+        <TabsContent value="trade-details" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <TrendingUp className="h-5 w-5" />
+                Basic Trade Information
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 <div>
-                  <Label htmlFor="currentPrice">Current Stock Price</Label>
+                  <Label htmlFor="name">Trade Name</Label>
+                  <Input
+                    id="name"
+                    value={formData.name}
+                    onChange={(e) => handleInputChange('name', e.target.value)}
+                    placeholder="e.g., AAPL Put Credit Spread"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="symbol">Symbol</Label>
+                  <Input
+                    id="symbol"
+                    value={formData.symbol}
+                    onChange={(e) => handleInputChange('symbol', e.target.value.toUpperCase())}
+                    placeholder="AAPL"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="currentPrice">Current Price</Label>
                   <Input
                     id="currentPrice"
                     type="number"
                     step="0.01"
-                    placeholder="e.g., 152.50"
                     value={formData.currentPrice || ''}
-                    onChange={(e) => handleInputChange('currentPrice', parseFloat(e.target.value) || undefined)}
+                    onChange={(e) => handleInputChange('currentPrice', parseFloat(e.target.value) || 0)}
+                    placeholder="150.00"
                   />
                 </div>
-                
+
                 <div>
-                  <Label htmlFor="iv">IV (%)</Label>
+                  <Label htmlFor="expirationDate">Expiration Date</Label>
                   <Input
-                    id="iv"
+                    id="expirationDate"
+                    type="date"
+                    value={formData.expirationDate}
+                    onChange={(e) => handleInputChange('expirationDate', e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="dte">DTE (Days to Expiration)</Label>
+                  <Input
+                    id="dte"
                     type="number"
-                    step="0.1"
-                    placeholder="e.g., 45.2"
-                    value={formData.iv || ''}
-                    onChange={(e) => handleInputChange('iv', parseFloat(e.target.value) || undefined)}
+                    value={formData.dte}
+                    disabled
+                    className="bg-gray-50"
                   />
                 </div>
-                
+
                 <div>
-                  <Label htmlFor="delta">Delta</Label>
+                  <Label htmlFor="contractType">Contract Type</Label>
+                  <Select
+                    value={formData.contractType}
+                    onValueChange={(value: any) => handleInputChange('contractType', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="put-credit-spread">Put Credit Spread</SelectItem>
+                      <SelectItem value="call-credit-spread">Call Credit Spread</SelectItem>
+                      <SelectItem value="long-call">Long Call</SelectItem>
+                      <SelectItem value="long-put">Long Put</SelectItem>
+                      <SelectItem value="iron-condor">Iron Condor</SelectItem>
+                      <SelectItem value="covered-call">Covered Call</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Label htmlFor="numberOfContracts"># of Contracts</Label>
                   <Input
-                    id="delta"
+                    id="numberOfContracts"
+                    type="number"
+                    min="1"
+                    value={formData.numberOfContracts}
+                    onChange={(e) => handleInputChange('numberOfContracts', parseInt(e.target.value) || 1)}
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="shortStrike">Short Strike</Label>
+                  <Input
+                    id="shortStrike"
+                    type="number"
+                    step="0.50"
+                    value={formData.shortStrike || ''}
+                    onChange={(e) => handleInputChange('shortStrike', parseFloat(e.target.value) || 0)}
+                    placeholder="145.00"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="longStrike">Long Strike</Label>
+                  <Input
+                    id="longStrike"
+                    type="number"
+                    step="0.50"
+                    value={formData.longStrike || ''}
+                    onChange={(e) => handleInputChange('longStrike', parseFloat(e.target.value) || 0)}
+                    placeholder="140.00"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="creditReceived">Credit Received</Label>
+                  <Input
+                    id="creditReceived"
                     type="number"
                     step="0.01"
-                    placeholder="e.g., 0.15"
-                    value={formData.delta || ''}
-                    onChange={(e) => handleInputChange('delta', parseFloat(e.target.value) || undefined)}
+                    value={formData.creditReceived || ''}
+                    onChange={(e) => handleInputChange('creditReceived', parseFloat(e.target.value) || 0)}
+                    placeholder="1.25"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="sector">Sector</Label>
+                  <Select
+                    value={formData.sector}
+                    onValueChange={(value) => handleInputChange('sector', value)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select sector" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="technology">Technology</SelectItem>
+                      <SelectItem value="healthcare">Healthcare</SelectItem>
+                      <SelectItem value="financials">Financials</SelectItem>
+                      <SelectItem value="consumer-discretionary">Consumer Discretionary</SelectItem>
+                      <SelectItem value="communication">Communication</SelectItem>
+                      <SelectItem value="industrials">Industrials</SelectItem>
+                      <SelectItem value="consumer-staples">Consumer Staples</SelectItem>
+                      <SelectItem value="energy">Energy</SelectItem>
+                      <SelectItem value="utilities">Utilities</SelectItem>
+                      <SelectItem value="real-estate">Real Estate</SelectItem>
+                      <SelectItem value="materials">Materials</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Calculated Metrics */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Calculator className="h-5 w-5" />
+                Options Metrics (Manual Entry)
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div>
+                  <Label htmlFor="spreadWidth">Spread Width</Label>
+                  <Input
+                    id="spreadWidth"
+                    type="number"
+                    value={formData.spreadWidth}
+                    disabled
+                    className="bg-gray-50"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="maxGain">Max Gain ($)</Label>
+                  <Input
+                    id="maxGain"
+                    type="number"
+                    value={formData.maxGain}
+                    disabled
+                    className="bg-gray-50"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="maxLoss">Max Loss ($)</Label>
+                  <Input
+                    id="maxLoss"
+                    type="number"
+                    value={formData.maxLoss}
+                    disabled
+                    className="bg-gray-50"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="percentCurrentToShort">% Current to Short</Label>
+                  <Input
+                    id="percentCurrentToShort"
+                    type="number"
+                    value={formData.percentCurrentToShort.toFixed(2)}
+                    disabled
+                    className="bg-gray-50"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="deltaShortLeg">Delta (Short Leg)</Label>
+                  <Input
+                    id="deltaShortLeg"
+                    type="number"
+                    step="0.01"
+                    value={formData.deltaShortLeg || ''}
+                    onChange={(e) => handleInputChange('deltaShortLeg', parseFloat(e.target.value) || 0)}
+                    placeholder="0.25"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="theta">Theta</Label>
+                  <Input
+                    id="theta"
+                    type="number"
+                    step="0.01"
+                    value={formData.theta || ''}
+                    onChange={(e) => handleInputChange('theta', parseFloat(e.target.value) || 0)}
+                    placeholder="-0.05"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="vega">Vega</Label>
+                  <Input
+                    id="vega"
+                    type="number"
+                    step="0.01"
+                    value={formData.vega || ''}
+                    onChange={(e) => handleInputChange('vega', parseFloat(e.target.value) || 0)}
+                    placeholder="0.15"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="ivAtEntry">IV at Entry (%)</Label>
+                  <Input
+                    id="ivAtEntry"
+                    type="number"
+                    step="0.1"
+                    value={formData.ivAtEntry || ''}
+                    onChange={(e) => handleInputChange('ivAtEntry', parseFloat(e.target.value) || 0)}
+                    placeholder="25.5"
                   />
                 </div>
               </div>
-            </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-            {/* Notes */}
-            <div>
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                id="notes"
-                placeholder="Trade thesis, market conditions, etc."
-                value={formData.notes || ''}
-                onChange={(e) => handleInputChange('notes', e.target.value)}
-                rows={3}
-              />
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* IPS Scoring Panel */}
-      <div>
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Calculator className="h-5 w-5" />
-              IPS Score
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {ipsScore === null ? (
-              <div className="text-center py-6">
-                <p className="text-gray-500 mb-4">Enter trade details and calculate IPS score</p>
-                <Button 
-                  onClick={calculateIPSScore}
-                  disabled={!formData.symbol || isCalculating}
-                >
-                  {isCalculating ? 'Calculating...' : 'Calculate Score'}
-                </Button>
-              </div>
-            ) : (
-              <div className="space-y-4">
-                <div className="text-center">
-                  <div className={`text-4xl font-bold ${getScoreColor(ipsScore)}`}>
-                    {ipsScore}/100
-                  </div>
-                  <Badge {...getScoreBadge(ipsScore)} className="mt-2">
-                    {getScoreBadge(ipsScore).text}
+        {/* IPS Factors Tab */}
+        <TabsContent value="ips-factors" className="space-y-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* API Factors (Read-only) */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <CheckCircle className="h-5 w-5 text-green-600" />
+                  API Factors (Auto-populated)
+                  <Badge variant="outline" className="bg-green-50 text-green-700">
+                    Alpha Vantage
                   </Badge>
-                </div>
-
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2 text-sm">
-                    {formData.iv && formData.iv >= 40 ? (
-                      <CheckCircle className="h-4 w-4 text-green-600" />
-                    ) : (
-                      <AlertTriangle className="h-4 w-4 text-yellow-600" />
-                    )}
-                    <span>IV Requirement ({formData.iv || 'N/A'}%)</span>
-                  </div>
-                  
-                  <div className="flex items-center gap-2 text-sm">
-                    {formData.delta && formData.delta >= 0.10 && formData.delta <= 0.25 ? (
-                      <CheckCircle className="h-4 w-4 text-green-600" />
-                    ) : (
-                      <AlertTriangle className="h-4 w-4 text-yellow-600" />
-                    )}
-                    <span>Delta Range ({formData.delta || 'N/A'})</span>
+                  {getApiFactors().map((factor) => (
+                    <div key={factor.id} className="flex items-center justify-between p-3 bg-green-50 rounded-lg border border-green-200">
+                      <div>
+                        <div className="font-medium text-sm">{factor.name}</div>
+                        <div className="text-xs text-gray-600">{factor.category}</div>
+                      </div>
+                      <div className="text-sm text-green-700">
+                        Will be populated automatically
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Manual Factors */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Users className="h-5 w-5 text-orange-600" />
+                  Manual Input Required
+                  <Badge variant="outline" className="bg-orange-50 text-orange-700">
+                    {getManualFactors().length} factors
+                  </Badge>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {getManualFactors().map((factor) => (
+                    <div key={factor.id} className="space-y-2">
+                      <Label htmlFor={factor.id} className="text-sm font-medium">
+                        {factor.name}
+                        <span className="text-xs text-gray-500 ml-2">({factor.unit})</span>
+                      </Label>
+                      {renderFactorInput(factor)}
+                      <div className="text-xs text-gray-600">{factor.category}</div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </TabsContent>
+
+        {/* Review Tab */}
+        <TabsContent value="review" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Target className="h-5 w-5" />
+                Review & Submit
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="flex items-center justify-between p-4 bg-blue-50 rounded-lg border border-blue-200">
+                <div>
+                  <div className="font-medium">Form Completion</div>
+                  <div className="text-sm text-gray-600">
+                    {isFormValid() ? 'All required fields completed' : 'Some fields still need to be filled'}
                   </div>
                 </div>
-
-                <div className="pt-4 space-y-2">
-                <Button 
-                    className="w-full" 
-                    disabled={ipsScore === null || ipsScore < 60 || isSaving}
-                    onClick={async () => {
-                    if (ipsScore === null) return
-                    
-                    setIsSaving(true)
-                    
-                    // Prepare trade data
-                    const tradeData = {
-                        type: formData.type,
-                        symbol: formData.symbol,
-                        expirationDate: formData.expirationDate,
-                        quantity: formData.quantity,
-                        shortStrike: formData.shortStrike,
-                        longStrike: formData.longStrike,
-                        creditReceived: formData.creditReceived,
-                        callStrike: formData.callStrike,
-                        premiumPaid: formData.premiumPaid,
-                        currentPrice: formData.currentPrice,
-                        iv: formData.iv,
-                        delta: formData.delta,
-                        status: 'potential' as const,
-                        entryDate: new Date().toISOString(),
-                        ipsScore,
-                        ipsNotes: `Score: ${ipsScore}/100. ${ipsScore >= 80 ? 'Excellent' : ipsScore >= 60 ? 'Good' : 'Poor'} fit for IPS criteria.`,
-                        notes: formData.notes,
-                    }
-                    
-                    // Save to store
-                    addTrade(tradeData)
-                    
-                    // Show success state
-                    setShowSuccess(true)
-                    
-                    // Reset after delay
-                    setTimeout(() => {
-                        setIsSaving(false)
-                        setShowSuccess(false)
-                        setFormData(initialFormData)
-                        setIpsScore(null)
-                    }, 2000)
-                    }}
-                >
-                    {isSaving ? (
-                    <>
-                        <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white mr-2"></div>
-                        Saving...
-                    </>
-                    ) : showSuccess ? (
-                    <>
-                        <CheckCircle className="h-4 w-4 mr-2" />
-                        Added Successfully!
-                    </>
-                    ) : (
-                    <>
-                        <TrendingUp className="h-4 w-4 mr-2" />
-                        Add to Potential Trades
-                    </>
-                    )}
-                </Button>
-                <p className="text-xs text-gray-500 text-center">
-                    {ipsScore === null ? 'Calculate score first' :
-                    ipsScore >= 60 ? 'Meets IPS criteria' : 'Below IPS threshold (60)'}
-                </p>
-                {showSuccess && (
-                    <div className="text-center">
-                    <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => router.push('/trades?tab=potential')}
-                        className="text-xs"
-                    >
-                        View Potential Trades
-                    </Button>
-                    </div>
-                )}
+                <div className="flex items-center gap-2">
+                  <Progress value={completionScore} className="w-32" />
+                  <span className="font-medium">{Math.round(completionScore)}%</span>
                 </div>
               </div>
-            )}
-          </CardContent>
-        </Card>
-      </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h4 className="font-medium mb-3">Trade Summary</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span>Symbol:</span>
+                      <span className="font-medium">{formData.symbol || 'Not set'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Strategy:</span>
+                      <span className="font-medium">{formData.contractType || 'Not set'}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Max Gain:</span>
+                      <span className="font-medium text-green-600">${formData.maxGain.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Max Loss:</span>
+                      <span className="font-medium text-red-600">${formData.maxLoss.toFixed(2)}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div>
+                  <h4 className="font-medium mb-3">IPS Compliance</h4>
+                  <div className="space-y-2 text-sm">
+                    <div className="flex justify-between">
+                      <span>Selected IPS:</span>
+                      <span className="font-medium">{selectedIPS.name}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Manual Factors:</span>
+                      <span className="font-medium">{getManualFactors().length} required</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>API Factors:</span>
+                      <span className="font-medium">{getApiFactors().length} auto-filled</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <Separator />
+
+              <div className="flex items-center justify-between">
+                <Button variant="outline" onClick={onCancel}>
+                  Cancel
+                </Button>
+
+                <div className="flex gap-3">
+                  <Button
+                    variant="outline"
+                    onClick={handleCalculateScore}
+                    disabled={!isFormValid() || isCalculating}
+                    className="flex items-center gap-2"
+                  >
+                    {isCalculating ? (
+                      <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
+                    ) : (
+                      <Calculator className="h-4 w-4" />
+                    )}
+                    Calculate IPS Score
+                  </Button>
+
+                  <Button
+                    onClick={() => onSubmit(formData)}
+                    disabled={!isFormValid()}
+                    className="flex items-center gap-2"
+                  >
+                    <Sparkles className="h-4 w-4" />
+                    Add to Potentials
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
     </div>
-  )
+  );
 }

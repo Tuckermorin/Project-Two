@@ -1,18 +1,235 @@
-// src/lib/services/ips-data-service.ts
-import { createClient } from '@supabase/supabase-js';
+/**
+ * Complete IPS Data Service - Fixed Strategy-Based Factor Selection
+ * Copy this into: src/lib/services/ips-data-service.ts
+ */
 
-// Initialize Supabase client
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-const supabase = createClient(supabaseUrl, supabaseKey);
+// Strategy definitions
+interface TradingStrategy {
+  id: string;
+  name: string;
+  description: string;
+  requiredFactorTypes: ('quantitative' | 'qualitative' | 'options')[];
+  recommendedFactors: string[];
+}
 
-// Types
-export interface IPSConfiguration {
+// Strategy configurations - All with correct factor names
+const TRADING_STRATEGIES: TradingStrategy[] = [
+  {
+    id: 'buy-hold-stocks',
+    name: 'Buy & Hold Stocks',
+    description: 'Long-term equity positions based on fundamental analysis',
+    requiredFactorTypes: ['quantitative', 'qualitative'],
+    recommendedFactors: [
+      'Quarterly Revenue Growth YoY',
+      'P/E Ratio',
+      'Return on Equity TTM',
+      'Total Liabilities',
+      'Market Leadership',
+      'Economic Moat',
+      'Management Quality'
+    ]
+  },
+  {
+    id: 'put-credit-spreads',
+    name: 'Put Credit Spreads',
+    description: 'Sell put spreads for income generation',
+    requiredFactorTypes: ['quantitative', 'qualitative', 'options'],
+    recommendedFactors: [
+      'Implied Volatility',
+      'Delta', 
+      'Theta',
+      'Beta',
+      'Management Quality',
+      'IV Rank',
+      'Economic Moat',
+      'Return on Equity TTM'
+    ]
+  },
+  {
+    id: 'call-credit-spreads',
+    name: 'Call Credit Spreads',
+    description: 'Sell call spreads at resistance levels',
+    requiredFactorTypes: ['quantitative', 'qualitative', 'options'],
+    recommendedFactors: [
+      'Implied Volatility',
+      'Delta',
+      'Theta',
+      'P/E Ratio',
+      'IV Rank',
+      'Competitive Position',
+      'Volume',
+      'Beta'
+    ]
+  },
+  {
+    id: 'long-calls',
+    name: 'Long Calls',
+    description: 'Directional bullish plays with defined risk',
+    requiredFactorTypes: ['quantitative', 'qualitative', 'options'],
+    recommendedFactors: [
+      'Quarterly Revenue Growth YoY',
+      'Earnings Surprise',
+      'Delta',
+      'Implied Volatility',
+      'Market Leadership',
+      'Volume',
+      'Innovation & R&D',
+      'Beta'
+    ]
+  },
+  {
+    id: 'long-puts',
+    name: 'Long Puts',
+    description: 'Directional bearish plays or portfolio hedging',
+    requiredFactorTypes: ['quantitative', 'qualitative', 'options'],
+    recommendedFactors: [
+      'Beta',
+      'Delta',
+      'Implied Volatility',
+      'P/E Ratio',
+      'Regulatory Environment',
+      'Volume',
+      'Economic Moat',
+      'Theta'
+    ]
+  },
+  {
+    id: 'iron-condors',
+    name: 'Iron Condors',
+    description: 'Range-bound strategies for low volatility periods',
+    requiredFactorTypes: ['quantitative', 'qualitative', 'options'],
+    recommendedFactors: [
+      'Implied Volatility',
+      'Delta',
+      'Theta',
+      'Gamma',
+      'Beta',
+      'Economic Moat',
+      'IV Rank',
+      'Volume'
+    ]
+  },
+  {
+    id: 'covered-calls',
+    name: 'Covered Calls',
+    description: 'Income generation on existing equity positions',
+    requiredFactorTypes: ['quantitative', 'qualitative', 'options'],
+    recommendedFactors: [
+      'Dividend Yield',
+      'Delta',
+      'Time Value',
+      'Beta',
+      'Management Quality',
+      'Volume',
+      'Economic Moat',
+      'Theta'
+    ]
+  }
+];
+
+// Complete Alpha Vantage factor definitions - all API supported
+const ALPHA_VANTAGE_FACTORS = [
+  // Company Overview Factors - All supported by Alpha Vantage API
+  { id: 'av-market-cap', name: 'Market Capitalization', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-pe-ratio', name: 'P/E Ratio', type: 'quantitative', category: 'Company Overview', data_type: 'ratio', unit: 'ratio', source: 'alpha_vantage' },
+  { id: 'av-peg-ratio', name: 'PEG Ratio', type: 'quantitative', category: 'Company Overview', data_type: 'ratio', unit: 'ratio', source: 'alpha_vantage' },
+  { id: 'av-book-value', name: 'Book Value per Share', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-dividend-per-share', name: 'Dividend per Share', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-dividend-yield', name: 'Dividend Yield', type: 'quantitative', category: 'Company Overview', data_type: 'percentage', unit: '%', source: 'alpha_vantage' },
+  { id: 'av-eps', name: 'Earnings per Share', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-revenue-per-share', name: 'Revenue per Share TTM', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-profit-margin', name: 'Profit Margin', type: 'quantitative', category: 'Company Overview', data_type: 'percentage', unit: '%', source: 'alpha_vantage' },
+  { id: 'av-operating-margin', name: 'Operating Margin TTM', type: 'quantitative', category: 'Company Overview', data_type: 'percentage', unit: '%', source: 'alpha_vantage' },
+  { id: 'av-return-on-assets', name: 'Return on Assets TTM', type: 'quantitative', category: 'Company Overview', data_type: 'percentage', unit: '%', source: 'alpha_vantage' },
+  { id: 'av-return-on-equity', name: 'Return on Equity TTM', type: 'quantitative', category: 'Company Overview', data_type: 'percentage', unit: '%', source: 'alpha_vantage' },
+  { id: 'av-revenue-growth', name: 'Quarterly Revenue Growth YoY', type: 'quantitative', category: 'Company Overview', data_type: 'percentage', unit: '%', source: 'alpha_vantage' },
+  { id: 'av-gross-profit', name: 'Gross Profit TTM', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-ebitda', name: 'EBITDA', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-beta', name: 'Beta', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: 'coefficient', source: 'alpha_vantage' },
+  { id: 'av-52-week-high', name: '52 Week High', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-52-week-low', name: '52 Week Low', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-50-day-ma', name: '50 Day Moving Average', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-200-day-ma', name: '200 Day Moving Average', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+
+  // Price & Quote Factors
+  { id: 'av-volume', name: 'Volume', type: 'quantitative', category: 'Price & Quote', data_type: 'numeric', unit: 'shares', source: 'alpha_vantage' },
+
+  // Financial Statement Factors - All supported by Alpha Vantage API
+  { id: 'av-total-revenue', name: 'Total Revenue', type: 'quantitative', category: 'Income Statement', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-cost-of-revenue', name: 'Cost of Revenue', type: 'quantitative', category: 'Income Statement', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-gross-profit-statement', name: 'Gross Profit', type: 'quantitative', category: 'Income Statement', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-operating-income', name: 'Operating Income', type: 'quantitative', category: 'Income Statement', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-net-income', name: 'Net Income', type: 'quantitative', category: 'Income Statement', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+
+  // Balance Sheet Factors - All supported by Alpha Vantage API
+  { id: 'av-total-assets', name: 'Total Assets', type: 'quantitative', category: 'Balance Sheet', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-total-liabilities', name: 'Total Liabilities', type: 'quantitative', category: 'Balance Sheet', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-total-equity', name: 'Total Shareholder Equity', type: 'quantitative', category: 'Balance Sheet', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-current-assets', name: 'Current Assets', type: 'quantitative', category: 'Balance Sheet', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-current-liabilities', name: 'Current Liabilities', type: 'quantitative', category: 'Balance Sheet', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-long-term-debt', name: 'Long Term Debt', type: 'quantitative', category: 'Balance Sheet', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+
+  // Cash Flow Factors - All supported by Alpha Vantage API
+  { id: 'av-operating-cash-flow', name: 'Operating Cash Flow', type: 'quantitative', category: 'Cash Flow', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-capital-expenditures', name: 'Capital Expenditures', type: 'quantitative', category: 'Cash Flow', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-free-cash-flow', name: 'Free Cash Flow', type: 'quantitative', category: 'Cash Flow', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-dividends-paid', name: 'Dividends Paid', type: 'quantitative', category: 'Cash Flow', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+
+  // Earnings Factors - All supported by Alpha Vantage API
+  { id: 'av-reported-eps', name: 'Reported EPS', type: 'quantitative', category: 'Earnings', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-estimated-eps', name: 'Estimated EPS', type: 'quantitative', category: 'Earnings', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-earnings-surprise', name: 'Earnings Surprise', type: 'quantitative', category: 'Earnings', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'av-surprise-percentage', name: 'Surprise Percentage', type: 'quantitative', category: 'Earnings', data_type: 'percentage', unit: '%', source: 'alpha_vantage' },
+];
+
+// Qualitative factors - require manual input
+const QUALITATIVE_FACTORS = [
+  { id: 'qual-market-leadership', name: 'Market Leadership', type: 'qualitative', category: 'Management & Governance', data_type: 'rating', unit: '1-5' },
+  { id: 'qual-management-quality', name: 'Management Quality', type: 'qualitative', category: 'Management & Governance', data_type: 'rating', unit: '1-5' },
+  { id: 'qual-economic-moat', name: 'Economic Moat', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
+  { id: 'qual-competitive-position', name: 'Competitive Position', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
+  { id: 'qual-brand-strength', name: 'Brand Strength', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
+  { id: 'qual-innovation-rd', name: 'Innovation & R&D', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
+  { id: 'qual-regulatory-environment', name: 'Regulatory Environment', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
+  { id: 'qual-esg-factors', name: 'ESG Factors', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
+];
+
+// Options factors - All require manual input
+const OPTIONS_FACTORS = [
+  { id: 'opt-iv', name: 'Implied Volatility', type: 'options', category: 'Options Metrics', data_type: 'percentage', unit: '%' },
+  { id: 'opt-delta', name: 'Delta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
+  { id: 'opt-gamma', name: 'Gamma', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
+  { id: 'opt-theta', name: 'Theta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
+  { id: 'opt-vega', name: 'Vega', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
+  { id: 'opt-rho', name: 'Rho', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
+  { id: 'opt-open-interest', name: 'Open Interest', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'contracts' },
+  { id: 'opt-volume', name: 'Option Volume', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'contracts' },
+  { id: 'opt-bid-ask-spread', name: 'Bid-Ask Spread', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: '$' },
+  { id: 'opt-time-value', name: 'Time Value', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: '$' },
+  { id: 'opt-intrinsic-value', name: 'Intrinsic Value', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: '$' },
+  
+  { id: 'opt-put-call-ratio', name: 'Put/Call Ratio', type: 'options', category: 'Sentiment & Flow', data_type: 'ratio', unit: 'ratio' },
+  { id: 'opt-iv-rank', name: 'IV Rank', type: 'options', category: 'Sentiment & Flow', data_type: 'percentile', unit: '%' },
+  { id: 'opt-iv-percentile', name: 'IV Percentile', type: 'options', category: 'Sentiment & Flow', data_type: 'percentile', unit: '%' },
+  { id: 'opt-skew', name: 'Volatility Skew', type: 'options', category: 'Sentiment & Flow', data_type: 'percentage', unit: '%' },
+  { id: 'opt-chain-liquidity', name: 'Options Chain Liquidity', type: 'options', category: 'Sentiment & Flow', data_type: 'rating', unit: '1-5' },
+  { id: 'opt-market-implied-move', name: 'Market-Implied Move', type: 'options', category: 'Sentiment & Flow', data_type: 'percentage', unit: '%' },
+];
+
+// Combined factor definitions
+const ALL_FACTORS = [
+  ...ALPHA_VANTAGE_FACTORS,
+  ...QUALITATIVE_FACTORS,
+  ...OPTIONS_FACTORS
+];
+
+// Extended IPS interface with strategies
+interface IPSConfiguration {
   id: string;
   user_id: string;
   name: string;
   description?: string;
-  strategies: string[];
+  strategies: string[]; // Array of strategy IDs
   is_active: boolean;
   total_factors?: number;
   active_factors?: number;
@@ -26,430 +243,149 @@ export interface IPSConfiguration {
     totalTrades: number;
   };
   criteria?: {
-    minIV?: number;
-    maxDelta?: number;
-    targetROI?: number;
-    maxPositions?: number;
+    minIV: number;
+    maxDelta: number;
+    targetROI: number;
+    maxPositions: number;
   };
 }
 
-export interface IPSFactorConfiguration {
-  id: string;
-  ips_id: string;
-  factor_id: string;
-  factor_name: string;
-  weight: number;
-  enabled: boolean;
-  target_config: Record<string, any>;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface TradingStrategy {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  difficulty: 'Beginner' | 'Intermediate' | 'Advanced';
-  requiredCapital: string;
-  timeCommitment: string;
-  riskLevel: 'Low' | 'Medium' | 'High';
-  marketConditions: string[];
-  keyMetrics: string[];
-  requiredFactorTypes: ('quantitative' | 'qualitative' | 'options')[];
-  recommendedFactors: string[];
-}
-
-// Factor definitions (keeping the same structure as before)
-const ALPHA_VANTAGE_FACTORS = [
-  { id: 'stock-price', name: 'Current Stock Price', type: 'stock', category: 'Price & Volume', data_type: 'numeric', unit: '$' },
-  { id: 'stock-volume', name: 'Volume', type: 'stock', category: 'Price & Volume', data_type: 'numeric', unit: 'shares' },
-  { id: 'stock-market-cap', name: 'Market Capitalization', type: 'stock', category: 'Fundamentals', data_type: 'numeric', unit: '$' },
-  { id: 'stock-pe-ratio', name: 'P/E Ratio', type: 'stock', category: 'Fundamentals', data_type: 'ratio', unit: 'ratio' },
-  { id: 'stock-dividend-yield', name: 'Dividend Yield', type: 'stock', category: 'Fundamentals', data_type: 'percentage', unit: '%' },
-  { id: 'stock-52w-high', name: '52-Week High', type: 'stock', category: 'Price & Volume', data_type: 'numeric', unit: '$' },
-  { id: 'stock-52w-low', name: '52-Week Low', type: 'stock', category: 'Price & Volume', data_type: 'numeric', unit: '$' },
-  { id: 'stock-beta', name: 'Beta', type: 'stock', category: 'Risk Metrics', data_type: 'numeric', unit: 'coefficient' },
-  { id: 'stock-rsi', name: 'RSI (14-day)', type: 'stock', category: 'Technical Indicators', data_type: 'oscillator', unit: '0-100' },
-  { id: 'stock-macd', name: 'MACD', type: 'stock', category: 'Technical Indicators', data_type: 'momentum', unit: 'price' },
-  { id: 'stock-sma-20', name: 'SMA (20-day)', type: 'stock', category: 'Technical Indicators', data_type: 'numeric', unit: '$' },
-  { id: 'stock-sma-50', name: 'SMA (50-day)', type: 'stock', category: 'Technical Indicators', data_type: 'numeric', unit: '$' },
-  { id: 'stock-ema-12', name: 'EMA (12-day)', type: 'stock', category: 'Technical Indicators', data_type: 'numeric', unit: '$' },
-  { id: 'stock-ema-26', name: 'EMA (26-day)', type: 'stock', category: 'Technical Indicators', data_type: 'numeric', unit: '$' },
-];
-
-const QUALITATIVE_FACTORS = [
-  { id: 'earnings-announcement', name: 'Earnings Announcement', type: 'qualitative', category: 'Corporate Events', data_type: 'date', unit: 'days_until' },
-  { id: 'ex-dividend-date', name: 'Ex-Dividend Date', type: 'qualitative', category: 'Corporate Events', data_type: 'date', unit: 'days_until' },
-  { id: 'analyst-rating', name: 'Analyst Rating', type: 'qualitative', category: 'Analyst Coverage', data_type: 'rating', unit: '1-5' },
-  { id: 'news-sentiment', name: 'News Sentiment', type: 'qualitative', category: 'Market Sentiment', data_type: 'sentiment', unit: '-1 to 1' },
-  { id: 'sector-performance', name: 'Sector Performance', type: 'qualitative', category: 'Market Context', data_type: 'percentage', unit: '%' },
-  { id: 'market-regime', name: 'Market Regime', type: 'qualitative', category: 'Market Context', data_type: 'categorical', unit: 'bull/bear/neutral' },
-];
-
-const OPTIONS_FACTORS = [
-  { id: 'opt-implied-volatility', name: 'Implied Volatility', type: 'options', category: 'Options Metrics', data_type: 'percentage', unit: '%' },
-  { id: 'opt-delta', name: 'Delta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
-  { id: 'opt-gamma', name: 'Gamma', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
-  { id: 'opt-theta', name: 'Theta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
-  { id: 'opt-vega', name: 'Vega', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
-  { id: 'opt-rho', name: 'Rho', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
-  { id: 'opt-open-interest', name: 'Open Interest', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'contracts' },
-  { id: 'opt-volume', name: 'Option Volume', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'contracts' },
-  { id: 'opt-bid-ask-spread', name: 'Bid-Ask Spread', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: '$' },
-  { id: 'opt-time-value', name: 'Time Value', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: '$' },
-  { id: 'opt-intrinsic-value', name: 'Intrinsic Value', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: '$' },
-  { id: 'opt-put-call-ratio', name: 'Put/Call Ratio', type: 'options', category: 'Sentiment & Flow', data_type: 'ratio', unit: 'ratio' },
-  { id: 'opt-iv-rank', name: 'IV Rank', type: 'options', category: 'Sentiment & Flow', data_type: 'percentile', unit: '%' },
-  { id: 'opt-iv-percentile', name: 'IV Percentile', type: 'options', category: 'Sentiment & Flow', data_type: 'percentile', unit: '%' },
-  { id: 'opt-skew', name: 'Volatility Skew', type: 'options', category: 'Sentiment & Flow', data_type: 'percentage', unit: '%' },
-  { id: 'opt-chain-liquidity', name: 'Options Chain Liquidity', type: 'options', category: 'Sentiment & Flow', data_type: 'rating', unit: '1-5' },
-  { id: 'opt-market-implied-move', name: 'Market-Implied Move', type: 'options', category: 'Sentiment & Flow', data_type: 'percentage', unit: '%' },
-];
-
-const ALL_FACTORS = [...ALPHA_VANTAGE_FACTORS, ...QUALITATIVE_FACTORS, ...OPTIONS_FACTORS];
-
-// Trading strategies
-const AVAILABLE_STRATEGIES: TradingStrategy[] = [
-  {
-    id: 'put-credit-spread',
-    name: 'Put Credit Spread',
-    description: 'Sell a put option and buy a put option at a lower strike price',
-    category: 'Credit Spreads',
-    difficulty: 'Intermediate',
-    requiredCapital: '$2,000 - $10,000',
-    timeCommitment: '1-2 hours/week',
-    riskLevel: 'Medium',
-    marketConditions: ['Neutral', 'Bullish'],
-    keyMetrics: ['IV Rank', 'Delta', 'DTE', 'Liquidity'],
-    requiredFactorTypes: ['options', 'quantitative'],
-    recommendedFactors: ['opt-implied-volatility', 'opt-delta', 'opt-volume', 'stock-volume', 'opt-iv-rank']
-  },
-  {
-    id: 'call-credit-spread',
-    name: 'Call Credit Spread',
-    description: 'Sell a call option and buy a call option at a higher strike price',
-    category: 'Credit Spreads',
-    difficulty: 'Intermediate',
-    requiredCapital: '$2,000 - $10,000',
-    timeCommitment: '1-2 hours/week',
-    riskLevel: 'Medium',
-    marketConditions: ['Neutral', 'Bearish'],
-    keyMetrics: ['IV Rank', 'Delta', 'DTE', 'Liquidity'],
-    requiredFactorTypes: ['options', 'quantitative'],
-    recommendedFactors: ['opt-implied-volatility', 'opt-delta', 'opt-volume', 'stock-volume', 'opt-iv-rank']
-  },
-  {
-    id: 'iron-condor',
-    name: 'Iron Condor',
-    description: 'Combination of put credit spread and call credit spread',
-    category: 'Neutral Strategies',
-    difficulty: 'Advanced',
-    requiredCapital: '$3,000 - $15,000',
-    timeCommitment: '2-3 hours/week',
-    riskLevel: 'Medium',
-    marketConditions: ['Neutral', 'Low Volatility'],
-    keyMetrics: ['IV Rank', 'Delta', 'Expected Move', 'Liquidity'],
-    requiredFactorTypes: ['options', 'quantitative', 'qualitative'],
-    recommendedFactors: ['opt-implied-volatility', 'opt-delta', 'opt-gamma', 'opt-theta', 'opt-market-implied-move', 'stock-volume']
-  },
-  {
-    id: 'long-call',
-    name: 'Long Call',
-    description: 'Buy a call option to profit from upward price movement',
-    category: 'Directional',
-    difficulty: 'Beginner',
-    requiredCapital: '$500 - $5,000',
-    timeCommitment: '30 min/week',
-    riskLevel: 'High',
-    marketConditions: ['Bullish'],
-    keyMetrics: ['Delta', 'IV', 'DTE', 'Volume'],
-    requiredFactorTypes: ['options', 'quantitative'],
-    recommendedFactors: ['opt-delta', 'opt-implied-volatility', 'opt-volume', 'stock-price', 'stock-volume']
-  },
-  {
-    id: 'long-put',
-    name: 'Long Put',
-    description: 'Buy a put option to profit from downward price movement',
-    category: 'Directional',
-    difficulty: 'Beginner',
-    requiredCapital: '$500 - $5,000',
-    timeCommitment: '30 min/week',
-    riskLevel: 'High',
-    marketConditions: ['Bearish'],
-    keyMetrics: ['Delta', 'IV', 'DTE', 'Volume'],
-    requiredFactorTypes: ['options', 'quantitative'],
-    recommendedFactors: ['opt-delta', 'opt-implied-volatility', 'opt-volume', 'stock-price', 'stock-volume']
-  },
-];
-
-export class IPSDataService {
-  // Get current user ID
-  private async getCurrentUserId(): Promise<string> {
-    const { data: { user }, error } = await supabase.auth.getUser();
-    if (error || !user) {
-      throw new Error('User not authenticated');
+class IPSDataService {
+  private mockIPSs: IPSConfiguration[] = [
+    {
+      id: 'ips-1',
+      user_id: 'user-123',
+      name: 'Conservative Growth Strategy',
+      description: 'Focus on established companies with steady growth',
+      strategies: ['buy-hold-stocks'], // Uses buy-hold-stocks strategy
+      is_active: true,
+      total_factors: 8,
+      active_factors: 6,
+      total_weight: 100,
+      avg_weight: 16.7,
+      created_at: '2024-01-15T10:30:00Z',
+      last_modified: '2024-01-20',
+      performance: { winRate: 73, avgROI: 12.4, totalTrades: 15 },
+      criteria: { minIV: 30, maxDelta: 0.30, targetROI: 8, maxPositions: 5 }
+    },
+    {
+      id: 'ips-2',
+      user_id: 'user-123',
+      name: 'Put Credit Spread Strategy',
+      description: 'High probability options trades with defined risk',
+      strategies: ['put-credit-spreads'],
+      is_active: true,
+      total_factors: 12,
+      active_factors: 10,
+      total_weight: 100,
+      avg_weight: 10,
+      created_at: '2024-01-18T14:15:00Z',
+      last_modified: '2024-01-25',
+      performance: { winRate: 85, avgROI: 6.2, totalTrades: 28 },
+      criteria: { minIV: 40, maxDelta: 0.25, targetROI: 6, maxPositions: 3 }
     }
-    return user.id;
+  ];
+
+  // Get available trading strategies
+  getAvailableStrategies(): TradingStrategy[] {
+    return TRADING_STRATEGIES;
   }
 
-  // IPS Configuration methods
-  async createIPS(userId: string, ipsData: any): Promise<IPSConfiguration> {
-    const { data, error } = await supabase
-      .from('ips_configurations')
-      .insert({
-        user_id: userId,
-        name: ipsData.name,
-        description: ipsData.description,
-        strategies: ipsData.strategies || [],
-        criteria: ipsData.criteria || {}
-      })
-      .select()
-      .single();
+  // Get factors filtered by strategy with proper qualitative inclusion
+  getFactorsForStrategies(strategyIds: string[]): any {
+    const selectedStrategies = TRADING_STRATEGIES.filter(s => strategyIds.includes(s.id));
+    
+    // Determine which factor types should be shown
+    const requiredTypes = new Set<string>();
+    selectedStrategies.forEach(strategy => {
+      strategy.requiredFactorTypes.forEach(type => requiredTypes.add(type));
+    });
 
-    if (error) {
-      throw new Error(`Failed to create IPS: ${error.message}`);
-    }
+    // Get recommended factors across all selected strategies
+    const recommendedFactors = new Set<string>();
+    selectedStrategies.forEach(strategy => {
+      strategy.recommendedFactors.forEach(factor => recommendedFactors.add(factor));
+    });
 
-    return data;
+    // Filter factors based on required types
+    const availableFactors = ALL_FACTORS.filter(factor => 
+      requiredTypes.has(factor.type)
+    );
+
+    return {
+      availableFactors,
+      recommendedFactors: Array.from(recommendedFactors),
+      requiredTypes: Array.from(requiredTypes)
+    };
   }
 
-  async getAllUserIPSs(userId: string): Promise<IPSConfiguration[]> {
-    const { data, error } = await supabase
-      .from('ips_configurations')
-      .select('*')
-      .eq('user_id', userId)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      throw new Error(`Failed to fetch IPS configurations: ${error.message}`);
-    }
-
-    return data || [];
-  }
-
-  async getActiveIPS(userId: string): Promise<IPSConfiguration | null> {
-    const { data, error } = await supabase
-      .from('ips_configurations')
-      .select('*')
-      .eq('user_id', userId)
-      .eq('is_active', true)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') { // No rows returned
-        return null;
-      }
-      throw new Error(`Failed to fetch active IPS: ${error.message}`);
-    }
-
-    return data;
-  }
-
-  async getIPSById(ipsId: string): Promise<IPSConfiguration | null> {
-    const { data, error } = await supabase
-      .from('ips_configurations')
-      .select('*')
-      .eq('id', ipsId)
-      .single();
-
-    if (error) {
-      if (error.code === 'PGRST116') { // No rows returned
-        return null;
-      }
-      throw new Error(`Failed to fetch IPS: ${error.message}`);
-    }
-
-    return data;
-  }
-
-  async updateIPS(ipsId: string, ipsData: any): Promise<IPSConfiguration> {
-    const { data, error } = await supabase
-      .from('ips_configurations')
-      .update({
-        name: ipsData.name,
-        description: ipsData.description,
-        strategies: ipsData.strategies,
-        criteria: ipsData.criteria
-      })
-      .eq('id', ipsId)
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to update IPS: ${error.message}`);
-    }
-
-    return data;
-  }
-
-  async toggleIPSStatus(ipsId: string): Promise<IPSConfiguration> {
-    // First get current status
-    const current = await this.getIPSById(ipsId);
-    if (!current) {
-      throw new Error('IPS not found');
-    }
-
-    const { data, error } = await supabase
-      .from('ips_configurations')
-      .update({ is_active: !current.is_active })
-      .eq('id', ipsId)
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to toggle IPS status: ${error.message}`);
-    }
-
-    return data;
-  }
-
-  async duplicateIPS(ipsId: string, userId: string): Promise<IPSConfiguration> {
-    const originalIPS = await this.getIPSById(ipsId);
-    if (!originalIPS) {
-      throw new Error('IPS not found');
-    }
-
-    const { data, error } = await supabase
-      .from('ips_configurations')
-      .insert({
-        user_id: userId,
-        name: `${originalIPS.name} (Copy)`,
-        description: originalIPS.description,
-        strategies: originalIPS.strategies,
-        criteria: originalIPS.criteria,
-        is_active: false // Copies start as inactive
-      })
-      .select()
-      .single();
-
-    if (error) {
-      throw new Error(`Failed to duplicate IPS: ${error.message}`);
-    }
-
-    return data;
-  }
-
-  async deleteIPS(ipsId: string): Promise<void> {
-    const { error } = await supabase
-      .from('ips_configurations')
-      .delete()
-      .eq('id', ipsId);
-
-    if (error) {
-      throw new Error(`Failed to delete IPS: ${error.message}`);
-    }
-  }
-
-  // Factor configuration methods
-  async saveFactorConfigurations(ipsId: string, factorConfigs: any[]): Promise<void> {
-    // First delete existing configurations
-    const { error: deleteError } = await supabase
-      .from('ips_factor_configurations')
-      .delete()
-      .eq('ips_id', ipsId);
-
-    if (deleteError) {
-      throw new Error(`Failed to clear existing factor configurations: ${deleteError.message}`);
-    }
-
-    // Insert new configurations
-    if (factorConfigs.length > 0) {
-      const configsToInsert = factorConfigs.map(config => ({
-        ips_id: ipsId,
-        factor_id: config.factorId,
-        factor_name: config.factorName || config.factorId,
-        weight: config.weight,
-        enabled: config.enabled,
-        target_config: config.targetConfig || {}
-      }));
-
-      const { error: insertError } = await supabase
-        .from('ips_factor_configurations')
-        .insert(configsToInsert);
-
-      if (insertError) {
-        throw new Error(`Failed to save factor configurations: ${insertError.message}`);
-      }
-    }
-
-    // Update IPS stats
-    await this.updateIPSFactorStats(ipsId, factorConfigs);
-  }
-
-  async getFactorConfigurations(ipsId: string): Promise<IPSFactorConfiguration[]> {
-    const { data, error } = await supabase
-      .from('ips_factor_configurations')
-      .select('*')
-      .eq('ips_id', ipsId)
-      .order('created_at', { ascending: true });
-
-    if (error) {
-      throw new Error(`Failed to fetch factor configurations: ${error.message}`);
-    }
-
-    return data || [];
-  }
-
-  private async updateIPSFactorStats(ipsId: string, factorConfigs: any[]): Promise<void> {
-    const totalFactors = factorConfigs.length;
-    const activeFactors = factorConfigs.filter(config => config.enabled).length;
-    const totalWeight = factorConfigs.reduce((sum, config) => sum + (config.enabled ? config.weight : 0), 0);
-    const avgWeight = activeFactors > 0 ? totalWeight / activeFactors : 0;
-
-    const { error } = await supabase
-      .from('ips_configurations')
-      .update({
-        total_factors: totalFactors,
-        active_factors: activeFactors,
-        total_weight: totalWeight,
-        avg_weight: avgWeight
-      })
-      .eq('id', ipsId);
-
-    if (error) {
-      console.error('Failed to update IPS factor stats:', error);
-    }
-  }
-
-  // Performance tracking
-  async updateIPSPerformance(ipsId: string, performance: any): Promise<void> {
-    const { error } = await supabase
-      .from('ips_configurations')
-      .update({ performance })
-      .eq('id', ipsId);
-
-    if (error) {
-      throw new Error(`Failed to update IPS performance: ${error.message}`);
-    }
-  }
-
-  // Factor and strategy data methods
-  getAvailableFactors(): any[] {
+  // Get all factors (for reference)
+  getAllFactors() {
     return ALL_FACTORS;
   }
 
-  getAvailableStrategies(): TradingStrategy[] {
-    return AVAILABLE_STRATEGIES;
+  // Get factors by type
+  getFactorsByType(type: 'quantitative' | 'qualitative' | 'options') {
+    return ALL_FACTORS.filter(factor => factor.type === type);
   }
 
-  getFactorsForStrategies(strategies: string[]): { raw: any[], grouped: any } {
-    // For now, return all factors. In a real implementation, you might filter based on strategies
-    const matchingFactors = ALL_FACTORS;
-    
-    const grouped = matchingFactors.reduce((acc: any, factor) => {
-      if (!acc[factor.type]) acc[factor.type] = {};
-      if (!acc[factor.type][factor.category]) acc[factor.type][factor.category] = [];
-      acc[factor.type][factor.category].push(factor);
-      return acc;
-    }, {});
+  // CRUD operations for IPS configurations
+  async getAllUserIPSs(userId: string): Promise<IPSConfiguration[]> {
+    return this.mockIPSs.filter(ips => ips.user_id === userId);
+  }
 
-    return {
-      raw: matchingFactors,
-      grouped
+  async getIPSById(ipsId: string): Promise<IPSConfiguration | null> {
+    return this.mockIPSs.find(ips => ips.id === ipsId) || null;
+  }
+
+  async createIPS(ipsData: Partial<IPSConfiguration>): Promise<IPSConfiguration> {
+    const newIPS: IPSConfiguration = {
+      id: `ips-${Date.now()}`,
+      user_id: ipsData.user_id || 'user-123',
+      name: ipsData.name || 'Untitled Strategy',
+      description: ipsData.description,
+      strategies: ipsData.strategies || [],
+      is_active: ipsData.is_active ?? true,
+      created_at: new Date().toISOString(),
+      ...ipsData
+    } as IPSConfiguration;
+
+    this.mockIPSs.push(newIPS);
+    return newIPS;
+  }
+
+  async updateIPS(ipsId: string, updates: Partial<IPSConfiguration>): Promise<IPSConfiguration | null> {
+    const index = this.mockIPSs.findIndex(ips => ips.id === ipsId);
+    if (index === -1) return null;
+
+    this.mockIPSs[index] = {
+      ...this.mockIPSs[index],
+      ...updates,
+      last_modified: new Date().toISOString()
     };
+
+    return this.mockIPSs[index];
+  }
+
+  async deleteIPS(ipsId: string): Promise<boolean> {
+    const index = this.mockIPSs.findIndex(ips => ips.id === ipsId);
+    if (index === -1) return false;
+
+    this.mockIPSs.splice(index, 1);
+    return true;
+  }
+
+  async toggleIPSStatus(ipsId: string): Promise<IPSConfiguration | null> {
+    const ips = this.mockIPSs.find(ips => ips.id === ipsId);
+    if (!ips) return null;
+
+    ips.is_active = !ips.is_active;
+    ips.last_modified = new Date().toISOString();
+    return ips;
   }
 }
 
-// Singleton instance
+// Export singleton instance
 export const ipsDataService = new IPSDataService();
+export type { IPSConfiguration, TradingStrategy };
+export { TRADING_STRATEGIES, ALL_FACTORS };
