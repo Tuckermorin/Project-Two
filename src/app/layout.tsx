@@ -19,9 +19,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
-        {children}
-        <Toaster />
+      <body className={inter.className}>
+        <MarketDataProvider>
+          <Navigation />
+          {children}
+          <Toaster />
+        </MarketDataProvider>
       </body>
     </html>
   )
