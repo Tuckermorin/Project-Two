@@ -3,19 +3,37 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { TrendingUp, TrendingDown, Activity, DollarSign, FileText, Eye, Target } from 'lucide-react'
+import { TrendingUp, TrendingDown, Activity, DollarSign, FileText, Eye, Target, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
 import ExcelStyleTradesDashboard from '@/components/dashboard/excel-style-trades-dashboard'
 import HistoricTradesDashboard from '@/components/dashboard/historic-trades-dashboard'
 import { IPSPerformanceTracker } from '@/components/ips/ips-performance-tracker'
 
-// Compact Market Overview
+// Compact Market Overview Component
 function CompactMarketOverview() {
-  const marketData = [
-    { name: 'DOW', value: '43,250', change: '+0.85%', isPositive: true },
-    { name: 'S&P', value: '5,825', change: '+0.42%', isPositive: true },
-    { name: 'NASDAQ', value: '18,946', change: '-0.23%', isPositive: false }
-  ]
+  // TODO: Replace with actual market data from API
+  const marketData: Array<{
+    name: string;
+    value: string;
+    change: string;
+    isPositive: boolean;
+  }> = []
+
+  if (marketData.length === 0) {
+    return (
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Market Overview</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-4 text-gray-500">
+            <AlertCircle className="h-8 w-8 mx-auto mb-2 text-gray-400" />
+            <p className="text-sm">No market data available</p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card>
@@ -41,7 +59,7 @@ function CompactMarketOverview() {
   )
 }
 
-// Simplified Quick Start
+// Simplified Quick Start Component
 interface SimplifiedQuickStartProps {
   hasIPS: boolean
   watchlistCount: number
@@ -55,21 +73,21 @@ function SimplifiedQuickStart({ hasIPS = false, watchlistCount = 0, tradeCount =
       href: "/ips",
       icon: FileText,
       completed: hasIPS,
-      description: "Define your trading criteria and risk parameters"
+      description: hasIPS ? "IPS configured" : "Set up your trading criteria"
     },
     {
       title: "Watchlist",
       href: "/watchlist", 
       icon: Eye,
       completed: watchlistCount > 0,
-      description: `${watchlistCount} stocks being monitored`
+      description: watchlistCount > 0 ? `${watchlistCount} stocks monitored` : "Add stocks to monitor"
     },
     {
       title: "Trading",
       href: "/trades",
       icon: TrendingUp,
       completed: tradeCount > 0,
-      description: `${tradeCount} trades in history`
+      description: tradeCount > 0 ? `${tradeCount} trades recorded` : "Start paper trading"
     }
   ]
 
@@ -92,7 +110,9 @@ function SimplifiedQuickStart({ hasIPS = false, watchlistCount = 0, tradeCount =
                   </div>
                 </div>
                 <Button asChild variant="outline" size="sm">
-                  <Link href={step.href}>Edit</Link>
+                  <Link href={step.href}>
+                    {step.completed ? 'View' : 'Start'}
+                  </Link>
                 </Button>
               </div>
             )
@@ -105,15 +125,16 @@ function SimplifiedQuickStart({ hasIPS = false, watchlistCount = 0, tradeCount =
 
 // Main Dashboard Component
 export default function Dashboard() {
-  // Sample data - this would come from your state management
+  // TODO: Replace with actual data from your state management or API
+  // These should come from your authentication context, database, or state management
   const dashboardData = {
-    activeTrades: 5,
-    totalPL: 375.00,
-    winRate: 72.5,
-    ipsScore: 79,
-    hasIPS: true,
-    watchlistCount: 12,
-    tradeCount: 23
+    activeTrades: 0,
+    totalPL: 0,
+    winRate: 0,
+    ipsScore: 0,
+    hasIPS: false,
+    watchlistCount: 0,
+    tradeCount: 0
   }
 
   return (
@@ -126,10 +147,10 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Main Content: Current and Historic Trades */}
         <div className="lg:col-span-3 space-y-8">
-          {/* Current Trades */}
+          {/* Current Trades Component */}
           <ExcelStyleTradesDashboard />
           
-          {/* Historic Trades */}
+          {/* Historic Trades Component */}
           <HistoricTradesDashboard />
         </div>
 
@@ -141,6 +162,7 @@ export default function Dashboard() {
           {/* IPS Performance Tracker */}
           <IPSPerformanceTracker 
             hasActiveIPS={dashboardData.hasIPS}
+            // performanceData prop is optional, component will show empty state if not provided
           />
           
           {/* Simplified Quick Start */}
