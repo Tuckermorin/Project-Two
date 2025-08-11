@@ -1,7 +1,7 @@
 // src/lib/services/market-data-service.ts
 
 import { getAlphaVantageClient, type FundamentalData } from '@/lib/api/alpha-vantage';
-import { getTradierClient, type OptionContract, type StockQuote } from '@/lib/api/tradier';
+import { getTradierClient, type StockQuote } from '@/lib/api/tradier';
 import { createClient } from '@supabase/supabase-js';
 
 // Unified data types for our application
@@ -109,28 +109,49 @@ class MarketDataService {
     setInterval(() => this.cleanupCache(), 60 * 60 * 1000);
   }
 
+  // Calculate milliseconds until the next day for daily cache invalidation
+  private getDailyTTL(): number {
+    const now = new Date();
+    const tomorrow = new Date(now);
+    tomorrow.setHours(0, 0, 0, 0);
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    return tomorrow.getTime() - now.getTime();
+  }
+
   /**
    * Get unified stock data combining Alpha Vantage fundamentals with Tradier quotes
    */
-  async getUnifiedStockData(symbol: string, includeFundamentals = true): Promise<UnifiedStockData> {
+  async getUnifiedStockData(
+    symbol: string,
+    includeFundamentals = true,
+    forceRefresh = false
+  ): Promise<UnifiedStockData> {
     console.log(`Getting unified stock data for ${symbol}`);
-    
-    // Get real-time quote from Tradier
-    const quote = await this.tradier.getQuote(symbol);
-    
+
+    const quoteCacheKey = `quote_${symbol}`;
+    let quote: StockQuote | null = null;
+
+    if (!forceRefresh) {
+      quote = this.getFromCache<StockQuote>(quoteCacheKey);
+    }
+
+    if (!quote) {
+      quote = await this.tradier.getQuote(symbol);
+      this.setCache(quoteCacheKey, quote, this.getDailyTTL());
+    }
+
     let fundamentals;
     if (includeFundamentals) {
-      // Check cache first for fundamentals (24 hour TTL)
       const cacheKey = `fundamentals_${symbol}`;
-      const cached = this.getFromCache(cacheKey, 24 * 60 * 60 * 1000); // 24 hours
-      
+      const cached = !forceRefresh ? this.getFromCache(cacheKey) : null;
+
       if (cached) {
         fundamentals = cached;
       } else {
         try {
           const fundamentalData = await this.alphaVantage.getCompleteFundamentalData(symbol);
           fundamentals = this.extractFundamentals(fundamentalData);
-          this.setCache(cacheKey, fundamentals, 24 * 60 * 60 * 1000);
+          this.setCache(cacheKey, fundamentals, this.getDailyTTL());
         } catch (error) {
           console.warn(`Failed to fetch fundamentals for ${symbol}:`, error);
         }
@@ -161,15 +182,22 @@ class MarketDataService {
     symbol: string,
     strike: number,
     expiration: string,
-    optionType: 'call' | 'put'
+    optionType: 'call' | 'put',
+    forceRefresh = false
   ): Promise<UnifiedOptionsData | null> {
     console.log(`Getting options data for ${symbol} ${strike}${optionType.charAt(0).toUpperCase()} ${expiration}`);
-    
+
+    const cacheKey = `option_${symbol}_${strike}_${expiration}_${optionType}`;
+    if (!forceRefresh) {
+      const cached = this.getFromCache<UnifiedOptionsData>(cacheKey);
+      if (cached) return cached;
+    }
+
     try {
       const optionsChain = await this.tradier.getOptionsChain(symbol, expiration, true);
-      
-      const option = optionsChain.find(opt => 
-        opt.strike === strike && 
+
+      const option = optionsChain.find(opt =>
+        opt.strike === strike &&
         opt.option_type === optionType
       );
 
@@ -178,7 +206,7 @@ class MarketDataService {
         return null;
       }
 
-      return {
+      const data: UnifiedOptionsData = {
         symbol: option.symbol,
         underlying: option.underlying,
         strike: option.strike,
@@ -199,6 +227,9 @@ class MarketDataService {
         } : undefined,
         lastUpdated: new Date()
       };
+
+      this.setCache(cacheKey, data, this.getDailyTTL());
+      return data;
     } catch (error) {
       console.error(`Error fetching options data:`, error);
       return null;
@@ -250,6 +281,9 @@ class MarketDataService {
 
         if (updateError) {
           console.error(`Failed to update ${quote.symbol}:`, updateError);
+        } else {
+          // Store latest quote in cache so UI refreshes don't trigger new calls
+          this.setCache(`quote_${quote.symbol}`, quote, this.getDailyTTL());
         }
       }
 
@@ -335,7 +369,7 @@ class MarketDataService {
     trade: any, 
     snapshotType: 'market_open' | 'midday' | 'market_close'
   ): Promise<TradeSnapshot> {
-    const stockData = await this.getUnifiedStockData(trade.symbol, false);
+    const stockData = await this.getUnifiedStockData(trade.symbol, false, true);
     
     let optionsData: UnifiedOptionsData | null = null;
     let premium = 0;
@@ -348,7 +382,8 @@ class MarketDataService {
         trade.symbol,
         trade.shortStrike,
         trade.expirationDate,
-        'put'
+        'put',
+        true
       );
       
       if (optionsData) {
@@ -362,7 +397,8 @@ class MarketDataService {
         trade.symbol,
         trade.callStrike,
         trade.expirationDate,
-        'call'
+        'call',
+        true
       );
       
       if (optionsData) {
@@ -444,15 +480,15 @@ class MarketDataService {
   }
 
   // Cache management
-  private getFromCache<T>(key: string, ttl: number): T | null {
+  private getFromCache<T>(key: string): T | null {
     const cached = this.cache.get(key);
     if (!cached) return null;
-    
-    if (Date.now() - cached.timestamp.getTime() > ttl) {
+
+    if (Date.now() - cached.timestamp.getTime() > cached.ttl) {
       this.cache.delete(key);
       return null;
     }
-    
+
     return cached.data as T;
   }
 
