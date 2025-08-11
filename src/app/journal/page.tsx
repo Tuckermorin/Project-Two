@@ -18,15 +18,7 @@ interface JournalEntry {
 
 export default function JournalPage() {
   // TODO: This will come from a store later
-  const [entries, setEntries] = useState<JournalEntry[]>([
-    {
-      id: '1',
-      title: 'Week of Jan 15, 2025 - First Week Trading',
-      content: 'Started with PCS on AAPL. IV was high at 45%. Learned that managing trades early is crucial - closed at 75% profit instead of holding to expiration. Market was choppy but stayed disciplined with my IPS criteria.',
-      weekOf: '2025-01-15',
-      createdAt: '2025-01-15T10:00:00Z'
-    }
-  ])
+  const [entries, setEntries] = useState<JournalEntry[]>([])
   
   const [showForm, setShowForm] = useState(false)
   const [editingEntry, setEditingEntry] = useState<JournalEntry | null>(null)
