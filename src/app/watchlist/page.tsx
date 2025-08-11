@@ -7,27 +7,20 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Eye, Plus, Search, Trash2, TrendingUp } from 'lucide-react'
 
+interface Stock {
+  id: string
+  symbol: string
+  companyName?: string
+  sector?: string
+  notes?: string
+  currentPrice?: number
+  week52High?: number
+  week52Low?: number
+}
+
 export default function WatchlistPage() {
-  // TODO: This will come from a store later
-  const [stocks, setStocks] = useState([
-    {
-      id: '1',
-      symbol: 'AAPL',
-      companyName: 'Apple Inc.',
-      sector: 'Technology',
-      currentPrice: 195.50,
-      notes: 'Strong earnings, waiting for pullback'
-    },
-    {
-      id: '2',
-      symbol: 'TSLA',
-      companyName: 'Tesla, Inc.',
-      sector: 'Automotive',
-      currentPrice: 248.75,
-      notes: 'High IV, good for PCS opportunities'
-    }
-  ])
-  
+  const [stocks, setStocks] = useState<Stock[]>([])
+
   const [showAddForm, setShowAddForm] = useState(false)
   const [newStock, setNewStock] = useState({
     symbol: '',
@@ -36,19 +29,34 @@ export default function WatchlistPage() {
     notes: ''
   })
 
-  const handleAddStock = () => {
+  const handleAddStock = async () => {
     if (!newStock.symbol) return
-    
-    const stock = {
-      id: Date.now().toString(),
-      ...newStock,
-      symbol: newStock.symbol.toUpperCase(),
-      currentPrice: 0, // TODO: Fetch real price later
+
+    try {
+      const response = await fetch(`/api/market-data/quotes?symbols=${newStock.symbol}`)
+      if (!response.ok) {
+        throw new Error('Failed to fetch stock data')
+      }
+      const result = await response.json()
+      const quote = result.data?.[0]
+
+      const stock: Stock = {
+        id: Date.now().toString(),
+        symbol: newStock.symbol.toUpperCase(),
+        companyName: newStock.companyName,
+        sector: newStock.sector,
+        notes: newStock.notes,
+        currentPrice: quote?.currentPrice,
+        week52High: quote?.week52High,
+        week52Low: quote?.week52Low,
+      }
+
+      setStocks([...stocks, stock])
+      setNewStock({ symbol: '', companyName: '', sector: '', notes: '' })
+      setShowAddForm(false)
+    } catch (error) {
+      console.error('Error adding stock:', error)
     }
-    
-    setStocks([...stocks, stock])
-    setNewStock({ symbol: '', companyName: '', sector: '', notes: '' })
-    setShowAddForm(false)
   }
 
   const handleRemoveStock = (id: string) => {
@@ -62,7 +70,7 @@ export default function WatchlistPage() {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Watchlist</h1>
             <p className="text-gray-600 mt-2">
-              Track stocks you're monitoring for trading opportunities
+              Track stocks you&apos;re monitoring for trading opportunities
             </p>
           </div>
           <Button onClick={() => setShowAddForm(!showAddForm)}>
@@ -179,6 +187,15 @@ export default function WatchlistPage() {
                   <p className="text-sm text-gray-600">Current Price</p>
                   <p className="text-2xl font-bold text-gray-900">
                     {stock.currentPrice > 0 ? `$${stock.currentPrice.toFixed(2)}` : 'N/A'}
+                  </p>
+                </div>
+
+                <div className="mb-4">
+                  <p className="text-sm text-gray-600">52-Week Range</p>
+                  <p className="text-sm text-gray-800">
+                    {stock.week52High && stock.week52Low
+                      ? `$${stock.week52Low.toFixed(2)} - $${stock.week52High.toFixed(2)}`
+                      : 'N/A'}
                   </p>
                 </div>
 

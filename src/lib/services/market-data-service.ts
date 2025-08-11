@@ -16,6 +16,8 @@ interface UnifiedStockData {
   marketCap?: number;
   beta?: number;
   peRatio?: number;
+  week52High?: number;
+  week52Low?: number;
   lastUpdated: Date;
   
   // Fundamental metrics (from Alpha Vantage)
@@ -143,6 +145,8 @@ class MarketDataService {
       priceChangePercent: quote.change_percentage,
       volume: quote.volume,
       avgVolume: quote.average_volume,
+      week52High: quote.week_52_high,
+      week52Low: quote.week_52_low,
       beta: fundamentals?.beta,
       peRatio: fundamentals?.peRatio,
       lastUpdated: new Date(),
