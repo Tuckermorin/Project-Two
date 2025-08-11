@@ -8,56 +8,7 @@ import Link from 'next/link'
 import ExcelStyleTradesDashboard from '@/components/dashboard/excel-style-trades-dashboard'
 import HistoricTradesDashboard from '@/components/dashboard/historic-trades-dashboard'
 import { IPSPerformanceTracker } from '@/components/ips/ips-performance-tracker'
-
-// Compact Market Overview Component
-function CompactMarketOverview() {
-  // TODO: Replace with actual market data from API
-  const marketData: Array<{
-    name: string;
-    value: string;
-    change: string;
-    isPositive: boolean;
-  }> = []
-
-  if (marketData.length === 0) {
-    return (
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base">Market Overview</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-center py-4 text-gray-500">
-            <AlertCircle className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-            <p className="text-sm">No market data available</p>
-          </div>
-        </CardContent>
-      </Card>
-    )
-  }
-
-  return (
-    <Card>
-      <CardHeader className="pb-3">
-        <CardTitle className="text-base">Market Overview</CardTitle>
-      </CardHeader>
-      <CardContent>
-        <div className="space-y-2">
-          {marketData.map((market) => (
-            <div key={market.name} className="flex items-center justify-between">
-              <span className="text-sm font-medium">{market.name}</span>
-              <div className="text-right">
-                <div className="text-sm font-bold">{market.value}</div>
-                <div className={`text-xs ${market.isPositive ? 'text-green-600' : 'text-red-600'}`}>
-                  {market.change}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </CardContent>
-    </Card>
-  )
-}
+import { MarketOverview } from '@/components/dashboard/market-overview'
 
 // Simplified Quick Start Component
 interface SimplifiedQuickStartProps {
@@ -156,8 +107,8 @@ export default function Dashboard() {
 
         {/* Right Sidebar: Compact components */}
         <div className="space-y-6">
-          {/* Compact Market Overview */}
-          <CompactMarketOverview />
+          {/* Market Overview with real Alpha Vantage data */}
+          <MarketOverview />
           
           {/* IPS Performance Tracker */}
           <IPSPerformanceTracker 
