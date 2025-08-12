@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AlertCircle, TrendingUp, TrendingDown, RefreshCw, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { getMarketDataService } from '@/lib/services/market-data-service';
 
 interface MarketIndex {
   symbol: string
@@ -14,7 +15,7 @@ interface MarketIndex {
   change: string
   changePercent: string
   isPositive: boolean
-  lastUpdated?: string
+  lastUpdated: string
 }
 
 interface MarketOverviewProps {
@@ -34,79 +35,105 @@ export function MarketOverview({ apiKey }: MarketOverviewProps) {
   const indexETFs = [
     { symbol: 'DIA', name: 'DIA (DOW)', description: 'Dow Jones Industrial Average' },
     { symbol: 'SPY', name: 'SPY (S&P 500)', description: 'S&P 500 Index' },
-    { symbol: 'QQQ', name: 'QQQ (NASDAQ)', description: 'NASDAQ-100 Index' }
+    { symbol: 'QQQ', name: 'QQQ (NASDAQ)', description: 'NASDAQ-100 Index' },
+    { symbol: 'VIX', name: 'Volatility Idx', description: 'Volatility Index' }
   ]
 
   const fetchMarketData = async () => {
-    if (!alphaVantageKey || alphaVantageKey === 'your-alpha-vantage-key-here') {
-      setError('Alpha Vantage API key not configured')
-      setIsLoading(false)
-      return
-    }
-
-    setIsLoading(true)
-    setError(null)
-
     try {
-      const promises = indexETFs.map(async (index) => {
-        const response = await fetch(
-          `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${index.symbol}&apikey=${alphaVantageKey}`
-        )
-
-        if (!response.ok) {
-          throw new Error(`Failed to fetch ${index.symbol}`)
+      setIsLoading(true);
+      setError(null);
+      const marketDataService = getMarketDataService();
+      
+      const symbols = ['DIA', 'SPY', 'QQQ', 'VIX']; // Use the symbols from your indexETFs
+      const promises = symbols.map(async (symbol) => {
+        try {
+          const data = await marketDataService.getUnifiedStockData(symbol, false);
+          return { symbol, data, error: null };
+        } catch (error) {
+          console.error(`Error fetching data for ${symbol}:`, error);
+          return { 
+            symbol, 
+            data: null, 
+            error: error instanceof Error ? error.message : 'Unknown error' 
+          };
         }
-
-        const data = await response.json()
-
-        // Check for API errors
-        if (data['Error Message']) {
-          throw new Error(data['Error Message'])
-        }
-
-        if (data['Note']) {
-          // API rate limit message
-          throw new Error('API rate limit reached. Please wait a minute and try again.')
-        }
-
-        const quote = data['Global Quote']
+      });
+      
+      const results = await Promise.allSettled(promises);
+    
+// Transform the data to match MarketIndex interface
+    const transformedData: MarketIndex[] = results
+      .map((result, index) => {
+        const symbol = symbols[index];
         
-        if (!quote || Object.keys(quote).length === 0) {
-          throw new Error(`No data available for ${index.symbol}`)
-        }
-
-        const price = parseFloat(quote['05. price'])
-        const change = parseFloat(quote['09. change'])
-        const changePercent = quote['10. change percent'].replace('%', '')
-        const isPositive = change >= 0
-
-        return {
-          symbol: index.symbol,
-          name: index.name,
-          price: price.toFixed(2),
-          change: `${isPositive ? '+' : ''}${change.toFixed(2)}`,
-          changePercent: `${isPositive ? '+' : ''}${parseFloat(changePercent).toFixed(2)}%`,
-          isPositive,
-          lastUpdated: quote['07. latest trading day']
+        if (result.status === 'fulfilled') {
+          if (result.value.error || !result.value.data) {
+            console.warn(`Failed to fetch ${symbol}:`, result.value.error);
+            // Return fallback data that matches MarketIndex interface
+            return {
+              symbol,
+              name: getIndexName(symbol),
+              price: '$0.00',
+              change: '$0.00',
+              changePercent: '0.00%',
+              isPositive: false,
+              lastUpdated: new Date().toISOString()
+            };
+          }
+          
+          // Transform UnifiedStockData to MarketIndex
+          const data = result.value.data;
+          const isPositive = data.priceChange >= 0;
+          
+          return {
+            symbol: data.symbol,
+            name: getIndexName(data.symbol),
+            price: `$${data.currentPrice.toFixed(2)}`,
+            change: `${isPositive ? '+' : ''}$${data.priceChange.toFixed(2)}`,
+            changePercent: `${isPositive ? '+' : ''}${data.priceChangePercent.toFixed(2)}%`,
+            isPositive,
+            lastUpdated: data.lastUpdated.toISOString()
+          };
+        } else {
+          console.error(`Promise rejected for ${symbol}:`, result.reason);
+          // Return fallback data
+          return {
+            symbol,
+            name: getIndexName(symbol),
+            price: '$0.00',
+            change: '$0.00',
+            changePercent: '0.00%',
+            isPositive: false,
+            lastUpdated: new Date().toISOString()
+          };
         }
       })
-
-      const results = await Promise.all(promises)
-      setMarketData(results)
-      setLastRefresh(new Date())
-      setError(null)
-    } catch (err) {
-      console.error('Error fetching market data:', err)
-      setError(err instanceof Error ? err.message : 'Failed to fetch market data')
-      
-      // If we have cached data, keep showing it
-      if (marketData.length === 0) {
-        setMarketData([])
-      }
-    } finally {
-      setIsLoading(false)
-    }
+      .filter((item): item is MarketIndex => item !== null && item !== undefined);
+    
+    setMarketData(transformedData);
+    setLastRefresh(new Date());
+    
+  } catch (error) {
+    console.error('Error in fetchMarketData:', error);
+    setError(error instanceof Error ? error.message : 'Unknown error occurred');
+    setMarketData([]);
+  } finally {
+    setIsLoading(false);
   }
+};
+
+// Helper function to get index names - update to match your indexETFs
+const getIndexName = (symbol: string): string => {
+  const nameMap: Record<string, string> = {
+    'DIA': 'DIA (DOW)',
+    'SPY': 'SPY (S&P 500)',
+    'QQQ': 'QQQ (NASDAQ)',
+    'VIX': 'Volatility Idx',
+    // Add more as needed
+  };
+  return nameMap[symbol] || symbol;
+};
 
   // Fetch data on component mount
   useEffect(() => {

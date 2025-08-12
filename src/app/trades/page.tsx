@@ -1,694 +1,1143 @@
-"use client"
+// src/app/trades/page.tsx
+"use client";
 
-import { useState, useEffect } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { TrendingUp, Plus, List, Eye, Filter, ArrowLeft, Target, BarChart3, Layers, FileText } from 'lucide-react'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Textarea } from '@/components/ui/textarea'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
+import {
+  TrendingUp,
+  Plus,
+  List,
+  ArrowLeft,
+  Target,
+  BarChart3,
+  FileText,
+  CheckCircle,
+  AlertCircle,
+  Database,
+  Users,
+  DollarSign,
+  Calculator,
+  RefreshCw,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
 
-// Import services
-import { ipsDataService, type IPSConfiguration, type TradingStrategy } from '@/lib/services/ips-data-service'
+// Import existing services
+import { ipsDataService, type IPSConfiguration, ALL_FACTORS } from "@/lib/services/ips-data-service";
 
 // Types
 interface TradeFormData {
-  strategy: string
-  symbol: string
-  quantity: number
-  expiration: string
-  notes: string
-  [key: string]: string | number // Allow dynamic factor fields
+  name: string;
+  symbol: string;
+  currentPrice: number;
+  expirationDate: string;
+  contractType: string;
+  numberOfContracts: number;
+  shortStrike: number;
+  longStrike: number;
+  creditReceived: number;
+  ipsFactors: Record<string, any>;
+  apiFactors: Record<string, any>;
 }
 
-interface ScoreBadgeConfig {
-  color: string
-  text: string
-}
-
-type ViewType = "selection" | "manual" | "potential" | "active"
-type OptionType = "watchlist" | "smart-filter" | "manual"
+type ViewType = "selection" | "entry" | "prospective" | "active";
 
 export default function TradesPage() {
-  const [currentView, setCurrentView] = useState<ViewType>("selection")
-  const [selectedIPS, setSelectedIPS] = useState<string>("")
-  const [tradeFormData, setTradeFormData] = useState<TradeFormData>({
-    strategy: '',
-    symbol: '',
-    quantity: 1,
-    expiration: '',
-    notes: ''
-  })
-  const [calculatedScore, setCalculatedScore] = useState<number | null>(null)
-  const [showSuccess, setShowSuccess] = useState<boolean>(false)
-  
-  // Real IPS data instead of mock
-  const [activeIPSs, setActiveIPSs] = useState<IPSConfiguration[]>([])
-  const [availableStrategies, setAvailableStrategies] = useState<TradingStrategy[]>([])
-  const [selectedIPSData, setSelectedIPSData] = useState<IPSConfiguration | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  
-  const router = useRouter()
-  const userId = 'user-123' // Replace with actual user ID from auth
+  const [currentView, setCurrentView] = useState<ViewType>("selection");
+  const [selectedIPS, setSelectedIPS] = useState<IPSConfiguration | null>(null);
+  const [activeIPSs, setActiveIPSs] = useState<IPSConfiguration[]>([]);
+  const [calculatedScore, setCalculatedScore] = useState<number | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Load real IPS data on component mount
+  const userId = 'user-123'; // Replace with actual user ID from auth
+
+  // Load IPS configurations on mount
   useEffect(() => {
     const loadIPSData = async () => {
       try {
-        setIsLoading(true)
-        const [userIPSs, strategies] = await Promise.all([
-          ipsDataService.getAllUserIPSs(userId),
-          Promise.resolve(ipsDataService.getAvailableStrategies())
-        ])
-        
-        // Filter to only active IPSs for trade selection
-        const activeOnly = userIPSs.filter(ips => ips.is_active)
-        setActiveIPSs(activeOnly)
-        setAvailableStrategies(strategies)
-        
+        setIsLoading(true);
+        const userIPSs = await ipsDataService.getAllUserIPSs(userId);
+        const activeOnly = userIPSs.filter(ips => ips.is_active);
+        setActiveIPSs(activeOnly);
       } catch (error) {
-        console.error('Error loading IPS data:', error)
+        console.error('Error loading IPS data:', error);
       } finally {
-        setIsLoading(false)
+        setIsLoading(false);
       }
-    }
+    };
 
-    loadIPSData()
-  }, [userId])
+    loadIPSData();
+  }, [userId]);
 
-  const handleOptionSelect = (option: OptionType): void => {
-    if (option === 'watchlist') {
-      alert('Watchlist feature coming soon!')
-    } else if (option === 'smart-filter') {
-      alert('IPS Smart Filter feature coming soon!')
-    } else if (option === 'manual') {
-      setCurrentView('manual')
-    }
-  }
+  const handleIPSSelection = (ips: IPSConfiguration) => {
+    setSelectedIPS(ips);
+    setCurrentView("entry");
+    setCalculatedScore(null);
+  };
 
-  const handleIPSSelection = (ipsId: string): void => {
-    setSelectedIPS(ipsId)
-    const ipsData = activeIPSs.find(ips => ips.id === ipsId)
-    setSelectedIPSData(ipsData || null)
-    
-    if (ipsData) {
-      // Reset form and prepare dynamic fields based on IPS strategies
-      const newFormData: TradeFormData = {
-        strategy: '',
-        symbol: '',
-        quantity: 1,
-        expiration: '',
-        notes: ''
-      }
+  const handleTradeSubmit = async (formData: TradeFormData) => {
+    try {
+      setIsLoading(true);
+
+      // In a real implementation, you'd save to your database
+      // For now, just simulate the save
+      const tradeId = `trade-${Date.now()}`;
       
-      // Set default strategy if IPS has only one strategy
-      if (ipsData.strategies?.length === 1) {
-        const strategy = availableStrategies.find(s => s.id === ipsData.strategies![0])
-        newFormData.strategy = strategy?.name || ''
-      }
-      
-      setTradeFormData(newFormData)
-      setCalculatedScore(null)
-    }
-  }
+      console.log('Saving trade:', {
+        tradeId,
+        ipsId: selectedIPS?.id,
+        formData,
+        timestamp: new Date().toISOString()
+      });
 
-  const calculateScore = async (): Promise<void> => {
-    if (!selectedIPSData) return
+      // Simulate API delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      alert('Trade saved to prospective trades!');
+      setCurrentView("prospective");
+      
+    } catch (error) {
+      console.error("Error submitting trade:", error);
+      alert("Error saving trade. Please try again.");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleCalculateScore = async (formData: TradeFormData) => {
+    if (!selectedIPS) return;
     
     try {
-      // Here we'll eventually integrate with the real scoring engine
-      // For now, using a mock calculation
-      const baseScore = 60
-      const randomVariation = Math.floor(Math.random() * 30)
-      const score = Math.min(100, baseScore + randomVariation)
+      setIsLoading(true);
+
+      // Combine all factor values
+      const allFactors = {
+        ...formData.apiFactors,
+        ...formData.ipsFactors,
+      };
+
+      // Simple scoring algorithm (you can replace with your actual scoring logic)
+      const factorValues = Object.values(allFactors).filter(v => v !== undefined && v !== '');
+      const factorCount = Object.keys(allFactors).length;
       
-      setCalculatedScore(score)
+      if (factorValues.length === 0) {
+        throw new Error('No factor values available for scoring');
+      }
+
+      // Simulate score calculation delay
+      await new Promise(resolve => setTimeout(resolve, 1500));
+      
+      // Basic scoring: normalize qualitative factors (1-5) and quantitative factors
+      const normalizedScores = factorValues.map(value => {
+        if (typeof value === 'number') {
+          if (value >= 1 && value <= 5) {
+            // Qualitative factor (1-5 scale) -> convert to 0-100
+            return (value - 1) * 25;
+          } else {
+            // Quantitative factor - apply basic normalization
+            return Math.min(100, Math.max(0, value * 2 + 50));
+          }
+        }
+        return 50; // Default for non-numeric
+      });
+
+      const averageScore = normalizedScores.reduce((sum, score) => sum + score, 0) / normalizedScores.length;
+      
+      // Add some randomization to make it realistic
+      const finalScore = Math.min(100, Math.max(0, averageScore + (Math.random() - 0.5) * 10));
+      
+      setCalculatedScore(finalScore);
+      
     } catch (error) {
-      console.error('Error calculating trade score:', error)
+      console.error("Error calculating score:", error);
+      alert("Error calculating IPS score. Please try again.");
+    } finally {
+      setIsLoading(false);
     }
-  }
+  };
 
-  const addToPotentials = (): void => {
-    // TODO: Save to database as potential trade
-    setShowSuccess(true)
-    setTimeout(() => {
-      setShowSuccess(false)
-      setCurrentView('potential')
-    }, 1500)
-  }
-
-  const handleFormDataChange = (field: string, value: string | number): void => {
-    setTradeFormData(prev => ({
-      ...prev,
-      [field]: value
-    }))
-  }
-
-  const getScoreBadge = (score: number): ScoreBadgeConfig => {
-    if (score >= 80) return { color: 'bg-green-500', text: 'Excellent' }
-    if (score >= 60) return { color: 'bg-yellow-500', text: 'Good' }
-    return { color: 'bg-red-500', text: 'Poor' }
-  }
-
-  const getStrategyOptions = () => {
-    if (!selectedIPSData?.strategies) return availableStrategies
-    
-    // Filter strategies to only those supported by the selected IPS
-    return availableStrategies.filter(strategy => 
-      selectedIPSData.strategies!.includes(strategy.id)
-    )
-  }
-
-  // Progress indicator for multi-step flow
-  const renderProgressIndicator = () => {
-    const steps = [
-      { id: "selection", name: "Choose Method", active: currentView === "selection" },
-      { id: "manual", name: "Enter Trade", active: currentView === "manual" },
-      { id: "potential", name: "Review", active: currentView === "potential" },
-      { id: "active", name: "Execute", active: currentView === "active" }
-    ]
-
+  if (isLoading && currentView === "selection") {
     return (
-      <div className="mb-8">
-        <div className="flex items-center justify-center space-x-8">
-          {steps.map((step, index) => (
-            <div key={step.id} className="flex items-center">
-              <div className={`flex items-center justify-center w-8 h-8 rounded-full ${
-                step.active ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'
-              }`}>
-                {index + 1}
-              </div>
-              <span className={`ml-2 text-sm font-medium ${
-                step.active ? 'text-blue-600' : 'text-gray-500'
-              }`}>
-                {step.name}
-              </span>
-              {index < steps.length - 1 && (
-                <div className="w-16 h-0.5 bg-gray-300 mx-4" />
-              )}
-            </div>
-          ))}
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="flex items-center justify-center py-12">
+          <RefreshCw className="h-8 w-8 animate-spin text-blue-600" />
+          <span className="ml-2 text-gray-600">Loading IPS configurations...</span>
         </div>
       </div>
-    )
+    );
   }
 
-  // Loading state
-  if (isLoading) {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex items-center justify-center min-h-[400px]">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading your IPSs...</p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  // Main selection view
+  // IPS Selection View
   if (currentView === "selection") {
     return (
-      <div className="container mx-auto px-4 py-8">
-        <div className="mb-8 text-center">
-          <h1 className="text-4xl font-bold text-gray-900 mb-4">Trades</h1>
-          <p className="text-xl text-gray-600 mb-8">
-            Choose how you'd like to work with trades today
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold mb-2">Select Investment Performance System</h1>
+          <p className="text-gray-600">
+            Choose an IPS configuration to build your trade upon
           </p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-          {/* Watchlist Screening */}
-          <Card className="hover:shadow-xl transition-all duration-300 cursor-pointer transform hover:scale-105">
-            <CardHeader className="text-center pb-4">
-              <div className="mx-auto w-20 h-20 bg-gray-400 rounded-full flex items-center justify-center mb-4">
-                <List className="h-10 w-10 text-white" />
-              </div>
-              <CardTitle className="text-xl mb-2">Screen Watchlist</CardTitle>
-              <Badge className="mx-auto bg-gray-500">Coming Soon</Badge>
-            </CardHeader>
-            <CardContent className="text-center">
-              <p className="text-gray-600 mb-6">
-                Apply your IPS criteria to your watchlist and discover potential trades
-              </p>
-              <Button 
-                disabled 
-                className="w-full" 
-                variant="outline"
-                size="lg"
-                onClick={() => handleOptionSelect('watchlist')}
-              >
-                Screen Watchlist
+        {activeIPSs.length === 0 ? (
+          <Card>
+            <CardContent className="text-center py-12">
+              <Target className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <h3 className="text-lg font-medium text-gray-900 mb-2">No Active IPS Configurations</h3>
+              <p className="text-gray-600 mb-6">Create an IPS configuration first to start trading</p>
+              <Button onClick={() => window.location.href = '/ips'}>
+                <Plus className="h-4 w-4 mr-2" />
+                Create IPS Configuration
               </Button>
             </CardContent>
           </Card>
-
-          {/* Smart Filter */}
-          <Card className="hover:shadow-xl transition-all duration-300 cursor-pointer transform hover:scale-105">
-            <CardHeader className="text-center pb-4">
-              <div className="mx-auto w-20 h-20 bg-gray-400 rounded-full flex items-center justify-center mb-4">
-                <Filter className="h-10 w-10 text-white" />
-              </div>
-              <CardTitle className="text-xl mb-2">Smart Filter</CardTitle>
-              <Badge className="mx-auto bg-gray-500">Coming Soon</Badge>
-            </CardHeader>
-            <CardContent className="text-center">
-              <p className="text-gray-600 mb-6">
-                Automatically discover and filter trades that match your IPS requirements
-              </p>
-              <Button 
-                disabled 
-                className="w-full" 
-                variant="outline"
-                size="lg"
-                onClick={() => handleOptionSelect('smart-filter')}
-              >
-                Smart Filter
-              </Button>
-            </CardContent>
-          </Card>
-
-          {/* Enter Manual Trades */}
-          <Card className="hover:shadow-xl transition-all duration-300 cursor-pointer border-2 border-blue-500 bg-gradient-to-br from-blue-50 to-blue-100 transform hover:scale-105">
-            <CardHeader className="text-center pb-4">
-              <div className="mx-auto w-20 h-20 bg-blue-600 rounded-full flex items-center justify-center mb-4">
-                <Plus className="h-10 w-10 text-white" />
-              </div>
-              <CardTitle className="text-xl mb-2">Enter Manual Trades</CardTitle>
-              <Badge className="mx-auto bg-blue-600">Available Now</Badge>
-            </CardHeader>
-            <CardContent className="text-center">
-              <p className="text-gray-700 mb-6">
-                Manually enter trades and get real-time IPS scoring to guide your decisions
-              </p>
-              <Button 
-                className="w-full bg-blue-600 hover:bg-blue-700" 
-                size="lg"
-                onClick={() => handleOptionSelect('manual')}
-              >
-                Start Manual Entry
-              </Button>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* IPS Status Summary */}
-        {activeIPSs.length > 0 && (
-          <Card className="mt-12 max-w-4xl mx-auto">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Target className="h-5 w-5" />
-                Your Active IPSs
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {activeIPSs.map(ips => (
-                  <div key={ips.id} className="border rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                      <h4 className="font-medium">{ips.name}</h4>
-                    </div>
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {ips.strategies?.map(strategyId => {
-                        const strategy = availableStrategies.find(s => s.id === strategyId)
-                        return strategy ? (
-                          <Badge key={strategyId} variant="outline" className="text-xs">
-                            {strategy.name}
-                          </Badge>
-                        ) : null
-                      })}
-                    </div>
-                    <div className="text-xs text-gray-500 mt-2">
-                      {ips.active_factors || 0} factors • Win rate: {ips.performance?.winRate || 0}%
-                    </div>
-                  </div>
-                ))}
-              </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {activeIPSs.map((ips) => {
+              // Get factor breakdown using actual factor definitions
+              const ipsFactorNames = ips.strategies.flatMap(strategyId => {
+                const strategy = ipsDataService.getAvailableStrategies().find(s => s.id === strategyId);
+                return strategy?.recommendedFactors || [];
+              });
               
-              {activeIPSs.length === 0 && (
-                <div className="text-center py-6">
-                  <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-600 mb-4">No active IPSs found</p>
-                  <Button 
-                    variant="outline"
-                    onClick={() => router.push('/ips')}
-                  >
-                    Create Your First IPS
-                  </Button>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        )}
+              const uniqueFactors = [...new Set(ipsFactorNames)];
+              
+              const apiFactors = ALL_FACTORS.filter(f => 
+                uniqueFactors.includes(f.name) && f.source === 'alpha_vantage'
+              );
+              
+              const manualFactors = ALL_FACTORS.filter(f => 
+                uniqueFactors.includes(f.name) && !f.source
+              );
 
-        {/* Bottom Navigation */}
-        <div className="mt-12 text-center">
-          <div className="flex justify-center gap-4">
-            <Button 
-              variant="outline" 
-              onClick={() => router.push('/ips')}
-            >
-              <Layers className="h-4 w-4 mr-2" />
-              Manage IPSs
-            </Button>
-            <Button 
-              variant="outline"
-              onClick={() => router.push('/dashboard')}
-            >
-              <BarChart3 className="h-4 w-4 mr-2" />
-              View Dashboard
-            </Button>
-          </div>
-        </div>
-      </div>
-    )
-  }
+              return (
+                <Card
+                  key={ips.id}
+                  className="cursor-pointer hover:shadow-lg transition-shadow"
+                >
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-lg">{ips.name}</CardTitle>
+                      <Badge variant="outline" className="bg-green-50 text-green-700">
+                        Active
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <p className="text-sm text-gray-600">{ips.description}</p>
 
-  // Manual trade entry view
-  if (currentView === "manual") {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        {renderProgressIndicator()}
-        <div className="max-w-2xl mx-auto">
-          <div className="mb-6">
-            <Button 
-              variant="outline" 
-              onClick={() => setCurrentView('selection')}
-              className="mb-4"
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Trade Options
-            </Button>
-            <h1 className="text-3xl font-bold">Enter Manual Trade</h1>
-            <p className="text-gray-600">Fill in trade details and get IPS assessment</p>
-          </div>
-
-          {/* IPS Selection */}
-          <Card className="mb-6">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Target className="h-5 w-5" />
-                Select IPS to Follow
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {activeIPSs.length === 0 ? (
-                <div className="text-center py-6">
-                  <FileText className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-                  <p className="text-gray-600 mb-4">No active IPSs available</p>
-                  <p className="text-sm text-gray-500 mb-4">
-                    You need at least one active IPS to score trades
-                  </p>
-                  <Button 
-                    onClick={() => router.push('/ips')}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
-                    Create Your First IPS
-                  </Button>
-                </div>
-              ) : (
-                <>
-                  <Select value={selectedIPS} onValueChange={handleIPSSelection}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Choose an active IPS" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {activeIPSs.map(ips => (
-                        <SelectItem key={ips.id} value={ips.id}>
-                          <div className="flex items-center justify-between w-full">
-                            <span>{ips.name}</span>
-                            <div className="flex gap-1 ml-2">
-                              {ips.strategies?.slice(0, 2).map(strategyId => {
-                                const strategy = availableStrategies.find(s => s.id === strategyId)
-                                return strategy ? (
-                                  <Badge key={strategyId} variant="outline" className="text-xs">
-                                    {strategy.name}
-                                  </Badge>
-                                ) : null
-                              })}
-                              {(ips.strategies?.length || 0) > 2 && (
-                                <Badge variant="outline" className="text-xs">
-                                  +{(ips.strategies?.length || 0) - 2}
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  
-                  {/* Selected IPS Info */}
-                  {selectedIPSData && (
-                    <div className="mt-4 p-4 bg-blue-50 rounded-lg">
-                      <div className="flex items-center justify-between mb-2">
-                        <h4 className="font-medium text-blue-900">{selectedIPSData.name}</h4>
-                        <Badge variant="secondary">
-                          {selectedIPSData.active_factors || 0} factors
-                        </Badge>
+                    <div className="space-y-2 text-sm">
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-600">Strategies:</span>
+                        <span className="font-medium">{ips.strategies.length}</span>
                       </div>
-                      {selectedIPSData.description && (
-                        <p className="text-sm text-blue-700 mb-2">{selectedIPSData.description}</p>
-                      )}
-                      <div className="flex flex-wrap gap-1">
-                        {selectedIPSData.strategies?.map(strategyId => {
-                          const strategy = availableStrategies.find(s => s.id === strategyId)
-                          return strategy ? (
-                            <Badge key={strategyId} variant="outline" className="text-xs">
-                              {strategy.name}
-                            </Badge>
-                          ) : null
-                        })}
-                      </div>
-                      {selectedIPSData.performance && (
-                        <div className="grid grid-cols-3 gap-4 mt-3 text-sm">
-                          <div className="text-center">
-                            <p className="font-medium text-green-600">{selectedIPSData.performance.winRate}%</p>
-                            <p className="text-xs text-gray-600">Win Rate</p>
+                      <div className="flex items-center justify-between">
+                        <span className="text-gray-600">Factors:</span>
+                        <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-1">
+                            <Database className="h-3 w-3 text-blue-600" />
+                            <span className="font-medium">{apiFactors.length} API</span>
                           </div>
-                          <div className="text-center">
-                            <p className="font-medium text-blue-600">{selectedIPSData.performance.avgROI}%</p>
-                            <p className="text-xs text-gray-600">Avg ROI</p>
-                          </div>
-                          <div className="text-center">
-                            <p className="font-medium">{selectedIPSData.performance.totalTrades}</p>
-                            <p className="text-xs text-gray-600">Trades</p>
+                          <div className="flex items-center gap-1">
+                            <Users className="h-3 w-3 text-orange-600" />
+                            <span className="font-medium">{manualFactors.length} Manual</span>
                           </div>
                         </div>
-                      )}
+                      </div>
                     </div>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
 
-          {/* Trade Entry Form */}
-          {selectedIPS && selectedIPSData && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Trade Details</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {/* Strategy Selection */}
-                <div>
-                  <Label htmlFor="strategy">Trading Strategy</Label>
-                  <Select 
-                    value={tradeFormData.strategy} 
-                    onValueChange={(value) => handleFormDataChange('strategy', value)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select strategy" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {getStrategyOptions().map(strategy => (
-                        <SelectItem key={strategy.id} value={strategy.name}>
-                          {strategy.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Basic Trade Info */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="symbol">Symbol</Label>
-                    <Input
-                      id="symbol"
-                      value={tradeFormData.symbol}
-                      onChange={(e) => handleFormDataChange('symbol', e.target.value.toUpperCase())}
-                      placeholder="e.g., AAPL"
-                    />
-                  </div>
-                  <div>
-                    <Label htmlFor="quantity">Quantity</Label>
-                    <Input
-                      id="quantity"
-                      type="number"
-                      value={tradeFormData.quantity}
-                      onChange={(e) => handleFormDataChange('quantity', parseInt(e.target.value) || 1)}
-                      min="1"
-                    />
-                  </div>
-                </div>
-
-                {/* Expiration (for options strategies) */}
-                {selectedIPSData.strategies?.some(strategyId => 
-                  ['put-credit-spreads', 'call-credit-spreads', 'long-calls', 'long-puts', 'iron-condors', 'covered-calls'].includes(strategyId)
-                ) && (
-                  <div>
-                    <Label htmlFor="expiration">Expiration Date</Label>
-                    <Input
-                      id="expiration"
-                      type="date"
-                      value={tradeFormData.expiration}
-                      onChange={(e) => handleFormDataChange('expiration', e.target.value)}
-                    />
-                  </div>
-                )}
-
-                {/* Notes */}
-                <div>
-                  <Label htmlFor="notes">Notes</Label>
-                  <Textarea
-                    id="notes"
-                    value={tradeFormData.notes}
-                    onChange={(e) => handleFormDataChange('notes', e.target.value)}
-                    placeholder="Additional trade notes and analysis..."
-                  />
-                </div>
-
-                {/* IPS Score Calculation */}
-                <div className="border-t pt-4">
-                  <div className="flex gap-3 items-center">
-                    <Button 
-                      onClick={calculateScore} 
-                      variant="outline"
-                      disabled={!tradeFormData.symbol || !tradeFormData.strategy}
-                    >
-                      <BarChart3 className="h-4 w-4 mr-2" />
-                      Calculate IPS Score
-                    </Button>
-                    
-                    {calculatedScore !== null && (
-                      <div className="flex items-center gap-2">
-                        <Badge className={getScoreBadge(calculatedScore).color}>
-                          Score: {calculatedScore}/100
-                        </Badge>
-                        <Badge variant="outline">
-                          {getScoreBadge(calculatedScore).text}
-                        </Badge>
-                        {calculatedScore >= 60 && (
-                          <Button 
-                            onClick={addToPotentials} 
-                            disabled={showSuccess}
-                            size="sm"
-                          >
-                            {showSuccess ? 'Added!' : 'Add to Potentials'}
-                          </Button>
-                        )}
+                    {ips.performance && (
+                      <div className="pt-3 border-t">
+                        <div className="grid grid-cols-3 gap-2 text-xs">
+                          <div className="text-center">
+                            <div className="font-medium text-green-600">
+                              {ips.performance.winRate}%
+                            </div>
+                            <div className="text-gray-500">Win Rate</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="font-medium text-blue-600">
+                              {ips.performance.avgROI}%
+                            </div>
+                            <div className="text-gray-500">Avg ROI</div>
+                          </div>
+                          <div className="text-center">
+                            <div className="font-medium text-gray-700">
+                              {ips.performance.totalTrades}
+                            </div>
+                            <div className="text-gray-500">Trades</div>
+                          </div>
+                        </div>
                       </div>
                     )}
+
+                    <Button onClick={() => handleIPSSelection(ips)} className="w-full mt-4">
+                      Select This IPS
+                    </Button>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Trade Entry View
+  if (currentView === "entry" && selectedIPS) {
+    return (
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="mb-6 flex items-center gap-4">
+          <Button
+            variant="outline"
+            onClick={() => setCurrentView("selection")}
+            className="flex items-center gap-2"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back to IPS Selection
+          </Button>
+          <div>
+            <h1 className="text-3xl font-bold">New Trade Entry</h1>
+            <p className="text-gray-600">IPS: {selectedIPS.name}</p>
+          </div>
+        </div>
+
+        <EnhancedTradeEntryForm
+          selectedIPS={selectedIPS}
+          onSubmit={handleTradeSubmit}
+          onCalculateScore={handleCalculateScore}
+          onCancel={() => setCurrentView("selection")}
+          isLoading={isLoading}
+          calculatedScore={calculatedScore}
+        />
+      </div>
+    );
+  }
+
+  // Prospective Trades View
+  if (currentView === "prospective") {
+    return (
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Prospective Trades</h1>
+            <p className="text-gray-600">Review and manage trades before execution</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setCurrentView("selection")}>
+              <Plus className="h-4 w-4 mr-2" />
+              New Trade
+            </Button>
+            <Button variant="outline" onClick={() => setCurrentView("active")}>
+              View Active Trades
+            </Button>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <FileText className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <div className="text-2xl font-bold">0</div>
+                    <div className="text-sm text-gray-600">Pending</div>
                   </div>
-                  
-                  {calculatedScore !== null && calculatedScore < 60 && (
-                    <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                      <p className="text-sm text-red-700">
-                        This trade scores below your IPS threshold. Consider reviewing the factors or looking for better opportunities.
-                      </p>
-                    </div>
-                  )}
                 </div>
               </CardContent>
             </Card>
-          )}
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <Target className="h-5 w-5 text-green-600" />
+                  <div>
+                    <div className="text-2xl font-bold">$0</div>
+                    <div className="text-sm text-gray-600">Potential Credit</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5 text-purple-600" />
+                  <div>
+                    <div className="text-2xl font-bold">0</div>
+                    <div className="text-sm text-gray-600">Avg Score</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-orange-600" />
+                  <div>
+                    <div className="text-2xl font-bold">0%</div>
+                    <div className="text-sm text-gray-600">Win Rate</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Prospective Trades Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <FileText className="h-5 w-5" />
+                Pending Trades
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center py-12">
+                <TrendingUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  No prospective trades
+                </h3>
+                <p className="text-gray-600 mb-6">
+                  Create your first trade using an IPS configuration
+                </p>
+                <Button onClick={() => setCurrentView("selection")}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create New Trade
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
         </div>
       </div>
-    )
+    );
   }
 
-  // Potential trades view
-  if (currentView === "potential") {
-    return (
-      <div className="container mx-auto px-4 py-8">
-        {renderProgressIndicator()}
-        <div className="mb-6">
-          <Button 
-            variant="outline" 
-            onClick={() => setCurrentView('selection')}
-            className="mb-4"
-          >
-            <ArrowLeft className="h-4 w-4 mr-2" />
-            Back to Trade Options
-          </Button>
-          <h1 className="text-3xl font-bold">Potential Trades</h1>
-          <p className="text-gray-600">Review and execute trades that meet your IPS criteria</p>
-        </div>
-
-        <Card>
-          <CardContent className="py-8 text-center">
-            <TrendingUp className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No Potential Trades</h3>
-            <p className="text-gray-600 mb-4">
-              You haven't added any potential trades yet. Start by entering a manual trade.
-            </p>
-            <Button onClick={() => setCurrentView('manual')}>
-              Enter Manual Trade
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    )
-  }
-
-  // Active trades view
+  // Active Trades View
   if (currentView === "active") {
     return (
-      <div className="container mx-auto px-4 py-8">
-        {renderProgressIndicator()}
-        <div className="mb-6 flex justify-between items-center">
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="mb-6 flex items-center justify-between">
           <div>
-            <Button 
-              variant="outline" 
-              onClick={() => setCurrentView('selection')}
-              className="mb-4"
-            >
-              <ArrowLeft className="h-4 w-4 mr-2" />
-              Back to Trade Options
-            </Button>
             <h1 className="text-3xl font-bold">Active Trades</h1>
-            <p className="text-gray-600">Simple summary of your current active trades</p>
+            <p className="text-gray-600">Monitor your current positions</p>
           </div>
-          <Button 
-            variant="outline"
-            onClick={() => router.push('/dashboard')}
-          >
-            <BarChart3 className="h-4 w-4 mr-2" />
-            Go to Dashboard
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setCurrentView("selection")}>
+              <Plus className="h-4 w-4 mr-2" />
+              New Trade
+            </Button>
+            <Button variant="outline" onClick={() => setCurrentView("prospective")}>
+              View Prospective
+            </Button>
+          </div>
         </div>
 
+        <div className="space-y-6">
+          {/* Portfolio Summary */}
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <List className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <div className="text-2xl font-bold">0</div>
+                    <div className="text-sm text-gray-600">Active Positions</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5 text-green-600" />
+                  <div>
+                    <div className="text-2xl font-bold">$0</div>
+                    <div className="text-sm text-gray-600">Total P&L</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <Target className="h-5 w-5 text-purple-600" />
+                  <div>
+                    <div className="text-2xl font-bold">$0</div>
+                    <div className="text-sm text-gray-600">Buying Power Used</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5 text-orange-600" />
+                  <div>
+                    <div className="text-2xl font-bold">0</div>
+                    <div className="text-sm text-gray-600">Portfolio Delta</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Active Trades Table */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <List className="h-5 w-5" />
+                Current Positions
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-center py-12">
+                <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                <h3 className="text-lg font-medium text-gray-900 mb-2">
+                  No active trades
+                </h3>
+                <p className="text-gray-600 mb-6">
+                  Your executed trades will appear here with real-time P&L tracking
+                </p>
+                <Button onClick={() => setCurrentView("selection")}>
+                  <Plus className="h-4 w-4 mr-2" />
+                  Create New Trade
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  return null;
+}
+
+// Enhanced Trade Entry Form Component
+interface EnhancedTradeEntryFormProps {
+  selectedIPS: IPSConfiguration;
+  onSubmit: (formData: TradeFormData) => void;
+  onCalculateScore: (formData: TradeFormData) => void;
+  onCancel: () => void;
+  isLoading: boolean;
+  calculatedScore: number | null;
+}
+
+function EnhancedTradeEntryForm({
+  selectedIPS,
+  onSubmit,
+  onCalculateScore,
+  onCancel,
+  isLoading,
+  calculatedScore,
+}: EnhancedTradeEntryFormProps) {
+  const [formData, setFormData] = useState<TradeFormData>({
+    name: "",
+    symbol: "",
+    currentPrice: 0,
+    expirationDate: "",
+    contractType: "put-credit-spread",
+    numberOfContracts: 1,
+    shortStrike: 0,
+    longStrike: 0,
+    creditReceived: 0,
+    ipsFactors: {},
+    apiFactors: {},
+  });
+
+  const [apiStatus, setApiStatus] = useState<"connected" | "disconnected" | "loading">("connected");
+  const [completionScore, setCompletionScore] = useState(0);
+  const [localCalculatedScore, setLocalCalculatedScore] = useState<number | null>(calculatedScore);
+
+  // Get factors for this IPS using the actual service
+  const getIPSFactors = () => {
+    const strategies = ipsDataService.getAvailableStrategies();
+    const ipsStrategies = strategies.filter(s => selectedIPS.strategies.includes(s.id));
+    
+    const allFactorNames = new Set<string>();
+    ipsStrategies.forEach(strategy => {
+      strategy.recommendedFactors.forEach(factor => allFactorNames.add(factor));
+    });
+    
+    return Array.from(allFactorNames);
+  };
+
+  const getAPIFactors = (): string[] => {
+    const allFactors = getIPSFactors();
+    return ALL_FACTORS
+      .filter(f => allFactors.includes(f.name) && f.source === 'alpha_vantage')
+      .map(f => f.name);
+  };
+
+  const getManualFactors = (): string[] => {
+    const allFactors = getIPSFactors();
+    return ALL_FACTORS
+      .filter(f => allFactors.includes(f.name) && !f.source)
+      .map(f => f.name);
+  };
+
+    useEffect(() => {
+    setLocalCalculatedScore(calculatedScore);
+  }, [calculatedScore]);
+
+  // Load API factors when symbol changes
+  useEffect(() => {
+    if (formData.symbol && formData.symbol.length >= 2) {
+      loadAPIFactors(formData.symbol);
+    }
+  }, [formData.symbol]);
+
+  // Calculate completion score
+  useEffect(() => {
+    const requiredFields = [
+      "name", "symbol", "currentPrice", "expirationDate", 
+      "numberOfContracts", "shortStrike", "longStrike", "creditReceived"
+    ];
+    const manualFactors = getManualFactors();
+
+    const completedFields = requiredFields.filter((field) => {
+      const value = formData[field as keyof TradeFormData];
+      return value !== "" && value !== 0;
+    }).length;
+
+    const completedFactors = manualFactors.filter(
+      (factor) => formData.ipsFactors[factor] !== undefined && formData.ipsFactors[factor] !== ""
+    ).length;
+
+    const totalRequired = requiredFields.length + manualFactors.length;
+    const totalCompleted = completedFields + completedFactors;
+
+    setCompletionScore(totalRequired ? (totalCompleted / totalRequired) * 100 : 0);
+  }, [formData]);
+
+  const loadAPIFactors = async (symbol: string) => {
+    setApiStatus("loading");
+    try {
+      // Simulate API call to your market data service
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      
+      // Simulate API success/failure (85% success rate)
+      if (Math.random() > 0.15) {
+        // Create realistic mock data based on the actual API factors for this IPS
+        const apiFactorNames = getAPIFactors();
+        const mockData: Record<string, number> = {};
+        
+        apiFactorNames.forEach(factorName => {
+          switch (factorName) {
+            case 'P/E Ratio':
+              mockData[factorName] = symbol === 'AAPL' ? 28.5 : Math.random() * 30 + 10;
+              break;
+            case 'Beta':
+              mockData[factorName] = symbol === 'AAPL' ? 1.21 : Math.random() * 1.5 + 0.5;
+              break;
+            case 'Quarterly Revenue Growth YoY':
+              mockData[factorName] = symbol === 'AAPL' ? 8.1 : Math.random() * 20 - 5;
+              break;
+            case 'Return on Equity TTM':
+              mockData[factorName] = symbol === 'AAPL' ? 26.4 : Math.random() * 25 + 5;
+              break;
+            case 'Dividend Yield':
+              mockData[factorName] = symbol === 'AAPL' ? 0.52 : Math.random() * 4;
+              break;
+            case 'Market Capitalization':
+              mockData[factorName] = Math.random() * 1000000 + 100000; // In millions
+              break;
+            default:
+              mockData[factorName] = Math.random() * 100;
+          }
+        });
+        
+        setFormData(prev => ({ ...prev, apiFactors: mockData }));
+        setApiStatus("connected");
+      } else {
+        throw new Error("API temporarily unavailable");
+      }
+    } catch (error) {
+      console.error("API Error:", error);
+      setApiStatus("disconnected");
+    }
+  };
+
+  const handleInputChange = (field: keyof TradeFormData, value: any) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleFactorChange = (factorName: string, value: any) => {
+    setFormData((prev) => ({
+      ...prev,
+      ipsFactors: { ...prev.ipsFactors, [factorName]: value },
+    }));
+  };
+
+  const handleAPIFactorOverride = (factorName: string, value: any) => {
+    setFormData((prev) => ({
+      ...prev,
+      apiFactors: { ...prev.apiFactors, [factorName]: value },
+    }));
+  };
+
+  const isFormValid = () => {
+    const requiredFields = [
+      "name", "symbol", "currentPrice", "expirationDate",
+      "numberOfContracts", "shortStrike", "longStrike", "creditReceived"
+    ];
+    const manualFactors = getManualFactors();
+
+    const basicFieldsComplete = requiredFields.every((field) => {
+      const value = formData[field as keyof TradeFormData];
+      return value !== "" && value !== 0;
+    });
+
+    const factorsComplete = manualFactors.every(
+      (factor) => formData.ipsFactors[factor] !== undefined && formData.ipsFactors[factor] !== ""
+    );
+
+    return basicFieldsComplete && factorsComplete;
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Progress Header */}
+      <div className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
+        <div className="flex items-center gap-4">
+          <div className="text-sm text-gray-600">Progress:</div>
+          <Progress value={completionScore} className="w-48" />
+          <span className="text-sm font-medium">{Math.round(completionScore)}%</span>
+        </div>
+        <div className="flex items-center gap-4 text-sm">
+          <div className="flex items-center gap-2">
+            <Database className="h-4 w-4 text-blue-600" />
+            <span>{getAPIFactors().length} API Factors</span>
+            {apiStatus === "connected" && <Wifi className="h-3 w-3 text-green-600" />}
+            {apiStatus === "disconnected" && <WifiOff className="h-3 w-3 text-red-600" />}
+            {apiStatus === "loading" && <RefreshCw className="h-3 w-3 animate-spin text-blue-600" />}
+          </div>
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4 text-orange-600" />
+            <span>{getManualFactors().length} Manual Factors</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Basic Trade Details */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />
+            Trade Details
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div>
+              <Label htmlFor="expirationDate">Expiration Date</Label>
+              <Input
+                id="expirationDate"
+                type="date"
+                value={formData.expirationDate}
+                onChange={(e) => handleInputChange("expirationDate", e.target.value)}
+                min={new Date().toISOString().split("T")[0]}
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="contractType">Contract Type</Label>
+              <select
+                id="contractType"
+                value={formData.contractType}
+                onChange={(e) => handleInputChange("contractType", e.target.value)}
+                className="w-full p-2 border border-gray-300 rounded-md"
+              >
+                <option value="put-credit-spread">Put Credit Spread</option>
+                <option value="call-credit-spread">Call Credit Spread</option>
+                <option value="long-call">Long Call</option>
+                <option value="long-put">Long Put</option>
+                <option value="iron-condor">Iron Condor</option>
+                <option value="covered-call">Covered Call</option>
+              </select>
+            </div>
+
+            <div>
+              <Label htmlFor="numberOfContracts">Number of Contracts</Label>
+              <Input
+                id="numberOfContracts"
+                type="number"
+                min={1}
+                value={formData.numberOfContracts || ""}
+                onChange={(e) => handleInputChange("numberOfContracts", parseInt(e.target.value) || 1)}
+                placeholder="1"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="shortStrike">Short Strike</Label>
+              <Input
+                id="shortStrike"
+                type="number"
+                step="0.01"
+                value={formData.shortStrike || ""}
+                onChange={(e) => handleInputChange("shortStrike", parseFloat(e.target.value) || 0)}
+                placeholder="145.00"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="longStrike">Long Strike</Label>
+              <Input
+                id="longStrike"
+                type="number"
+                step="0.01"
+                value={formData.longStrike || ""}
+                onChange={(e) => handleInputChange("longStrike", parseFloat(e.target.value) || 0)}
+                placeholder="140.00"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="creditReceived">Premium Paid/Collected</Label>
+              <Input
+                id="creditReceived"
+                type="number"
+                step="0.01"
+                value={formData.creditReceived || ""}
+                onChange={(e) => handleInputChange("creditReceived", parseFloat(e.target.value) || 0)}
+                placeholder="1.25"
+              />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* IPS Factors Section */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* API Factors */}
         <Card>
-          <CardContent className="py-8 text-center">
-            <List className="h-12 w-12 mx-auto text-gray-400 mb-4" />
-            <h3 className="text-lg font-semibold mb-2">No Active Trades</h3>
-            <p className="text-gray-600 mb-4">
-              You don't have any active trades yet. Execute some trades from your potentials list.
-            </p>
-            <Button onClick={() => setCurrentView('potential')}>
-              View Potential Trades
-            </Button>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Database className="h-5 w-5 text-blue-600" />
+              API Factors ({getAPIFactors().length})
+              <Badge variant="outline" className={`${
+                apiStatus === "connected" ? "bg-green-50 text-green-700" : 
+                apiStatus === "disconnected" ? "bg-red-50 text-red-700" : 
+                "bg-yellow-50 text-yellow-700"
+              }`}>
+                {apiStatus === "connected" ? "Auto-populated" : 
+                 apiStatus === "disconnected" ? "Manual Entry Required" : 
+                 "Loading..."}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {apiStatus === "disconnected" && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 text-red-600" />
+                  <span className="text-sm text-red-700">
+                    API connection failed. Please enter values manually below.
+                  </span>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {getAPIFactors().map((factorName) => {
+                const hasValue = formData.apiFactors[factorName] !== undefined;
+                const value = formData.apiFactors[factorName];
+                const factor = ALL_FACTORS.find(f => f.name === factorName);
+
+                return (
+                  <div
+                    key={factorName}
+                    className={`p-3 rounded-lg border ${
+                      apiStatus === "connected" && hasValue
+                        ? "bg-green-50 border-green-200"
+                        : apiStatus === "loading"
+                        ? "bg-yellow-50 border-yellow-200"
+                        : "bg-gray-50 border-gray-200"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <div>
+                        <Label className="font-medium text-sm">{factorName}</Label>
+                        <div className="text-xs text-gray-500">{factor?.category || 'Financial'}</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {apiStatus === "connected" && hasValue ? (
+                          <>
+                            <CheckCircle className="h-4 w-4 text-green-600" />
+                            <span className="text-sm font-medium text-green-700">
+                              {typeof value === "number" ? value.toFixed(2) : value}
+                              <span className="text-xs ml-1">{factor?.unit || ''}</span>
+                            </span>
+                          </>
+                        ) : apiStatus === "loading" ? (
+                          <>
+                            <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
+                            <span className="text-sm text-blue-700">Loading...</span>
+                          </>
+                        ) : (
+                          <span className="text-sm text-gray-600">
+                            {apiStatus === "disconnected" ? "Manual input required" : "Will auto-populate"}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Manual input when API is down or for override */}
+                    {(apiStatus === "disconnected" || (!hasValue && apiStatus !== "loading")) && (
+                      <Input
+                        type="number"
+                        step={factor?.data_type === 'percentage' ? "0.01" : "0.01"}
+                        value={formData.apiFactors[factorName] ?? ""}
+                        onChange={(e) => handleAPIFactorOverride(factorName, parseFloat(e.target.value) || "")}
+                        placeholder={`Enter ${factorName.toLowerCase()}`}
+                        className="mt-2"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Refresh API Button */}
+            {formData.symbol && (
+              <div className="mt-4 pt-4 border-t">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => loadAPIFactors(formData.symbol)}
+                  disabled={apiStatus === "loading"}
+                  className="w-full flex items-center gap-2"
+                >
+                  {apiStatus === "loading" ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      Loading API Data...
+                    </>
+                  ) : (
+                    <>
+                      <Database className="h-4 w-4" />
+                      Refresh API Data
+                    </>
+                  )}
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Manual Factors */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-orange-600" />
+              Manual Input Required ({getManualFactors().length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4">
+              {getManualFactors().map((factorName) => {
+                const value = formData.ipsFactors[factorName];
+                const hasValue = value !== undefined && value !== "";
+                const factor = ALL_FACTORS.find(f => f.name === factorName);
+
+                return (
+                  <div key={factorName} className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Label className="font-medium text-sm">{factorName}</Label>
+                      {hasValue && <CheckCircle className="h-4 w-4 text-green-600" />}
+                    </div>
+                    <div className="text-xs text-gray-500 mb-1">{factor?.category || 'Management'}</div>
+                    <select
+                      value={value ?? ""}
+                      onChange={(e) => handleFactorChange(factorName, parseInt(e.target.value))}
+                      className={`w-full p-2 border rounded-md ${
+                        hasValue ? "border-green-300 bg-green-50" : "border-gray-300"
+                      }`}
+                    >
+                      <option value="">Select rating</option>
+                      <option value="1">1 - Poor</option>
+                      <option value="2">2 - Below Average</option>
+                      <option value="3">3 - Average</option>
+                      <option value="4">4 - Good</option>
+                      <option value="5">5 - Excellent</option>
+                    </select>
+                    <div className="text-xs text-gray-500">
+                      Rate this factor from 1 (poor) to 5 (excellent)
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </CardContent>
         </Card>
       </div>
-    )
-  }
 
-  return null
+      {/* Score Calculation and Actions */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Calculator className="h-5 w-5" />
+            IPS Score & Actions
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="font-medium">Calculate IPS Score</div>
+              <div className="text-sm text-gray-600">
+                {isFormValid() ? 
+                  `Ready to calculate using ${getAPIFactors().length} API + ${getManualFactors().length} manual factors` : 
+                  "Complete all fields to enable calculation"}
+              </div>
+            </div>
+            <Button
+              onClick={() => onCalculateScore(formData)}
+              disabled={!isFormValid() || isLoading}
+              className="flex items-center gap-2"
+            >
+              {isLoading ? (
+                <>
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                  Calculating...
+                </>
+              ) : (
+                <>
+                  <Calculator className="h-4 w-4" />
+                  Calculate Score
+                </>
+              )}
+            </Button>
+          </div>
+
+          {calculatedScore !== null && (
+            <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-xl font-bold text-blue-900">
+                    IPS Score: {calculatedScore.toFixed(1)}
+                  </div>
+                  <div className="text-sm text-blue-700">
+                    {calculatedScore >= 80 ? "Excellent Trade Opportunity" : 
+                     calculatedScore >= 70 ? "Good Trade Setup" : 
+                     calculatedScore >= 60 ? "Average Trade" : 
+                     "Poor Trade - Consider Alternatives"}
+                  </div>
+                  <div className="text-xs text-gray-600 mt-1">
+                    Based on {getAPIFactors().length} API factors + {getManualFactors().length} manual factors
+                  </div>
+                </div>
+                <div className="text-right">
+                  <Progress value={calculatedScore} className="w-24 mb-2" />
+                  <div className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${
+                    calculatedScore >= 80 ? "bg-green-100 text-green-800" :
+                    calculatedScore >= 70 ? "bg-blue-100 text-blue-800" :
+                    calculatedScore >= 60 ? "bg-yellow-100 text-yellow-800" :
+                    "bg-red-100 text-red-800"
+                  }`}>
+                    {calculatedScore >= 80 ? "EXCELLENT" : 
+                     calculatedScore >= 70 ? "GOOD" : 
+                     calculatedScore >= 60 ? "AVERAGE" : "POOR"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Action Buttons */}
+          <div className="flex items-center justify-between pt-4 border-t">
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (confirm("Delete this trade and start over?")) {
+                  setFormData({
+                    name: "",
+                    symbol: "",
+                    currentPrice: 0,
+                    expirationDate: "",
+                    contractType: "put-credit-spread",
+                    numberOfContracts: 1,
+                    shortStrike: 0,
+                    longStrike: 0,
+                    creditReceived: 0,
+                    ipsFactors: {},
+                    apiFactors: {},
+                  });
+                  setLocalCalculatedScore(null);
+                }
+              }}
+              className="text-red-600 border-red-200 hover:bg-red-50"
+            >
+              Delete & Start Over
+            </Button>
+
+            <div className="flex items-center gap-3">
+              <Button variant="outline" onClick={onCancel}>
+                Cancel
+              </Button>
+
+              <Button
+                onClick={() => onSubmit(formData)}
+                disabled={!isFormValid() || isLoading}
+                className="flex items-center gap-2"
+              >
+                <Target className="h-4 w-4" />
+                {isLoading ? "Saving..." : "Move to Prospective Trades"}
+              </Button>
+            </div>
+          </div>
+
+          {/* Trade Summary */}
+          {isFormValid() && (
+            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+              <h4 className="font-medium mb-3">Trade Summary</h4>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <div className="text-gray-600">Symbol</div>
+                  <div className="font-medium">{formData.symbol}</div>
+                </div>
+                <div>
+                  <div className="text-gray-600">Strategy</div>
+                  <div className="font-medium">{formData.contractType.replace('-', ' ').toUpperCase()}</div>
+                </div>
+                <div>
+                  <div className="text-gray-600">Credit/Debit</div>
+                  <div className="font-medium">${formData.creditReceived}</div>
+                </div>
+                <div>
+                  <div className="text-gray-600">Contracts</div>
+                  <div className="font-medium">{formData.numberOfContracts}</div>
+                </div>
+                <div>
+                  <div className="text-gray-600">Short Strike</div>
+                  <div className="font-medium">${formData.shortStrike}</div>
+                </div>
+                <div>
+                  <div className="text-gray-600">Long Strike</div>
+                  <div className="font-medium">${formData.longStrike}</div>
+                </div>
+                <div>
+                  <div className="text-gray-600">Max Gain</div>
+                  <div className="font-medium text-green-600">
+                    ${(formData.creditReceived * formData.numberOfContracts * 100).toFixed(0)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-gray-600">Max Loss</div>
+                  <div className="font-medium text-red-600">
+                    ${((Math.abs(formData.shortStrike - formData.longStrike) - formData.creditReceived) * formData.numberOfContracts * 100).toFixed(0)}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
 }

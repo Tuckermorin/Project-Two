@@ -118,62 +118,117 @@ class MarketDataService {
     return tomorrow.getTime() - now.getTime();
   }
 
-  /**
-   * Get unified stock data combining Alpha Vantage fundamentals with Tradier quotes
-   */
-  async getUnifiedStockData(
-    symbol: string,
-    includeFundamentals = true,
-    forceRefresh = false
-  ): Promise<UnifiedStockData> {
+/**
+ * Get unified stock data with proper error handling and fallbacks
+ */
+    async getUnifiedStockData(symbol: string, includeFundamentals = true): Promise<UnifiedStockData> {
     console.log(`Getting unified stock data for ${symbol}`);
-
-    const quoteCacheKey = `quote_${symbol}`;
-    let quote: StockQuote | null = null;
-
-    if (!forceRefresh) {
-      quote = this.getFromCache<StockQuote>(quoteCacheKey);
-    }
-
-    if (!quote) {
-      quote = await this.tradier.getQuote(symbol);
-      this.setCache(quoteCacheKey, quote, this.getDailyTTL());
-    }
-
-    let fundamentals;
-    if (includeFundamentals) {
-      const cacheKey = `fundamentals_${symbol}`;
-      const cached = !forceRefresh ? this.getFromCache(cacheKey) : null;
-
-      if (cached) {
-        fundamentals = cached;
-      } else {
+    
+    try {
+        // Try to get real-time quote from Tradier first
+        let quote;
         try {
-          const fundamentalData = await this.alphaVantage.getCompleteFundamentalData(symbol);
-          fundamentals = this.extractFundamentals(fundamentalData);
-          this.setCache(cacheKey, fundamentals, this.getDailyTTL());
-        } catch (error) {
-          console.warn(`Failed to fetch fundamentals for ${symbol}:`, error);
+        quote = await this.tradier.getQuote(symbol);
+        } catch (quoteError) {
+        console.warn(`Failed to fetch quote for ${symbol} from Tradier:`, quoteError);
+        
+        // Fallback to basic data structure
+        quote = {
+            symbol,
+            last: 0,
+            prevclose: 0,
+            change: 0,
+            change_percentage: 0,
+            volume: 0,
+            average_volume: 0
+        };
         }
-      }
-    }
 
-    return {
-      symbol: quote.symbol,
-      currentPrice: quote.last,
-      previousClose: quote.prevclose,
-      priceChange: quote.change,
-      priceChangePercent: quote.change_percentage,
-      volume: quote.volume,
-      avgVolume: quote.average_volume,
-      week52High: quote.week_52_high,
-      week52Low: quote.week_52_low,
-      beta: fundamentals?.beta,
-      peRatio: fundamentals?.peRatio,
-      lastUpdated: new Date(),
-      fundamentals
-    };
-  }
+        let fundamentals;
+        if (includeFundamentals) {
+        // Check cache first for fundamentals (24 hour TTL)
+        const cacheKey = `fundamentals_${symbol}`;
+        const cached = this.getFromCache<any>(cacheKey); // Fix: only pass key if method expects 1 param
+        
+        // Check if cached data is still valid (if your cache doesn't handle TTL internally)
+        const isExpired = cached && (Date.now() - cached.timestamp.getTime() > (24 * 60 * 60 * 1000));
+        
+        if (cached && !isExpired) {
+            fundamentals = cached.data || cached; // Handle different cache structures
+        } else {
+            if (isExpired) {
+            this.cache.delete(cacheKey); // Clean up expired cache
+            }
+            
+            try {
+            const fundamentalData = await this.alphaVantage.getCompleteFundamentalData(symbol);
+            fundamentals = this.extractFundamentals(fundamentalData);
+            
+            // Fix: adjust setCache call based on your method signature
+            this.setCache(cacheKey, {
+                data: fundamentals,
+                timestamp: new Date()
+            }); // Only pass 2 params if method expects 2
+            
+            } catch (fundamentalError) {
+            console.warn(`Failed to fetch fundamentals for ${symbol}:`, fundamentalError);
+            
+            fundamentals = {
+                revenue: undefined,
+                grossMargin: undefined,
+                operatingMargin: undefined,
+                netMargin: undefined,
+                eps: undefined,
+                bookValue: undefined,
+                pbRatio: undefined,
+                psRatio: undefined,
+                pegRatio: undefined,
+                evToEbitda: undefined,
+                revenueGrowth: undefined,
+                earningsGrowth: undefined,
+                currentRatio: undefined,
+                debtToEquity: undefined,
+                roe: undefined,
+                roa: undefined
+            };
+            }
+        }
+        }
+
+        return {
+        symbol: quote.symbol || symbol,
+        currentPrice: quote.last || 0,
+        previousClose: quote.prevclose || 0,
+        priceChange: quote.change || 0,
+        priceChangePercent: quote.change_percentage || 0,
+        volume: quote.volume || 0,
+        avgVolume: quote.average_volume,
+        beta: fundamentals?.beta,
+        peRatio: fundamentals?.pbRatio,
+        marketCap: undefined,
+        lastUpdated: new Date(),
+        fundamentals
+        };
+
+    } catch (error) {
+        console.error(`Failed to get unified stock data for ${symbol}:`, error);
+        
+        return {
+        symbol,
+        currentPrice: 0,
+        previousClose: 0,
+        priceChange: 0,
+        priceChangePercent: 0,
+        volume: 0,
+        avgVolume: 0,
+        beta: undefined,
+        peRatio: undefined,
+        marketCap: undefined,
+        lastUpdated: new Date(),
+        fundamentals: undefined
+        };
+    }
+    }
 
   /**
    * Get options data for a specific trade
@@ -369,7 +424,7 @@ class MarketDataService {
     trade: any, 
     snapshotType: 'market_open' | 'midday' | 'market_close'
   ): Promise<TradeSnapshot> {
-    const stockData = await this.getUnifiedStockData(trade.symbol, false, true);
+    const stockData = await this.getUnifiedStockData(trade.symbol, false);
     
     let optionsData: UnifiedOptionsData | null = null;
     let premium = 0;
@@ -480,25 +535,25 @@ class MarketDataService {
   }
 
   // Cache management
-  private getFromCache<T>(key: string): T | null {
+    private getFromCache<T>(key: string, ttl?: number): T | null {
     const cached = this.cache.get(key);
     if (!cached) return null;
-
-    if (Date.now() - cached.timestamp.getTime() > cached.ttl) {
-      this.cache.delete(key);
-      return null;
+    
+    if (ttl && Date.now() - cached.timestamp.getTime() > ttl) {
+        this.cache.delete(key);
+        return null;
+    }
+    
+    return cached.data as T;
     }
 
-    return cached.data as T;
-  }
-
-  private setCache<T>(key: string, data: T, ttl: number): void {
+    private setCache<T>(key: string, data: T, ttl?: number): void {
     this.cache.set(key, {
-      data,
-      timestamp: new Date(),
-      ttl
+        data,
+        timestamp: new Date(),
+        ttl: ttl || 0
     });
-  }
+    }
 
   private cleanupCache(): void {
     const now = Date.now();
