@@ -131,40 +131,28 @@ const TRADING_STRATEGIES: TradingStrategy[] = [
   }
 ];
 
-// Factor definitions for Alpha Vantage API (static configuration)
-const ALPHA_VANTAGE_FACTORS: FactorDefinition[] = [
-  // Company Overview Factors
-  { id: 'av-market-cap', name: 'Market Capitalization', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
-  { id: 'av-pe-ratio', name: 'P/E Ratio', type: 'quantitative', category: 'Company Overview', data_type: 'ratio', unit: 'ratio', source: 'alpha_vantage' },
-  { id: 'av-dividend-yield', name: 'Dividend Yield', type: 'quantitative', category: 'Company Overview', data_type: 'percentage', unit: '%', source: 'alpha_vantage' },
-  { id: 'av-beta', name: 'Beta', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: 'coefficient', source: 'alpha_vantage' },
-  { id: 'av-revenue-growth', name: 'Revenue Growth YoY', type: 'quantitative', category: 'Company Overview', data_type: 'percentage', unit: '%', source: 'alpha_vantage' },
-  { id: 'av-return-on-equity', name: 'Return on Equity TTM', type: 'quantitative', category: 'Company Overview', data_type: 'percentage', unit: '%', source: 'alpha_vantage' },
-  // Add more as needed...
+// Basic fallback factor definitions used if database query fails
+// These represent a minimal set of factors across all categories.
+const FALLBACK_FACTORS: FactorDefinition[] = [
+  // Quantitative
+  { id: 'fallback-market-cap', name: 'Market Capitalization', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: '$', source: 'alpha_vantage' },
+  { id: 'fallback-pe-ratio', name: 'P/E Ratio', type: 'quantitative', category: 'Company Overview', data_type: 'ratio', unit: 'ratio', source: 'alpha_vantage' },
+  { id: 'fallback-dividend-yield', name: 'Dividend Yield', type: 'quantitative', category: 'Company Overview', data_type: 'percentage', unit: '%', source: 'alpha_vantage' },
+  { id: 'fallback-beta', name: 'Beta', type: 'quantitative', category: 'Company Overview', data_type: 'numeric', unit: 'coefficient', source: 'alpha_vantage' },
+  // Qualitative
+  { id: 'fallback-management-quality', name: 'Management Quality', type: 'qualitative', category: 'Management & Governance', data_type: 'rating', unit: '1-5' },
+  { id: 'fallback-economic-moat', name: 'Economic Moat', type: 'qualitative', category: 'Business Model', data_type: 'rating', unit: '1-5' },
+  { id: 'fallback-competitive-position', name: 'Competitive Position', type: 'qualitative', category: 'Business Model', data_type: 'rating', unit: '1-5' },
+  // Options
+  { id: 'fallback-implied-volatility', name: 'Implied Volatility', type: 'options', category: 'Options Metrics', data_type: 'percentage', unit: '%' },
+  { id: 'fallback-delta', name: 'Delta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
+  { id: 'fallback-theta', name: 'Theta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' }
 ];
 
-// Qualitative factors (manual input required)
-const QUALITATIVE_FACTORS: FactorDefinition[] = [
-  { id: 'qual-management-quality', name: 'Management Quality', type: 'qualitative', category: 'Management & Governance', data_type: 'rating', unit: '1-5' },
-  { id: 'qual-economic-moat', name: 'Economic Moat', type: 'qualitative', category: 'Business Model', data_type: 'rating', unit: '1-5' },
-  { id: 'qual-competitive-position', name: 'Competitive Position', type: 'qualitative', category: 'Business Model', data_type: 'rating', unit: '1-5' },
-  // Add more as needed...
-];
-
-// Options factors (manual input or from options API)
-const OPTIONS_FACTORS: FactorDefinition[] = [
-  { id: 'opt-iv', name: 'Implied Volatility', type: 'options', category: 'Options Metrics', data_type: 'percentage', unit: '%' },
-  { id: 'opt-delta', name: 'Delta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
-  { id: 'opt-theta', name: 'Theta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' },
-  // Add more as needed...
-];
-
-// Combined factors
-const ALL_FACTORS = [
-  ...ALPHA_VANTAGE_FACTORS,
-  ...QUALITATIVE_FACTORS,
-  ...OPTIONS_FACTORS
-];
+// This array will be populated from the database at runtime. It is exported so
+// existing imports continue to function. Components that rely on this value
+// should call `getAllFactors` first to ensure it's populated.
+let ALL_FACTORS: FactorDefinition[] = [...FALLBACK_FACTORS];
 
 class IPSDataService {
   // Store IPS configurations in memory (replace with database in production)
@@ -175,24 +163,46 @@ class IPSDataService {
     return TRADING_STRATEGIES;
   }
 
-  // Get all factors
-  getAllFactors(): FactorDefinition[] {
-    return ALL_FACTORS;
+  // Get all factors from the database (falls back to built-in list on error)
+  async getAllFactors(): Promise<FactorDefinition[]> {
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      );
+
+      const { data, error } = await supabase
+        .from('factors')
+        .select('id, name, type, category, data_type, unit, source');
+
+      if (error || !data) {
+        console.error('Failed to fetch factors:', error?.message);
+        return ALL_FACTORS;
+      }
+
+      ALL_FACTORS = data as FactorDefinition[];
+      return ALL_FACTORS;
+    } catch (err) {
+      console.error('Error loading factors:', err);
+      return ALL_FACTORS;
+    }
   }
 
   // Get factors by type
-  getFactorsByType(type: 'quantitative' | 'qualitative' | 'options'): FactorDefinition[] {
-    return ALL_FACTORS.filter(factor => factor.type === type);
+  async getFactorsByType(type: 'quantitative' | 'qualitative' | 'options'): Promise<FactorDefinition[]> {
+    const factors = await this.getAllFactors();
+    return factors.filter(factor => factor.type === type);
   }
 
   // Get factors for selected strategies
-  getFactorsForStrategies(strategyIds: string[]): {
+  async getFactorsForStrategies(strategyIds: string[]): Promise<{
     availableFactors: FactorDefinition[];
     recommendedFactors: string[];
     requiredTypes: string[];
-  } {
+  }> {
     const selectedStrategies = TRADING_STRATEGIES.filter(s => strategyIds.includes(s.id));
-    
+
     // Get required factor types
     const requiredTypes = new Set<string>();
     selectedStrategies.forEach(strategy => {
@@ -205,10 +215,9 @@ class IPSDataService {
       strategy.recommendedFactors.forEach(factor => recommendedFactors.add(factor));
     });
 
-    // Filter available factors based on required types
-    const availableFactors = ALL_FACTORS.filter(factor => 
-      requiredTypes.has(factor.type)
-    );
+    // Get all available factors and filter by required types
+    const allFactors = await this.getAllFactors();
+    const availableFactors = allFactors.filter(factor => requiredTypes.has(factor.type));
 
     return {
       availableFactors,
