@@ -6,6 +6,7 @@
 "use client"
 
 import React, { useState, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -47,6 +48,7 @@ import { IPSFactorSelector } from '@/components/ips/ips-factor-selector';
 import { IPSFactorConfiguration } from '@/components/ips/ips-factor-configuration'; 
 import { IPSSummary } from '@/components/ips/ips-summary';
 import { TradeScoreDisplay } from '@/components/ips/trade-score-display';
+import { createIPS, listIPS } from '@/lib/services/ips-data-service';
 
 // Import services
 import { ipsDataService, type IPSConfiguration, type TradingStrategy } from '@/lib/services/ips-data-service';
@@ -63,6 +65,60 @@ interface IPSFlowState {
 }
 
 export default function IPSPage() {
+    const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  const [ipsList, setIpsList] = useState<any[]>([]);
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+
+  async function saveIPS() {
+    const { data, error } = await supabase
+      .from('ips_configurations')
+      .insert([
+        {
+          user_id: 'test-user-123',
+          name,
+          description,
+          is_active: true,
+          total_factors: 0,
+          active_factors: 0,
+          total_weight: 0,
+          avg_weight: 0,
+          win_rate: 0,
+          avg_roi: 0,
+          total_trades: 0,
+        },
+      ])
+      .select();
+
+    if (error) {
+      console.error('Error inserting IPS:', error);
+    } else {
+      console.log('Inserted IPS:', data);
+      fetchIPS(); // refresh list after insert
+    }
+  }
+
+  async function fetchIPS() {
+    const { data, error } = await supabase
+      .from('ips_configurations')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.error('Error fetching IPS list:', error);
+    } else {
+      setIpsList(data);
+    }
+  }
+
+  useEffect(() => {
+    fetchIPS();
+  }, []);
+
   const [state, setState] = useState<IPSFlowState>({
     step: 'list',
     selectedStrategies: [],
@@ -76,9 +132,12 @@ export default function IPSPage() {
   const [showInactive, setShowInactive] = useState(false);
   const [availableStrategies, setAvailableStrategies] = useState<TradingStrategy[]>([]);
   const [factorDefinitions, setFactorDefinitions] = useState<any>(null);
+  const [creating, setCreating] = useState(false);
+  const [rows, setRows] = useState<any[]>([]);
 
   const userId = 'user-123'; // Replace with actual user ID from auth
 
+  
   // Load data on component mount
   useEffect(() => {
     const loadData = async () => {
@@ -348,7 +407,6 @@ export default function IPSPage() {
             onNext={() => handleStepNavigation('configuration')}
             onBack={() => handleStepNavigation('strategies')}
             factorDefinitions={factorDefinitions}
-            selectedStrategies={state.selectedStrategies}
           />
         )}
 
@@ -415,6 +473,40 @@ export default function IPSPage() {
               Show inactive IPSs ({inactiveIPSs.length})
             </label>
           </div>
+        </div>
+      </div>
+
+      {/* Quick IPS Creator (Dev) */}
+      <div className="mt-4 p-4 border rounded bg-gray-50">
+        <div className="flex items-center gap-2 mb-3">
+          <input
+            className="border p-2 rounded w-64"
+            placeholder="IPS Name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <input
+            className="border p-2 rounded w-96"
+            placeholder="Description"
+            value={description}
+            onChange={(e) => setDescription(e.target.value)}
+          />
+          <Button onClick={saveIPS} className="bg-blue-600 hover:bg-blue-700">
+            Save IPS
+          </Button>
+        </div>
+
+        <div className="text-sm text-gray-700">
+          <div className="font-semibold mb-1">Existing IPSs (from Supabase):</div>
+          <ul className="list-disc ml-5">
+            {ipsList.map((ips: any) => (
+              <li key={ips.id}>
+                <strong>{ips.name}</strong>{' '}
+                <span className="text-gray-500">— {ips.description || 'no description'}</span>
+              </li>
+            ))}
+            {ipsList.length === 0 && <li className="text-gray-500">None yet.</li>}
+          </ul>
         </div>
       </div>
 
