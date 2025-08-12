@@ -198,21 +198,29 @@ export default function TradesPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {activeIPSs.map((ips) => {
-              // Get factor breakdown using actual factor definitions
-              const ipsFactorNames = ips.strategies.flatMap(strategyId => {
-                const strategy = ipsDataService.getAvailableStrategies().find(s => s.id === strategyId);
-                return strategy?.recommendedFactors || [];
-              });
-              
-              const uniqueFactors = [...new Set(ipsFactorNames)];
-              
-              const apiFactors = ALL_FACTORS.filter(f => 
-                uniqueFactors.includes(f.name) && f.source === 'alpha_vantage'
-              );
-              
-              const manualFactors = ALL_FACTORS.filter(f => 
-                uniqueFactors.includes(f.name) && !f.source
-              );
+              // Calculate factor statistics from actual IPS data
+              const configuredFactors = ips.configurations
+                ? Object.keys(ips.configurations)
+                : ips.factors || [];
+
+              const activeFactorNames = ips.factors
+                ? ips.factors
+                : configuredFactors.filter(
+                    name => ips.configurations?.[name]?.enabled !== false
+                  );
+
+              const totalFactors = configuredFactors.length;
+              const activeFactors = activeFactorNames.length;
+
+              const apiFactors = configuredFactors.filter(name => {
+                const def = ALL_FACTORS.find(f => f.name === name);
+                return def && def.source === 'alpha_vantage';
+              }).length;
+
+              const manualFactors = configuredFactors.filter(name => {
+                const def = ALL_FACTORS.find(f => f.name === name);
+                return def && !def.source;
+              }).length;
 
               return (
                 <Card
@@ -237,15 +245,17 @@ export default function TradesPage() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-gray-600">Factors:</span>
-                        <div className="flex items-center gap-3">
-                          <div className="flex items-center gap-1">
-                            <Database className="h-3 w-3 text-blue-600" />
-                            <span className="font-medium">{apiFactors.length} API</span>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <Users className="h-3 w-3 text-orange-600" />
-                            <span className="font-medium">{manualFactors.length} Manual</span>
-                          </div>
+                        <span className="font-medium">{activeFactors} / {totalFactors} active</span>
+                      </div>
+                      <Progress value={totalFactors ? (activeFactors / totalFactors) * 100 : 0} className="h-2" />
+                      <div className="flex items-center justify-between mt-1 text-xs">
+                        <div className="flex items-center gap-1">
+                          <Database className="h-3 w-3 text-blue-600" />
+                          <span className="font-medium">{apiFactors} API</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <Users className="h-3 w-3 text-orange-600" />
+                          <span className="font-medium">{manualFactors} Manual</span>
                         </div>
                       </div>
                     </div>
