@@ -113,16 +113,12 @@ export default function IPSPage() {
 
   // Load factor definitions when strategies are selected
   useEffect(() => {
-    const loadFactors = async () => {
-      if (state.selectedStrategies.length > 0) {
-        const factors = await ipsDataService.getFactorsForStrategies(state.selectedStrategies);
-        setFactorDefinitions(factors);
-      } else {
-        setFactorDefinitions(null);
-      }
-    };
-
-    loadFactors();
+    if (state.selectedStrategies.length > 0) {
+      const factors = ipsDataService.getFactorsForStrategies(state.selectedStrategies);
+      setFactorDefinitions(factors);
+    } else {
+      setFactorDefinitions(null);
+    }
   }, [state.selectedStrategies]);
 
   // Navigation handlers
