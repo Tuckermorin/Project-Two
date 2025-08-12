@@ -234,9 +234,7 @@ class IPSDataService {
   }
 
   async createIPS(userId: string, ipsData: Partial<IPSConfiguration>): Promise<IPSConfiguration> {
-    // TODO: Replace with database insert
-    const newIPS: IPSConfiguration = {
-      id: `ips-${Date.now()}`,
+    const newIPS = {
       user_id: userId,
       name: ipsData.name || 'Untitled Strategy',
       description: ipsData.description,
@@ -246,11 +244,31 @@ class IPSDataService {
       ...ipsData
     };
 
-    const userIPSs = this.ipsConfigurations.get(userId) || [];
-    userIPSs.push(newIPS);
-    this.ipsConfigurations.set(userId, userIPSs);
+    try {
+      const response = await fetch('/api/ips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newIPS)
+      });
 
-    return Promise.resolve(newIPS);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('Failed to create IPS:', errorText);
+        throw new Error(errorText || 'Failed to create IPS');
+      }
+
+      const { data } = await response.json();
+      console.log('IPS created:', data);
+
+      const userIPSs = this.ipsConfigurations.get(userId) || [];
+      userIPSs.push(data);
+      this.ipsConfigurations.set(userId, userIPSs);
+
+      return data as IPSConfiguration;
+    } catch (error) {
+      console.error('Error creating IPS:', error);
+      throw error;
+    }
   }
 
   async updateIPS(ipsId: string, updates: Partial<IPSConfiguration>): Promise<IPSConfiguration> {
