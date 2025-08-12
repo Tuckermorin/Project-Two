@@ -588,9 +588,9 @@ function EnhancedTradeEntryForm({
   // Load API factors when symbol changes
   useEffect(() => {
     if (formData.symbol && formData.symbol.length >= 2) {
-      loadAPIFactors(formData.symbol);
+      loadAPIFactors(formData.symbol, selectedIPS.id);
     }
-  }, [formData.symbol]);
+  }, [formData.symbol, selectedIPS.id]);
 
   // Calculate completion score
   useEffect(() => {
@@ -615,51 +615,29 @@ function EnhancedTradeEntryForm({
     setCompletionScore(totalRequired ? (totalCompleted / totalRequired) * 100 : 0);
   }, [formData]);
 
-  const loadAPIFactors = async (symbol: string) => {
+  const loadAPIFactors = async (symbol: string, ipsId: string) => {
     setApiStatus("loading");
     try {
-      // Simulate API call to your market data service
-      await new Promise(resolve => setTimeout(resolve, 1200));
+      const response = await fetch(`/api/trades/factors?symbol=${symbol}&ipsId=${ipsId}`);
+      const data = await response.json();
       
-      // Simulate API success/failure (85% success rate)
-      if (Math.random() > 0.15) {
-        // Create realistic mock data based on the actual API factors for this IPS
-        const apiFactorNames = getAPIFactors();
-        const mockData: Record<string, number> = {};
-        
-        apiFactorNames.forEach(factorName => {
-          switch (factorName) {
-            case 'P/E Ratio':
-              mockData[factorName] = symbol === 'AAPL' ? 28.5 : Math.random() * 30 + 10;
-              break;
-            case 'Beta':
-              mockData[factorName] = symbol === 'AAPL' ? 1.21 : Math.random() * 1.5 + 0.5;
-              break;
-            case 'Quarterly Revenue Growth YoY':
-              mockData[factorName] = symbol === 'AAPL' ? 8.1 : Math.random() * 20 - 5;
-              break;
-            case 'Return on Equity TTM':
-              mockData[factorName] = symbol === 'AAPL' ? 26.4 : Math.random() * 25 + 5;
-              break;
-            case 'Dividend Yield':
-              mockData[factorName] = symbol === 'AAPL' ? 0.52 : Math.random() * 4;
-              break;
-            case 'Market Capitalization':
-              mockData[factorName] = Math.random() * 1000000 + 100000; // In millions
-              break;
-            default:
-              mockData[factorName] = Math.random() * 100;
-          }
+      if (data.success && Object.keys(data.data.factors).length > 0) {
+        // Convert factor objects back to simple values for the form
+        const factorValues: Record<string, number> = {};
+        Object.entries(data.data.factors).forEach(([name, factorData]: [string, any]) => {
+          factorValues[name] = factorData.value;
         });
         
-        setFormData(prev => ({ ...prev, apiFactors: mockData }));
-        setApiStatus("connected");
+        setFormData(prev => ({ ...prev, apiFactors: factorValues }));
+        setApiStatus('connected');
       } else {
-        throw new Error("API temporarily unavailable");
+        // API failed or no data - user must enter manually
+        setApiStatus('disconnected');
       }
     } catch (error) {
       console.error("API Error:", error);
       setApiStatus("disconnected");
+      // User can still complete trade manually
     }
   };
 
@@ -889,7 +867,7 @@ function EnhancedTradeEntryForm({
                     </div>
 
                     {/* Manual input when API is down or for override */}
-                    {(apiStatus === "disconnected" || (!hasValue && apiStatus !== "loading")) && (
+                    {(apiStatus === "disconnected" || !hasValue) && (
                       <Input
                         type="number"
                         step={factor?.data_type === 'percentage' ? "0.01" : "0.01"}
@@ -910,7 +888,7 @@ function EnhancedTradeEntryForm({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => loadAPIFactors(formData.symbol)}
+                  onClick={() => loadAPIFactors(formData.symbol, selectedIPS.id)}
                   disabled={apiStatus === "loading"}
                   className="w-full flex items-center gap-2"
                 >

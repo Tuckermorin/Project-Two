@@ -8,11 +8,11 @@ async function testAPIConnections() {
 
   // Check environment variables
   console.log('\n1. Checking API keys...');
-  const alphaVantageKey = process.env.ALPHA_VANTAGE_API_KEY;
+  const alphaVantageKey = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY;
   const tradierKey = process.env.TRADIER_ACCESS_TOKEN;
 
   if (!alphaVantageKey || alphaVantageKey === 'your-alpha-vantage-key-here') {
-    console.log('⚠️  ALPHA_VANTAGE_API_KEY not set or is placeholder');
+    console.log('⚠️  NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY not set or is placeholder');
   } else {
     console.log('✅ Alpha Vantage API key is set');
   }

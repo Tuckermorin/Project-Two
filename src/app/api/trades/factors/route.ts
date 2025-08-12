@@ -13,10 +13,21 @@ export async function GET(request: NextRequest) {
     const symbol = searchParams.get('symbol');
     const ipsId = searchParams.get('ipsId');
     
-    if (!symbol || !ipsId) {
+    if (!symbol) {
       return NextResponse.json({ 
-        error: 'Missing required parameters: symbol, ipsId' 
+        error: 'Missing required parameter: symbol' 
       }, { status: 400 });
+    }
+
+    if (!ipsId || ipsId === 'temp') {
+      return NextResponse.json({
+        success: false,
+        data: {
+          factors: {},
+          apiStatus: 'disconnected',
+          timestamp: new Date().toISOString()
+        }
+      });
     }
 
     // Get IPS configuration from database
@@ -195,7 +206,10 @@ export async function GET(request: NextRequest) {
         factors: factorResults,
         apiStatus,
         failedFactors: failedFactors.length > 0 ? failedFactors : undefined,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        message: failedFactors.length > 0 ? 
+          `Partial success: ${failedFactors.length} factors failed to load` : 
+          'All factors loaded successfully'
       }
     });
 

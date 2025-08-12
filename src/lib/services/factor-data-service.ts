@@ -40,76 +40,52 @@ class FactorDataService {
   /**
    * Fetch API factors for a given symbol and IPS configuration
    */
- async fetchAPIFactors(
-  symbol: string, 
-  ipsFactors: string[]
-): Promise<APIFactorResponse> {
-  const apiFactors = ipsFactors.filter(factorName => 
-    this.isAPIFactor(factorName)
-  );
+  async fetchAPIFactors(
+    symbol: string, 
+    ipsId: string
+  ): Promise<APIFactorResponse> {
+    try {
+      console.log(`Fetching API factors for ${symbol} using IPS ${ipsId}`);
+      
+      // Try to get cached data first
+      const cacheKey = `api_factors_${symbol}_${ipsId}`;
+      const cached = this.getFromCache<APIFactorResponse>(cacheKey, 5 * 60 * 1000); // 5 minute TTL
+      
+      if (cached && Date.now() - cached.timestamp.getTime() < (5 * 60 * 1000)) {
+        console.log('Using cached API factor data');
+        return cached;
+      }
 
-  if (apiFactors.length === 0) {
-    return {
-      success: true,
-      factors: {},
-      apiStatus: 'connected',
-      timestamp: new Date()
-    };
-  }
+      // Use the real API endpoint
+      const response = await fetch(`/api/trades/factors?symbol=${symbol}&ipsId=${ipsId}`);
+      const data = await response.json();
 
-  try {
-    console.log(`Fetching API factors for ${symbol}:`, apiFactors);
-    
-    // Try to get cached data first
-    const cacheKey = `api_factors_${symbol}`;
-    const cached = this.getFromCache(cacheKey, 5 * 60 * 1000); // 5 minute cache
-    
-    if (cached) {
-    console.log('Using cached API factor data');
+      if (data.success) {
+        const apiResponse: APIFactorResponse = {
+          success: true,
+          factors: data.data.factors,
+          apiStatus: data.data.apiStatus as 'connected' | 'disconnected' | 'partial',
+          timestamp: new Date(data.data.timestamp)
+        };
 
-    // If your cache already stores the whole APIFactorResponse, great:
-    const cachedResp = cached as Partial<APIFactorResponse>;
+        // Cache successful response
+        this.setCache(cacheKey, apiResponse, 5 * 60 * 1000); // 5 minute TTL
+        return apiResponse;
+      } else {
+        throw new Error(data.error || 'API request failed');
+      }
 
-    const result: APIFactorResponse = {
-        success: cachedResp.success ?? true,
-        factors: cachedResp.factors ?? {},
-        apiStatus: cachedResp.apiStatus ?? "connected",
-        timestamp: cachedResp.timestamp ?? new Date(),
-    };
-
-    return result;
-    }
-
-    // Use the real API endpoint we created
-    const response = await fetch(`/api/trades/factors?symbol=${symbol}&ipsId=temp`);
-    const data = await response.json();
-
-    if (data.success) {
-      const apiResponse: APIFactorResponse = {
-        success: true,
-        factors: data.data.factors,
-        apiStatus: data.data.apiStatus as 'connected' | 'disconnected' | 'partial',
-        timestamp: new Date(data.data.timestamp)
+    } catch (error) {
+      console.error('Error fetching API factors:', error);
+      return {
+        success: false,
+        factors: {},
+        apiStatus: 'disconnected',
+        timestamp: new Date(),
+        failedFactors: []
       };
-
-      // Cache successful response
-      this.setCache(cacheKey, apiResponse, 5 * 60 * 1000);
-      return apiResponse;
-    } else {
-      throw new Error(data.error || 'API request failed');
     }
-
-  } catch (error) {
-    console.error('Error fetching API factors:', error);
-    return {
-      success: false,
-      factors: {},
-      apiStatus: 'disconnected',
-      timestamp: new Date(),
-      failedFactors: apiFactors
-    };
   }
-}
 
   /**
    * Fetch a single factor from the appropriate API
@@ -286,10 +262,11 @@ class FactorDataService {
   async getTradeFactorData(
     tradeId: string,
     symbol: string,
+    ipsId: string,        // Add ipsId parameter
     ipsFactors: string[]
   ): Promise<TradeFactorData> {
-    // Fetch API factors
-    const apiResponse = await this.fetchAPIFactors(symbol, ipsFactors);
+    // Fetch API factors - now we have the proper ipsId
+    const apiResponse = await this.fetchAPIFactors(symbol, ipsId);
     
     // Get manual factors from storage (in real app, from database)
     const manualFactors = await this.getStoredManualFactors(tradeId);
@@ -312,7 +289,7 @@ class FactorDataService {
     
     return {
       tradeId,
-      ipsId: 'current-ips', // Would be passed in
+      ipsId, // Now use the actual ipsId parameter
       symbol,
       apiFactors: apiResponse.factors,
       manualFactors,

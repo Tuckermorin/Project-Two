@@ -87,6 +87,7 @@ interface QuarterlyEarningsReport {
 }
 
 interface QuoteData {
+  price: any;
   '01. symbol': string;
   '02. open': string;
   '03. high': string;
