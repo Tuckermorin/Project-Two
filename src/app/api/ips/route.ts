@@ -2,16 +2,23 @@
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+// Verify environment variables
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+  console.error('Missing Supabase environment variables for API route');
+}
+
 const supabase = createClient(
   process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // server-only
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
 type NewFactor = { factor_id: string; weight: number; target_value?: number | null };
 
 export async function POST(req: NextRequest) {
+  console.log('API Route: Received IPS creation request');
   try {
     const body = await req.json();
+    console.log('API Route: Request body:', JSON.stringify(body, null, 2));
     const {
       user_id = 'test-user-123', // until you wire auth
       name,
@@ -67,7 +74,7 @@ export async function POST(req: NextRequest) {
 
     return new Response(JSON.stringify({ ips_id, rows: data }), { status: 201 });
   } catch (e: any) {
-    console.error('Unexpected /api/ips POST error:', e);
+    console.error('API Route: Unexpected error:', e);
     return new Response(JSON.stringify({ error: e.message }), { status: 500 });
   }
 }

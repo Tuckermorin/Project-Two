@@ -409,13 +409,22 @@ export type NewIPS = {
 };
 
 export async function createIPS(input: NewIPS) {
+  console.log('Client: Sending IPS creation request:', input);
+  
   const res = await fetch('/api/ips', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(input),
   });
+  
   const json = await res.json();
-  if (!res.ok) throw new Error(json.error || 'Failed to create IPS');
+  console.log('Client: Response status:', res.status);
+  console.log('Client: Response data:', json);
+  
+  if (!res.ok) {
+    throw new Error(json.error || `Failed to create IPS: ${res.status}`);
+  }
+  
   return json as { ips_id: string; rows: any[] };
 }
 
