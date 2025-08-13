@@ -229,40 +229,68 @@ export default function IPSPage() {
 
   const handleSaveIPS = async (ipsData: any) => {
     try {
+      console.log('=== Starting IPS Save ===');
+      console.log('IPS Data received:', ipsData);
+      console.log('Selected factors:', Array.from(state.selectedFactors));
+      console.log('Factor configurations:', state.factorConfigurations);
+      
+      // Prepare the factors array for the API
+      const factors = Array.from(state.selectedFactors).map(factorName => {
+        const config = state.factorConfigurations[factorName];
+        
+        if (!config) {
+          console.warn(`No configuration found for factor: ${factorName}`);
+          return null;
+        }
+        
+        // The factorId should already be correct (e.g., 'opt-delta', 'av-pe-ratio')
+        // from the ips-factor-configuration component
+        console.log(`Processing factor ${factorName}:`, {
+          factorId: config.factorId,
+          weight: config.weight,
+          targetValue: config.targetValue
+        });
+        
+        return {
+          factor_id: config.factorId,  // This must match factor_definitions table
+          weight: config.weight || 5,
+          target_value: typeof config.targetValue === 'number' 
+            ? config.targetValue 
+            : (config.targetValue ? parseFloat(config.targetValue as string) : null)
+        };
+      }).filter(Boolean); // Remove any null entries
+
+      console.log('Formatted factors for API:', factors);
+
+      // Build complete IPS data
       const completeIPSData = {
-        ...ipsData,
-        strategies: state.selectedStrategies
+        name: ipsData.name || 'Untitled IPS',
+        description: ipsData.description || '',
+        strategies: state.selectedStrategies,
+        factors: factors
       };
+
+      console.log('Complete IPS data to send:', completeIPSData);
 
       let ipsConfig: IPSConfiguration;
       
       if (state.currentIPSId) {
-        // Update existing
+        // Update existing IPS
         ipsConfig = await ipsDataService.updateIPS(state.currentIPSId, completeIPSData);
         setAllIPSs(prevIPSs => 
           prevIPSs.map(ips => 
             ips.id === state.currentIPSId ? { ...ips, ...ipsConfig } : ips
           )
         );
+        console.log('✅ IPS updated successfully:', ipsConfig);
       } else {
-        // Create new
+        // Create new IPS
         ipsConfig = await ipsDataService.createIPS(userId, completeIPSData);
         setAllIPSs(prevIPSs => [...prevIPSs, ipsConfig]);
+        console.log('✅ IPS created successfully:', ipsConfig);
       }
       
-      // Save factor configurations
-      const factorConfigs = Array.from(state.selectedFactors).map(factorName => {
-        const config = state.factorConfigurations[factorName];
-        return {
-          factorId: config.factorId,
-          weight: config.weight,
-          enabled: config.enabled,
-          targetConfig: config.targetConfig
-        };
-      });
-      
-      await ipsDataService.saveFactorConfigurations(ipsConfig.id, factorConfigs);
-      
+      // Clear the form state and return to list view
       setState(prev => ({ 
         ...prev, 
         step: 'list', 
@@ -272,9 +300,18 @@ export default function IPSPage() {
         factorConfigurations: {}
       }));
       
+      // Show success (if you have toast)
+      // toast.success(`IPS "${completeIPSData.name}" saved successfully!`);
+      
     } catch (error) {
-      console.error('Error saving IPS:', error);
-      alert('Failed to save IPS. Please try again.');
+      console.error('❌ Error saving IPS:', error);
+      if (error instanceof Error) {
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack
+        });
+      }
+      alert(`Failed to save IPS: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   };
 

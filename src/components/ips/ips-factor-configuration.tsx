@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import { Calculator, Users, TrendingUp, ChevronRight, Target, Weight, ArrowLeft } from 'lucide-react';
+import { ALL_FACTORS } from '@/lib/services/ips-data-service';
 
 interface FactorConfiguration {
   weight: number;
@@ -49,26 +50,26 @@ export function IPSFactorConfiguration({
   const [activeTab, setActiveTab] = useState("quantitative");
 
   // Helper function to get factor info from definitions
-  const getFactorInfo = (factorName: string) => {
-    if (!factorDefinitions?.raw) {
-      // Fallback logic if definitions not available
-      const isQualitative = factorName.includes('Leadership') || factorName.includes('Moat') || factorName.includes('Clarity');
-      const isOptions = factorName.includes('Volatility') || factorName.includes('Delta') || factorName.includes('Interest') || factorName.includes('Theta') || factorName.includes('Gamma') || factorName.includes('Vega');
-      return {
-        type: isQualitative ? 'qualitative' : isOptions ? 'options' : 'quantitative',
-        category: isQualitative ? 'Management & Governance' : isOptions ? 'Options Metrics' : 'Income Statement',
-        id: `factor-${factorName.toLowerCase().replace(/\s+/g, '-')}`
-      };
-    }
-    
-    // Use real factor definitions
-    const factor = factorDefinitions.raw.find((f: any) => f.name === factorName);
-    return factor || {
-      type: 'quantitative',
-      category: 'Unknown',
-      id: `factor-${factorName.toLowerCase().replace(/\s+/g, '-')}`
+const getFactorInfo = (factorName: string) => {
+  // Look for the factor in ALL_FACTORS by name
+  const factor = ALL_FACTORS.find((f: any) => f.name === factorName);
+  
+  if (factor) {
+    return {
+      type: factor.type as 'quantitative' | 'qualitative' | 'options',
+      category: factor.category,
+      id: factor.id  // This will be the correct ID like 'opt-delta', 'av-pe-ratio', etc.
     };
+  }
+  
+  // Fallback if not found (shouldn't happen if factors are selected from the list)
+  console.warn(`Factor "${factorName}" not found in ALL_FACTORS`);
+  return {
+    type: 'quantitative' as const,
+    category: 'Unknown',
+    id: `unknown-${factorName.toLowerCase().replace(/\s+/g, '-')}`
   };
+};
 
   // Initialize configurations if not provided
   useEffect(() => {

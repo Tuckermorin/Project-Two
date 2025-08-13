@@ -295,40 +295,83 @@ class IPSDataService {
     return Promise.resolve(null);
   }
 
-  async createIPS(userId: string, ipsData: Partial<IPSConfiguration>): Promise<IPSConfiguration> {
-    const newIPS = {
+  async createIPS(userId: string, ipsData: any): Promise<IPSConfiguration> {
+    console.log('=== IPSDataService.createIPS ===');
+    console.log('User ID:', userId);
+    console.log('IPS Data received:', ipsData);
+    
+    // Build the request body for the API
+    const requestBody = {
       user_id: userId,
       name: ipsData.name || 'Untitled Strategy',
-      description: ipsData.description,
-      strategies: ipsData.strategies || [],
+      description: ipsData.description || '',
       is_active: ipsData.is_active ?? true,
-      created_at: new Date().toISOString(),
-      ...ipsData
+      factors: ipsData.factors || []
     };
+
+    console.log('Request body for API:', requestBody);
+    console.log('Factors being sent:', requestBody.factors);
 
     try {
       const response = await fetch('/api/ips', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newIPS)
+        body: JSON.stringify(requestBody)
       });
 
+      const responseText = await response.text();
+      console.log('API Response status:', response.status);
+      console.log('API Response text:', responseText);
+
       if (!response.ok) {
-        const errorText = await response.text();
-        console.error('Failed to create IPS:', errorText);
-        throw new Error(errorText || 'Failed to create IPS');
+        console.error('❌ API returned error:', responseText);
+        let errorMessage = 'Failed to create IPS';
+        try {
+          const errorJson = JSON.parse(responseText);
+          errorMessage = errorJson.error || errorMessage;
+        } catch {
+          errorMessage = responseText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
 
-      const { data } = await response.json();
-      console.log('IPS created:', data);
+      // Parse the successful response
+      let responseData;
+      try {
+        responseData = JSON.parse(responseText);
+      } catch (e) {
+        console.error('Failed to parse successful response:', e);
+        throw new Error('Invalid response format from server');
+      }
 
+      console.log('✅ IPS created successfully. Response:', responseData);
+
+      // Transform API response to match IPSConfiguration interface
+      const ipsConfig: IPSConfiguration = {
+        id: responseData.ips_id,
+        user_id: userId,
+        name: ipsData.name || 'Untitled Strategy',
+        description: ipsData.description || '',
+        strategies: ipsData.strategies || [],
+        is_active: ipsData.is_active ?? true,
+        total_factors: ipsData.factors?.length || 0,
+        active_factors: ipsData.factors?.filter((f: any) => f.weight > 0).length || 0,
+        total_weight: ipsData.factors?.reduce((sum: number, f: any) => sum + (f.weight || 0), 0) || 0,
+        avg_weight: ipsData.factors?.length > 0 
+          ? (ipsData.factors.reduce((sum: number, f: any) => sum + (f.weight || 0), 0) / ipsData.factors.length)
+          : 0,
+        created_at: new Date().toISOString()
+      };
+
+      // Store in local cache
       const userIPSs = this.ipsConfigurations.get(userId) || [];
-      userIPSs.push(data);
+      userIPSs.push(ipsConfig);
       this.ipsConfigurations.set(userId, userIPSs);
 
-      return data as IPSConfiguration;
+      return ipsConfig;
+      
     } catch (error) {
-      console.error('Error creating IPS:', error);
+      console.error('❌ Error in createIPS:', error);
       throw error;
     }
   }
