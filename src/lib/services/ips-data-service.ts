@@ -330,6 +330,7 @@ class IPSDataService {
             is_active: toBoolean(
               (r as any)?.ips_is_active ?? (r as any)?.is_active ?? (r as any)?.active
             ),
+            is_active: toBoolean(r?.is_active),
             // FIX: Add the missing required properties
             created_at: String(r?.created_at ?? new Date().toISOString()),
             total_factors: Number(r?.total_factors ?? 0),
