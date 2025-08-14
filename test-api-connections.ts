@@ -17,12 +17,6 @@ async function testAPIConnections() {
     console.log('✅ Alpha Vantage API key is set');
   }
 
-  if (!tradierKey || tradierKey === 'your-tradier-token-here') {
-    console.log('⚠️  TRADIER_ACCESS_TOKEN not set or is placeholder');
-  } else {
-    console.log('✅ Tradier API key is set');
-  }
-
   // Test Alpha Vantage (if key is set)
   if (alphaVantageKey && alphaVantageKey !== 'your-alpha-vantage-key-here') {
     console.log('\n2. Testing Alpha Vantage connection...');
@@ -33,19 +27,6 @@ async function testAPIConnections() {
       console.log(`   AAPL price: $${quote.price}`);
     } catch (error) {
       console.log('❌ Alpha Vantage test failed:', error);
-    }
-  }
-
-  // Test Tradier (if key is set)
-  if (tradierKey && tradierKey !== 'your-tradier-token-here') {
-    console.log('\n3. Testing Tradier connection...');
-    try {
-      const tradier = getTradierClient();
-      const quote = await tradier.getQuote('AAPL');
-      console.log('✅ Tradier connection successful!');
-      console.log(`   AAPL last: $${quote.last}, volume: ${quote.volume.toLocaleString()}`);
-    } catch (error) {
-      console.log('❌ Tradier test failed:', error);
     }
   }
 

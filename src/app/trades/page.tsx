@@ -1,7 +1,7 @@
 // src/app/trades/page.tsx
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -27,160 +27,281 @@ import {
   WifiOff,
 } from "lucide-react";
 
-// Import existing services
-import { ipsDataService, type IPSConfiguration, ALL_FACTORS } from "@/lib/services/ips-data-service";
+// Service imports (unchanged)
+import { ipsDataService, type IPSConfiguration } from "@/lib/services/ips-data-service";
 
-// Types
-interface TradeFormData {
-  name: string;
-  symbol: string;
-  currentPrice: number;
-  expirationDate: string;
-  contractType: string;
-  numberOfContracts: number;
-  shortStrike: number;
-  longStrike: number;
-  creditReceived: number;
-  ipsFactors: Record<string, any>;
-  apiFactors: Record<string, any>;
-}
+// -----------------------------
+// Local types + normalizer (builder-driven IPS)
+// -----------------------------
 
 type ViewType = "selection" | "entry" | "prospective" | "active";
+
+type ContractType =
+  | "put-credit-spread"
+  | "call-credit-spread"
+  | "long-call"
+  | "long-put"
+  | "iron-condor"
+  | "covered-call"
+  | "buy-hold";
+
+export type FactorOperator = "lt" | "lte" | "gt" | "gte" | "between" | "eq" | "neq";
+
+export interface FactorRule {
+  key: string; // e.g., 'delta' | 'market_cap' | 'price' | 'management_quality'
+  label?: string;
+  source: "api" | "manual";
+  dataType: "number" | "qualitative";
+  operator: FactorOperator;
+  threshold?: number; // lt/lte/gt/gte/eq/neq
+  min?: number; // between
+  max?: number; // between
+  weight?: number; // default 1
+  unit?: "%" | "$" | "raw";
+}
+
+// Extend the service type locally without changing the service definition
+export type IPSWithRules = IPSConfiguration & {
+  factorRules?: FactorRule[]; // preferred (saved by the IPS builder)
+  // legacy fallbacks to be resilient during migration
+  configurations?: Record<
+    string,
+    {
+      enabled?: boolean;
+      operator?: FactorOperator;
+      threshold?: number;
+      min?: number;
+      max?: number;
+      source?: "api" | "manual";
+      dataType?: "number" | "qualitative";
+      label?: string;
+      unit?: "%" | "$" | "raw";
+      weight?: number;
+    }
+  >;
+  factors?: string[]; // last resort: factor keys only
+};
+
+function normalizeIPSRules(ips: IPSWithRules): FactorRule[] {
+  // 1) canonical array from builder
+  if (Array.isArray(ips.factorRules) && ips.factorRules.length) {
+    return ips.factorRules.map((r) => ({
+      source: "manual",
+      dataType: "number",
+      operator: "eq",
+      weight: 1,
+      unit: "raw",
+      ...r,
+    }));
+  }
+  // 2) object map fallback
+  if (ips.configurations && typeof ips.configurations === "object") {
+    return Object.entries(ips.configurations)
+      .filter(([, cfg]) => cfg?.enabled !== false)
+      .map(([key, cfg]) => ({
+        key,
+        label: cfg?.label,
+        source: cfg?.source ?? "manual",
+        dataType: cfg?.dataType ?? "number",
+        operator: cfg?.operator ?? "eq",
+        threshold: cfg?.threshold,
+        min: cfg?.min,
+        max: cfg?.max,
+        weight: cfg?.weight ?? 1,
+        unit: cfg?.unit ?? "raw",
+      }));
+  }
+  // 3) factor key list fallback → qualitative manual >= 3
+  if (Array.isArray(ips.factors) && ips.factors.length) {
+    return ips.factors.map((key: string) => ({
+      key,
+      label: key,
+      source: "manual",
+      dataType: "qualitative",
+      operator: "gte",
+      threshold: 3,
+      weight: 1,
+      unit: "raw",
+    }));
+  }
+  return [];
+}
+
+function ruleText(r: FactorRule) {
+  switch (r.operator) {
+    case "lt":
+      return `< ${r.threshold}`;
+    case "lte":
+      return `≤ ${r.threshold}`;
+    case "gt":
+      return `> ${r.threshold}`;
+    case "gte":
+      return `≥ ${r.threshold}`;
+    case "eq":
+      return `= ${r.threshold}`;
+    case "neq":
+      return `≠ ${r.threshold}`;
+    case "between":
+      return `${r.min} to ${r.max}`;
+    default:
+      return "";
+  }
+}
+
+function evaluateRule(r: FactorRule, raw: unknown): boolean {
+  if (raw === undefined || raw === "") return false;
+  const v = r.dataType === "number" ? Math.abs(Number(raw)) : Number(raw);
+  switch (r.operator) {
+    case "lt":
+      return v < (r.threshold ?? Infinity);
+    case "lte":
+      return v <= (r.threshold ?? Infinity);
+    case "gt":
+      return v > (r.threshold ?? -Infinity);
+    case "gte":
+      return v >= (r.threshold ?? -Infinity);
+    case "eq":
+      return v === (r.threshold ?? v);
+    case "neq":
+      return v !== (r.threshold ?? null);
+    case "between":
+      return v >= (r.min ?? -Infinity) && v <= (r.max ?? Infinity);
+    default:
+      return false;
+  }
+}
+
+// -----------------------------
+// Trade form data
+// -----------------------------
+
+interface TradeFormData {
+  // universal
+  name?: string;
+  symbol: string;
+  currentPrice?: number;
+  expirationDate?: string;
+  contractType: ContractType;
+  numberOfContracts?: number;
+
+  // PCS
+  shortPutStrike?: number;
+  longPutStrike?: number;
+  creditReceived?: number; // per spread
+
+  // CCS
+  shortCallStrike?: number;
+  longCallStrike?: number;
+
+  // Long options
+  optionStrike?: number;
+  debitPaid?: number; // per contract
+
+  // Covered call
+  sharesOwned?: number;
+  callStrike?: number;
+  premiumReceived?: number; // per contract
+
+  // Buy/Hold
+  shares?: number;
+  entryPrice?: number;
+
+  // IPS factors (values only)
+  ipsFactors: Record<string, number | "">;
+  apiFactors: Record<string, number | "">;
+}
+
+interface ProspectiveTrade {
+  id: string;
+  ips: { id: string; name: string };
+  data: TradeFormData;
+  createdAt: string;
+  score?: number;
+}
+
+// -----------------------------
+// Page
+// -----------------------------
 
 export default function TradesPage() {
   const [currentView, setCurrentView] = useState<ViewType>("selection");
   const [selectedIPS, setSelectedIPS] = useState<IPSConfiguration | null>(null);
   const [activeIPSs, setActiveIPSs] = useState<IPSConfiguration[]>([]);
   const [calculatedScore, setCalculatedScore] = useState<number | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState<boolean>(true);
+  const [prospectiveTrades, setProspectiveTrades] = useState<ProspectiveTrade[]>([]);
 
-  const userId = 'user-123'; // Replace with actual user ID from auth
+  const userId = "user-123"; // TODO: replace with auth
 
-  // Load IPS configurations on mount
   useEffect(() => {
     const loadIPSData = async () => {
       try {
         setIsLoading(true);
         const userIPSs = await ipsDataService.getAllUserIPSs(userId);
-        const activeOnly = userIPSs.filter(ips => ips.is_active);
+        const activeOnly = userIPSs.filter((ips) => ips.is_active);
         setActiveIPSs(activeOnly);
-      } catch (error) {
-        console.error('Error loading IPS data:', error);
+      } catch (e) {
+        console.error("Error loading IPS data:", e);
       } finally {
         setIsLoading(false);
       }
     };
-
     loadIPSData();
   }, [userId]);
 
-  const handleIPSSelection = (ips: IPSConfiguration) => {
+  function handleIPSSelection(ips: IPSConfiguration) {
     setSelectedIPS(ips);
     setCurrentView("entry");
     setCalculatedScore(null);
-  };
+  }
 
-  const handleTradeSubmit = async (formData: TradeFormData) => {
-    try {
-      setIsLoading(true);
-
-      // In a real implementation, you'd save to your database
-      // For now, just simulate the save
-      const tradeId = `trade-${Date.now()}`;
-      
-      console.log('Saving trade:', {
-        tradeId,
-        ipsId: selectedIPS?.id,
-        formData,
-        timestamp: new Date().toISOString()
-      });
-
-      // Simulate API delay
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      alert('Trade saved to prospective trades!');
-      setCurrentView("prospective");
-      
-    } catch (error) {
-      console.error("Error submitting trade:", error);
-      alert("Error saving trade. Please try again.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleCalculateScore = async (formData: TradeFormData) => {
+  function handleTradeSubmit(formData: TradeFormData, score: number | null) {
     if (!selectedIPS) return;
-    
-    try {
-      setIsLoading(true);
+    const tradeId = `trade-${Date.now()}`;
+    const record: ProspectiveTrade = {
+      id: tradeId,
+      ips: { id: selectedIPS.id, name: selectedIPS.name },
+      data: formData,
+      createdAt: new Date().toISOString(),
+      score: score ?? undefined,
+    };
+    setProspectiveTrades((prev) => [record, ...prev]);
+    setCurrentView("prospective");
+  }
 
-      // Combine all factor values
-      const allFactors = {
-        ...formData.apiFactors,
-        ...formData.ipsFactors,
-      };
-
-      // Simple scoring algorithm (you can replace with your actual scoring logic)
-      const factorValues = Object.values(allFactors).filter(v => v !== undefined && v !== '');
-      const factorCount = Object.keys(allFactors).length;
-      
-      if (factorValues.length === 0) {
-        throw new Error('No factor values available for scoring');
-      }
-
-      // Simulate score calculation delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Basic scoring: normalize qualitative factors (1-5) and quantitative factors
-      const normalizedScores = factorValues.map(value => {
-        if (typeof value === 'number') {
-          if (value >= 1 && value <= 5) {
-            // Qualitative factor (1-5 scale) -> convert to 0-100
-            return (value - 1) * 25;
-          } else {
-            // Quantitative factor - apply basic normalization
-            return Math.min(100, Math.max(0, value * 2 + 50));
-          }
-        }
-        return 50; // Default for non-numeric
-      });
-
-      const averageScore = normalizedScores.reduce((sum, score) => sum + score, 0) / normalizedScores.length;
-      
-      // Add some randomization to make it realistic
-      const finalScore = Math.min(100, Math.max(0, averageScore + (Math.random() - 0.5) * 10));
-      
-      setCalculatedScore(finalScore);
-      
-    } catch (error) {
-      console.error("Error calculating score:", error);
-      alert("Error calculating IPS score. Please try again.");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  function handleCalculateScore(formData: TradeFormData) {
+    if (!selectedIPS) return;
+    const rules = normalizeIPSRules(selectedIPS as IPSWithRules);
+    const totalWeight = rules.reduce((s, r) => s + (r.weight ?? 1), 0) || 1;
+    const achieved = rules.reduce((s, r) => {
+      const bag = r.source === "api" ? formData.apiFactors : formData.ipsFactors;
+      const pass = evaluateRule(r, bag[r.key]);
+      return s + (pass ? (r.weight ?? 1) : 0);
+    }, 0);
+    const score = (achieved / totalWeight) * 100;
+    setCalculatedScore(score);
+  }
 
   if (isLoading && currentView === "selection") {
     return (
       <div className="max-w-6xl mx-auto p-6">
         <div className="flex items-center justify-center py-12">
           <RefreshCw className="h-8 w-8 animate-spin text-blue-600" />
-          <span className="ml-2 text-gray-600">Loading IPS configurations...</span>
+          <span className="ml-2 text-gray-600">Loading IPS configurations…</span>
         </div>
       </div>
     );
   }
 
-  // IPS Selection View
+  // -----------------------------
+  // Selection view: show active IPS tiles (driven by builder rules)
+  // -----------------------------
   if (currentView === "selection") {
     return (
       <div className="max-w-6xl mx-auto p-6">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Select Investment Performance System</h1>
-          <p className="text-gray-600">
-            Choose an IPS configuration to build your trade upon
-          </p>
+          <h1 className="text-3xl font-bold mb-2">Choose an IPS to Make a Trade</h1>
+          <p className="text-gray-600">Only active IPS configurations are shown</p>
         </div>
 
         {activeIPSs.length === 0 ? (
@@ -188,8 +309,8 @@ export default function TradesPage() {
             <CardContent className="text-center py-12">
               <Target className="h-12 w-12 text-gray-400 mx-auto mb-4" />
               <h3 className="text-lg font-medium text-gray-900 mb-2">No Active IPS Configurations</h3>
-              <p className="text-gray-600 mb-6">Create an IPS configuration first to start trading</p>
-              <Button onClick={() => window.location.href = '/ips'}>
+              <p className="text-gray-600 mb-6">Create an IPS first to start trading</p>
+              <Button onClick={() => (window.location.href = "/ips")}>
                 <Plus className="h-4 w-4 mr-2" />
                 Create IPS Configuration
               </Button>
@@ -197,36 +318,15 @@ export default function TradesPage() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {activeIPSs.map((ips) => {
-              // Calculate factor statistics from actual IPS data
-              const configuredFactors = ips.configurations
-                ? Object.keys(ips.configurations)
-                : ips.factors || [];
-
-              const activeFactorNames = ips.factors
-                ? ips.factors
-                : configuredFactors.filter(
-                    name => ips.configurations?.[name]?.enabled !== false
-                  );
-
-              const totalFactors = configuredFactors.length;
-              const activeFactors = activeFactorNames.length;
-
-              const apiFactors = configuredFactors.filter(name => {
-                const def = ALL_FACTORS.find(f => f.name === name);
-                return def && def.source === 'alpha_vantage';
-              }).length;
-
-              const manualFactors = configuredFactors.filter(name => {
-                const def = ALL_FACTORS.find(f => f.name === name);
-                return def && !def.source;
-              }).length;
+            {activeIPSs.map((ipsRaw) => {
+              const ips = ipsRaw as IPSWithRules;
+              const rules = normalizeIPSRules(ips);
+              const total = rules.length;
+              const apiCount = rules.filter((r) => r.source === "api").length;
+              const manualCount = total - apiCount;
 
               return (
-                <Card
-                  key={ips.id}
-                  className="cursor-pointer hover:shadow-lg transition-shadow"
-                >
+                <Card key={ips.id} className="hover:shadow-lg transition-shadow">
                   <CardHeader>
                     <div className="flex items-center justify-between">
                       <CardTitle className="text-lg">{ips.name}</CardTitle>
@@ -244,18 +344,18 @@ export default function TradesPage() {
                         <span className="font-medium">{ips.strategies.length}</span>
                       </div>
                       <div className="flex items-center justify-between">
-                        <span className="text-gray-600">Factors:</span>
-                        <span className="font-medium">{activeFactors} / {totalFactors} active</span>
+                        <span className="text-gray-600">IPS Factors:</span>
+                        <span className="font-medium">{total}</span>
                       </div>
-                      <Progress value={totalFactors ? (activeFactors / totalFactors) * 100 : 0} className="h-2" />
+                      <Progress value={total ? (apiCount / total) * 100 : 0} className="h-2" />
                       <div className="flex items-center justify-between mt-1 text-xs">
                         <div className="flex items-center gap-1">
                           <Database className="h-3 w-3 text-blue-600" />
-                          <span className="font-medium">{apiFactors} API</span>
+                          <span className="font-medium">{apiCount} API</span>
                         </div>
                         <div className="flex items-center gap-1">
                           <Users className="h-3 w-3 text-orange-600" />
-                          <span className="font-medium">{manualFactors} Manual</span>
+                          <span className="font-medium">{manualCount} Manual</span>
                         </div>
                       </div>
                     </div>
@@ -264,29 +364,23 @@ export default function TradesPage() {
                       <div className="pt-3 border-t">
                         <div className="grid grid-cols-3 gap-2 text-xs">
                           <div className="text-center">
-                            <div className="font-medium text-green-600">
-                              {ips.performance.winRate}%
-                            </div>
+                            <div className="font-medium text-green-600">{ips.performance.winRate}%</div>
                             <div className="text-gray-500">Win Rate</div>
                           </div>
                           <div className="text-center">
-                            <div className="font-medium text-blue-600">
-                              {ips.performance.avgROI}%
-                            </div>
+                            <div className="font-medium text-blue-600">{ips.performance.avgROI}%</div>
                             <div className="text-gray-500">Avg ROI</div>
                           </div>
                           <div className="text-center">
-                            <div className="font-medium text-gray-700">
-                              {ips.performance.totalTrades}
-                            </div>
+                            <div className="font-medium text-gray-700">{ips.performance.totalTrades}</div>
                             <div className="text-gray-500">Trades</div>
                           </div>
                         </div>
                       </div>
                     )}
 
-                    <Button onClick={() => handleIPSSelection(ips)} className="w-full mt-4">
-                      Select This IPS
+                    <Button onClick={() => handleIPSSelection(ipsRaw)} className="w-full mt-4">
+                      Make Trade
                     </Button>
                   </CardContent>
                 </Card>
@@ -298,29 +392,27 @@ export default function TradesPage() {
     );
   }
 
-  // Trade Entry View
+  // -----------------------------
+  // Entry view: dynamic strategy inputs + IPS factor inputs
+  // -----------------------------
   if (currentView === "entry" && selectedIPS) {
     return (
       <div className="max-w-6xl mx-auto p-6">
         <div className="mb-6 flex items-center gap-4">
-          <Button
-            variant="outline"
-            onClick={() => setCurrentView("selection")}
-            className="flex items-center gap-2"
-          >
+          <Button variant="outline" onClick={() => setCurrentView("selection")} className="flex items-center gap-2">
             <ArrowLeft className="h-4 w-4" />
             Back to IPS Selection
           </Button>
           <div>
-            <h1 className="text-3xl font-bold">New Trade Entry</h1>
+            <h1 className="text-3xl font-bold">New Trade</h1>
             <p className="text-gray-600">IPS: {selectedIPS.name}</p>
           </div>
         </div>
 
         <EnhancedTradeEntryForm
           selectedIPS={selectedIPS}
-          onSubmit={handleTradeSubmit}
-          onCalculateScore={handleCalculateScore}
+          onSubmit={(fd, score) => handleTradeSubmit(fd, score)}
+          onCalculateScore={(fd) => handleCalculateScore(fd)}
           onCancel={() => setCurrentView("selection")}
           isLoading={isLoading}
           calculatedScore={calculatedScore}
@@ -329,8 +421,13 @@ export default function TradesPage() {
     );
   }
 
-  // Prospective Trades View
+  // -----------------------------
+  // Prospective Trades view
+  // -----------------------------
   if (currentView === "prospective") {
+    const fmt = (n?: number | string) =>
+      n === undefined || n === "" ? "—" : typeof n === "number" ? (Math.abs(n) >= 1 ? n.toFixed(2) : n.toString()) : n;
+
     return (
       <div className="max-w-6xl mx-auto p-6">
         <div className="mb-6 flex items-center justify-between">
@@ -343,21 +440,18 @@ export default function TradesPage() {
               <Plus className="h-4 w-4 mr-2" />
               New Trade
             </Button>
-            <Button variant="outline" onClick={() => setCurrentView("active")}>
-              View Active Trades
-            </Button>
+            <Button variant="outline" onClick={() => setCurrentView("active")}>View Active Trades</Button>
           </div>
         </div>
 
         <div className="space-y-6">
-          {/* Summary Cards */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card>
               <CardContent className="p-4">
                 <div className="flex items-center gap-2">
                   <FileText className="h-5 w-5 text-blue-600" />
                   <div>
-                    <div className="text-2xl font-bold">0</div>
+                    <div className="text-2xl font-bold">{prospectiveTrades.length}</div>
                     <div className="text-sm text-gray-600">Pending</div>
                   </div>
                 </div>
@@ -368,7 +462,20 @@ export default function TradesPage() {
                 <div className="flex items-center gap-2">
                   <Target className="h-5 w-5 text-green-600" />
                   <div>
-                    <div className="text-2xl font-bold">$0</div>
+                    <div className="text-2xl font-bold">
+                      $
+                      {prospectiveTrades
+                        .reduce((acc, t) => {
+                          const d = t.data;
+                          const credit =
+                            d.creditReceived ??
+                            d.premiumReceived ??
+                            (d.debitPaid ? -Math.abs(d.debitPaid) : 0);
+                          const qty = d.numberOfContracts ?? (d.shares ? d.shares / 100 : 0) ?? 0;
+                          return acc + (credit || 0) * (qty || 0) * 100;
+                        }, 0)
+                        .toFixed(0)}
+                    </div>
                     <div className="text-sm text-gray-600">Potential Credit</div>
                   </div>
                 </div>
@@ -379,7 +486,14 @@ export default function TradesPage() {
                 <div className="flex items-center gap-2">
                   <BarChart3 className="h-5 w-5 text-purple-600" />
                   <div>
-                    <div className="text-2xl font-bold">0</div>
+                    <div className="text-2xl font-bold">
+                      {prospectiveTrades.length
+                        ? (
+                            prospectiveTrades.reduce((s, t) => s + (t.score ?? 0), 0) /
+                            prospectiveTrades.filter((t) => t.score !== undefined).length
+                          ).toFixed(1)
+                        : "—"}
+                    </div>
                     <div className="text-sm text-gray-600">Avg Score</div>
                   </div>
                 </div>
@@ -390,7 +504,7 @@ export default function TradesPage() {
                 <div className="flex items-center gap-2">
                   <TrendingUp className="h-5 w-5 text-orange-600" />
                   <div>
-                    <div className="text-2xl font-bold">0%</div>
+                    <div className="text-2xl font-bold">—</div>
                     <div className="text-sm text-gray-600">Win Rate</div>
                   </div>
                 </div>
@@ -398,28 +512,84 @@ export default function TradesPage() {
             </Card>
           </div>
 
-          {/* Prospective Trades Table */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <FileText className="h-5 w-5" />
-                Pending Trades
+                <FileText className="h-5 w-5" /> Pending Trades
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-center py-12">
-                <TrendingUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  No prospective trades
-                </h3>
-                <p className="text-gray-600 mb-6">
-                  Create your first trade using an IPS configuration
-                </p>
-                <Button onClick={() => setCurrentView("selection")}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create New Trade
-                </Button>
-              </div>
+              {prospectiveTrades.length === 0 ? (
+                <div className="text-center py-12">
+                  <TrendingUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                  <h3 className="text-lg font-medium text-gray-900 mb-2">No prospective trades</h3>
+                  <p className="text-gray-600 mb-6">Create your first trade using an IPS</p>
+                  <Button onClick={() => setCurrentView("selection")}>
+                    <Plus className="h-4 w-4 mr-2" /> Create New Trade
+                  </Button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="text-left text-gray-600">
+                      <tr>
+                        <th className="py-2 pr-4">Created</th>
+                        <th className="py-2 pr-4">IPS</th>
+                        <th className="py-2 pr-4">Symbol</th>
+                        <th className="py-2 pr-4">Strategy</th>
+                        <th className="py-2 pr-4">Expiry</th>
+                        <th className="py-2 pr-4">Key Terms</th>
+                        <th className="py-2 pr-4">Credit/Debit</th>
+                        <th className="py-2 pr-4">Score</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {prospectiveTrades.map((t) => {
+                        const d = t.data;
+                        const contract = d.contractType.replace(/-/g, " ").toUpperCase();
+                        const credit =
+                          d.creditReceived ?? d.premiumReceived ?? (d.debitPaid ? -Math.abs(d.debitPaid) : 0);
+                        let terms = "—";
+                        switch (d.contractType) {
+                          case "put-credit-spread":
+                            terms = `P ${fmt(d.shortPutStrike)} / ${fmt(d.longPutStrike)}`;
+                            break;
+                          case "call-credit-spread":
+                            terms = `C ${fmt(d.shortCallStrike)} / ${fmt(d.longCallStrike)}`;
+                            break;
+                          case "long-call":
+                          case "long-put":
+                            terms = `${fmt(d.optionStrike)}`;
+                            break;
+                          case "covered-call":
+                            terms = `${fmt(d.sharesOwned)} sh, K ${fmt(d.callStrike)}`;
+                            break;
+                          case "iron-condor":
+                            terms = `P ${fmt(d.shortPutStrike)}/${fmt(d.longPutStrike)} + C ${fmt(
+                              d.shortCallStrike
+                            )}/${fmt(d.longCallStrike)}`;
+                            break;
+                          case "buy-hold":
+                            terms = `${fmt(d.shares)} sh @ ${fmt(d.entryPrice)}`;
+                            break;
+                        }
+                        return (
+                          <tr key={t.id} className="border-t">
+                            <td className="py-2 pr-4">{new Date(t.createdAt).toLocaleString()}</td>
+                            <td className="py-2 pr-4">{t.ips.name}</td>
+                            <td className="py-2 pr-4">{d.symbol}</td>
+                            <td className="py-2 pr-4">{contract}</td>
+                            <td className="py-2 pr-4">{d.expirationDate || "—"}</td>
+                            <td className="py-2 pr-4">{terms}</td>
+                            <td className="py-2 pr-4">{credit === undefined ? "—" : `$${fmt(credit)}`}</td>
+                            <td className="py-2 pr-4">{t.score ? t.score.toFixed(1) : "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
@@ -427,7 +597,9 @@ export default function TradesPage() {
     );
   }
 
-  // Active Trades View
+  // -----------------------------
+  // Active Trades view (stub)
+  // -----------------------------
   if (currentView === "active") {
     return (
       <div className="max-w-6xl mx-auto p-6">
@@ -438,17 +610,13 @@ export default function TradesPage() {
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setCurrentView("selection")}>
-              <Plus className="h-4 w-4 mr-2" />
-              New Trade
+              <Plus className="h-4 w-4 mr-2" /> New Trade
             </Button>
-            <Button variant="outline" onClick={() => setCurrentView("prospective")}>
-              View Prospective
-            </Button>
+            <Button variant="outline" onClick={() => setCurrentView("prospective")}>View Prospective</Button>
           </div>
         </div>
 
         <div className="space-y-6">
-          {/* Portfolio Summary */}
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <Card>
               <CardContent className="p-4">
@@ -496,26 +664,19 @@ export default function TradesPage() {
             </Card>
           </div>
 
-          {/* Active Trades Table */}
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                <List className="h-5 w-5" />
-                Current Positions
+                <List className="h-5 w-5" /> Current Positions
               </CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-center py-12">
                 <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">
-                  No active trades
-                </h3>
-                <p className="text-gray-600 mb-6">
-                  Your executed trades will appear here with real-time P&L tracking
-                </p>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No active trades</h3>
+                <p className="text-gray-600 mb-6">Executed trades will appear here with real-time P&L</p>
                 <Button onClick={() => setCurrentView("selection")}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Create New Trade
+                  <Plus className="h-4 w-4 mr-2" /> Create New Trade
                 </Button>
               </div>
             </CardContent>
@@ -528,10 +689,13 @@ export default function TradesPage() {
   return null;
 }
 
-// Enhanced Trade Entry Form Component
+// -----------------------------
+// Enhanced Trade Entry Form
+// -----------------------------
+
 interface EnhancedTradeEntryFormProps {
   selectedIPS: IPSConfiguration;
-  onSubmit: (formData: TradeFormData) => void;
+  onSubmit: (formData: TradeFormData, score: number | null) => void;
   onCalculateScore: (formData: TradeFormData) => void;
   onCancel: () => void;
   isLoading: boolean;
@@ -549,144 +713,253 @@ function EnhancedTradeEntryForm({
   const [formData, setFormData] = useState<TradeFormData>({
     name: "",
     symbol: "",
-    currentPrice: 0,
+    currentPrice: undefined,
     expirationDate: "",
     contractType: "put-credit-spread",
     numberOfContracts: 1,
-    shortStrike: 0,
-    longStrike: 0,
-    creditReceived: 0,
+    // spreads
+    shortPutStrike: undefined,
+    longPutStrike: undefined,
+    creditReceived: undefined,
+    shortCallStrike: undefined,
+    longCallStrike: undefined,
+    // long options
+    optionStrike: undefined,
+    debitPaid: undefined,
+    // covered call
+    sharesOwned: undefined,
+    callStrike: undefined,
+    premiumReceived: undefined,
+    // buy/hold
+    shares: undefined,
+    entryPrice: undefined,
+    // factors
     ipsFactors: {},
     apiFactors: {},
   });
 
   const [apiStatus, setApiStatus] = useState<"connected" | "disconnected" | "loading">("connected");
-  const [completionScore, setCompletionScore] = useState(0);
-  const [localCalculatedScore, setLocalCalculatedScore] = useState<number | null>(calculatedScore);
+  const [completionScore, setCompletionScore] = useState<number>(0);
 
-  // Get factors for this IPS using the actual service
-  const getIPSFactors = () => {
-    const strategies = ipsDataService.getAvailableStrategies();
-    const ipsStrategies = strategies.filter(s => selectedIPS.strategies.includes(s.id));
-    
-    const allFactorNames = new Set<string>();
-    ipsStrategies.forEach(strategy => {
-      strategy.recommendedFactors.forEach(factor => allFactorNames.add(factor));
-    });
-    
-    return Array.from(allFactorNames);
-  };
+  const ips = selectedIPS as IPSWithRules;
+  const factorRules = useMemo(() => normalizeIPSRules(ips), [ips]);
+  const apiRules = useMemo(() => factorRules.filter((r) => r.source === "api"), [factorRules]);
+  const manualRules = useMemo(() => factorRules.filter((r) => r.source === "manual"), [factorRules]);
 
-  const getAPIFactors = (): string[] => {
-    const allFactors = getIPSFactors();
-    return ALL_FACTORS
-      .filter(f => allFactors.includes(f.name) && f.source === 'alpha_vantage')
-      .map(f => f.name);
-  };
-
-  const getManualFactors = (): string[] => {
-    const allFactors = getIPSFactors();
-    return ALL_FACTORS
-      .filter(f => allFactors.includes(f.name) && !f.source)
-      .map(f => f.name);
-  };
-
-    useEffect(() => {
-    setLocalCalculatedScore(calculatedScore);
-  }, [calculatedScore]);
-
-  // Load API factors when symbol changes
-  useEffect(() => {
-    if (formData.symbol && formData.symbol.length >= 2) {
-      loadAPIFactors(formData.symbol, selectedIPS.id);
-    }
-  }, [formData.symbol, selectedIPS.id]);
-
-  // Calculate completion score
-  useEffect(() => {
-    const requiredFields = [
-      "name", "symbol", "currentPrice", "expirationDate", 
-      "numberOfContracts", "shortStrike", "longStrike", "creditReceived"
-    ];
-    const manualFactors = getManualFactors();
-
-    const completedFields = requiredFields.filter((field) => {
-      const value = formData[field as keyof TradeFormData];
-      return value !== "" && value !== 0;
-    }).length;
-
-    const completedFactors = manualFactors.filter(
-      (factor) => formData.ipsFactors[factor] !== undefined && formData.ipsFactors[factor] !== ""
-    ).length;
-
-    const totalRequired = requiredFields.length + manualFactors.length;
-    const totalCompleted = completedFields + completedFactors;
-
-    setCompletionScore(totalRequired ? (totalCompleted / totalRequired) * 100 : 0);
-  }, [formData]);
-
-  const loadAPIFactors = async (symbol: string, ipsId: string) => {
+  // Fetch only API factors needed by this IPS
+  async function loadAPIFactors(symbol: string) {
     setApiStatus("loading");
     try {
-      const response = await fetch(`/api/trades/factors?symbol=${symbol}&ipsId=${ipsId}`);
-      const data = await response.json();
-      
-      if (data.success && Object.keys(data.data.factors).length > 0) {
-        // Convert factor objects back to simple values for the form
-        const factorValues: Record<string, number> = {};
-        Object.entries(data.data.factors).forEach(([name, factorData]: [string, any]) => {
-          factorValues[name] = factorData.value;
-        });
-        
-        setFormData(prev => ({ ...prev, apiFactors: factorValues }));
-        setApiStatus('connected');
-      } else {
-        // API failed or no data - user must enter manually
-        setApiStatus('disconnected');
-      }
-    } catch (error) {
-      console.error("API Error:", error);
+      const keys = apiRules.map((r) => r.key).join(",");
+      const res = await fetch(`/api/trades/factors?symbol=${symbol}&keys=${encodeURIComponent(keys)}`);
+      const json = await res.json();
+
+      const vals: Record<string, number> = {};
+      Object.entries(json?.data?.factors ?? {}).forEach(([k, obj]: [string, any]) => {
+        let v = typeof (obj as any)?.value === "number" ? (obj as any).value : parseFloat((obj as any)?.value);
+        if (k === "delta") v = Math.abs(v);
+        vals[k] = v;
+      });
+
+      setFormData((prev) => ({ ...prev, apiFactors: { ...prev.apiFactors, ...vals } }));
+      setApiStatus("connected");
+    } catch (e) {
+      console.error("API Error:", e);
       setApiStatus("disconnected");
-      // User can still complete trade manually
     }
+  }
+
+  // Auto-load API factors on symbol change (min 1 char to avoid spam; adjust as needed)
+  useEffect(() => {
+    if (formData.symbol) loadAPIFactors(formData.symbol);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData.symbol]);
+
+  // Required trade fields by contract type
+  const requiredFieldsByType: Record<ContractType, (keyof TradeFormData)[]> = {
+    "put-credit-spread": [
+      "symbol",
+      "expirationDate",
+      "numberOfContracts",
+      "shortPutStrike",
+      "longPutStrike",
+      "creditReceived",
+    ],
+    "call-credit-spread": [
+      "symbol",
+      "expirationDate",
+      "numberOfContracts",
+      "shortCallStrike",
+      "longCallStrike",
+      "creditReceived",
+    ],
+    "long-call": ["symbol", "expirationDate", "numberOfContracts", "optionStrike", "debitPaid"],
+    "long-put": ["symbol", "expirationDate", "numberOfContracts", "optionStrike", "debitPaid"],
+    "iron-condor": [
+      "symbol",
+      "expirationDate",
+      "numberOfContracts",
+      "shortPutStrike",
+      "longPutStrike",
+      "shortCallStrike",
+      "longCallStrike",
+      "creditReceived",
+    ],
+    "covered-call": ["symbol", "expirationDate", "sharesOwned", "callStrike", "premiumReceived"],
+    "buy-hold": ["symbol", "shares", "entryPrice"],
   };
 
-  const handleInputChange = (field: keyof TradeFormData, value: any) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
-  };
+  const isFilled = (v: unknown) => v !== undefined && v !== "" && !(typeof v === "number" && Number.isNaN(v));
 
-  const handleFactorChange = (factorName: string, value: any) => {
-    setFormData((prev) => ({
-      ...prev,
-      ipsFactors: { ...prev.ipsFactors, [factorName]: value },
-    }));
-  };
-
-  const handleAPIFactorOverride = (factorName: string, value: any) => {
-    setFormData((prev) => ({
-      ...prev,
-      apiFactors: { ...prev.apiFactors, [factorName]: value },
-    }));
-  };
-
-  const isFormValid = () => {
-    const requiredFields = [
-      "name", "symbol", "currentPrice", "expirationDate",
-      "numberOfContracts", "shortStrike", "longStrike", "creditReceived"
-    ];
-    const manualFactors = getManualFactors();
-
-    const basicFieldsComplete = requiredFields.every((field) => {
-      const value = formData[field as keyof TradeFormData];
-      return value !== "" && value !== 0;
+  const isFormValid = useMemo(() => {
+    const req = requiredFieldsByType[formData.contractType];
+    const basics = req.every((f) => isFilled(formData[f]));
+    const allRuleValuesPresent = factorRules.every((r) => {
+      const bag = r.source === "api" ? formData.apiFactors : formData.ipsFactors;
+      return isFilled(bag[r.key]);
     });
+    return basics && allRuleValuesPresent;
+  }, [formData, factorRules]);
 
-    const factorsComplete = manualFactors.every(
-      (factor) => formData.ipsFactors[factor] !== undefined && formData.ipsFactors[factor] !== ""
+  // Completion meter
+  useEffect(() => {
+    const req = requiredFieldsByType[formData.contractType];
+    const completedBasics = req.filter((f) => isFilled(formData[f])).length;
+    const completedRules = factorRules.filter((r) => {
+      const bag = r.source === "api" ? formData.apiFactors : formData.ipsFactors;
+      return isFilled(bag[r.key]);
+    }).length;
+    const total = req.length + factorRules.length;
+    setCompletionScore(total ? ((completedBasics + completedRules) / total) * 100 : 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formData, factorRules]);
+
+  // Strategy-specific field renderer
+  function StrategyFields() {
+    const N = (props: { id: keyof TradeFormData; label: string; step?: string; placeholder?: string }) => (
+      <div>
+        <Label htmlFor={String(props.id)}>{props.label}</Label>
+        <Input
+          id={String(props.id)}
+          type="number"
+          step={props.step ?? "0.01"}
+          value={(formData[props.id] as any) ?? ""}
+          onChange={(e) =>
+            setFormData((p) => ({
+              ...p,
+              [props.id]: e.target.value === "" ? undefined : parseFloat(e.target.value),
+            }))
+          }
+          placeholder={props.placeholder}
+        />
+      </div>
     );
 
-    return basicFieldsComplete && factorsComplete;
-  };
+    const D = (props: { id: keyof TradeFormData; label: string }) => (
+      <div>
+        <Label htmlFor={String(props.id)}>{props.label}</Label>
+        <Input
+          id={String(props.id)}
+          type="date"
+          value={(formData[props.id] as any) ?? ""}
+          onChange={(e) => setFormData((p) => ({ ...p, [props.id]: e.target.value || undefined }))}
+          min={new Date().toISOString().split("T")[0]}
+        />
+      </div>
+    );
+
+    const C = (props: { id: keyof TradeFormData; label: string; min?: number; placeholder?: string }) => (
+      <div>
+        <Label htmlFor={String(props.id)}>{props.label}</Label>
+        <Input
+          id={String(props.id)}
+          type="number"
+          min={props.min ?? 1}
+          value={(formData[props.id] as any) ?? ""}
+          onChange={(e) =>
+            setFormData((p) => ({
+              ...p,
+              [props.id]: e.target.value === "" ? undefined : parseInt(e.target.value),
+            }))
+          }
+          placeholder={props.placeholder}
+        />
+      </div>
+    );
+
+    switch (formData.contractType) {
+      case "put-credit-spread":
+        return (
+          <>
+            <D id="expirationDate" label="Expiration Date" />
+            <C id="numberOfContracts" label="Contracts" placeholder="1" />
+            <N id="shortPutStrike" label="Short Put Strike" placeholder="145.00" />
+            <N id="longPutStrike" label="Long Put Strike" placeholder="140.00" />
+            <N id="creditReceived" label="Net Credit (per spread)" placeholder="1.25" />
+          </>
+        );
+      case "call-credit-spread":
+        return (
+          <>
+            <D id="expirationDate" label="Expiration Date" />
+            <C id="numberOfContracts" label="Contracts" placeholder="1" />
+            <N id="shortCallStrike" label="Short Call Strike" placeholder="155.00" />
+            <N id="longCallStrike" label="Long Call Strike" placeholder="160.00" />
+            <N id="creditReceived" label="Net Credit (per spread)" placeholder="1.10" />
+          </>
+        );
+      case "long-call":
+      case "long-put":
+        return (
+          <>
+            <D id="expirationDate" label="Expiration Date" />
+            <C id="numberOfContracts" label="Contracts" placeholder="1" />
+            <N id="optionStrike" label="Option Strike" placeholder="150.00" />
+            <N id="debitPaid" label="Debit Paid (per contract)" placeholder="2.35" />
+          </>
+        );
+      case "covered-call":
+        return (
+          <>
+            <D id="expirationDate" label="Expiration Date" />
+            <N id="sharesOwned" label="Shares Owned" step="1" placeholder="100" />
+            <N id="callStrike" label="Call Strike" placeholder="160.00" />
+            <N id="premiumReceived" label="Premium Received (per contract)" placeholder="1.35" />
+          </>
+        );
+      case "iron-condor":
+        return (
+          <>
+            <D id="expirationDate" label="Expiration Date" />
+            <C id="numberOfContracts" label="Contracts" placeholder="1" />
+            <N id="shortPutStrike" label="Short Put Strike" placeholder="145.00" />
+            <N id="longPutStrike" label="Long Put Strike" placeholder="140.00" />
+            <N id="shortCallStrike" label="Short Call Strike" placeholder="160.00" />
+            <N id="longCallStrike" label="Long Call Strike" placeholder="165.00" />
+            <N id="creditReceived" label="Net Credit (per condor)" placeholder="2.10" />
+          </>
+        );
+      case "buy-hold":
+        return (
+          <>
+            <N id="shares" label="Shares" step="1" placeholder="100" />
+            <N id="entryPrice" label="Entry Price" placeholder="153.10" />
+          </>
+        );
+    }
+  }
+
+  // Calculate score locally so we can pass it to parent on submit
+  function calculateScore(): number | null {
+    if (!factorRules.length) return null;
+    const totalWeight = factorRules.reduce((s, r) => s + (r.weight ?? 1), 0) || 1;
+    const achieved = factorRules.reduce((s, r) => {
+      const bag = r.source === "api" ? formData.apiFactors : formData.ipsFactors;
+      const pass = evaluateRule(r, bag[r.key]);
+      return s + (pass ? (r.weight ?? 1) : 0);
+    }, 0);
+    return (achieved / totalWeight) * 100;
+  }
 
   return (
     <div className="space-y-6">
@@ -700,123 +973,106 @@ function EnhancedTradeEntryForm({
         <div className="flex items-center gap-4 text-sm">
           <div className="flex items-center gap-2">
             <Database className="h-4 w-4 text-blue-600" />
-            <span>{getAPIFactors().length} API Factors</span>
+            <span>{apiRules.length} API Factors</span>
             {apiStatus === "connected" && <Wifi className="h-3 w-3 text-green-600" />}
             {apiStatus === "disconnected" && <WifiOff className="h-3 w-3 text-red-600" />}
             {apiStatus === "loading" && <RefreshCw className="h-3 w-3 animate-spin text-blue-600" />}
           </div>
           <div className="flex items-center gap-2">
             <Users className="h-4 w-4 text-orange-600" />
-            <span>{getManualFactors().length} Manual Factors</span>
+            <span>{manualRules.length} Manual Factors</span>
           </div>
         </div>
       </div>
 
-      {/* Basic Trade Details */}
+      {/* Universal Trade Details */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <TrendingUp className="h-5 w-5" />
-            Trade Details
+            <TrendingUp className="h-5 w-5" /> Trade Details
           </CardTitle>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <div>
-              <Label htmlFor="expirationDate">Expiration Date</Label>
+              <Label htmlFor="name">Trade Name (optional)</Label>
               <Input
-                id="expirationDate"
-                type="date"
-                value={formData.expirationDate}
-                onChange={(e) => handleInputChange("expirationDate", e.target.value)}
-                min={new Date().toISOString().split("T")[0]}
+                id="name"
+                value={formData.name ?? ""}
+                onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))}
+                placeholder="e.g., PCS on AAPL - post-earnings fade"
               />
             </div>
 
             <div>
-              <Label htmlFor="contractType">Contract Type</Label>
+              <Label htmlFor="symbol">Symbol</Label>
+              <Input
+                id="symbol"
+                value={formData.symbol}
+                onChange={(e) => setFormData((p) => ({ ...p, symbol: e.target.value.toUpperCase() }))}
+                placeholder="AAPL"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="currentPrice">Current Price (optional)</Label>
+              <Input
+                id="currentPrice"
+                type="number"
+                step="0.01"
+                value={formData.currentPrice ?? ""}
+                onChange={(e) =>
+                  setFormData((p) => ({
+                    ...p,
+                    currentPrice: e.target.value === "" ? undefined : parseFloat(e.target.value),
+                  }))
+                }
+                placeholder="192.34"
+              />
+            </div>
+
+            <div>
+              <Label htmlFor="contractType">Strategy</Label>
               <select
                 id="contractType"
                 value={formData.contractType}
-                onChange={(e) => handleInputChange("contractType", e.target.value)}
+                onChange={(e) => setFormData((p) => ({ ...p, contractType: e.target.value as ContractType }))}
                 className="w-full p-2 border border-gray-300 rounded-md"
               >
+                <option value="buy-hold">Buy / Hold (Shares)</option>
                 <option value="put-credit-spread">Put Credit Spread</option>
                 <option value="call-credit-spread">Call Credit Spread</option>
-                <option value="long-call">Long Call</option>
-                <option value="long-put">Long Put</option>
                 <option value="iron-condor">Iron Condor</option>
                 <option value="covered-call">Covered Call</option>
+                <option value="long-call">Long Call</option>
+                <option value="long-put">Long Put</option>
               </select>
             </div>
 
-            <div>
-              <Label htmlFor="numberOfContracts">Number of Contracts</Label>
-              <Input
-                id="numberOfContracts"
-                type="number"
-                min={1}
-                value={formData.numberOfContracts || ""}
-                onChange={(e) => handleInputChange("numberOfContracts", parseInt(e.target.value) || 1)}
-                placeholder="1"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="shortStrike">Short Strike</Label>
-              <Input
-                id="shortStrike"
-                type="number"
-                step="0.01"
-                value={formData.shortStrike || ""}
-                onChange={(e) => handleInputChange("shortStrike", parseFloat(e.target.value) || 0)}
-                placeholder="145.00"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="longStrike">Long Strike</Label>
-              <Input
-                id="longStrike"
-                type="number"
-                step="0.01"
-                value={formData.longStrike || ""}
-                onChange={(e) => handleInputChange("longStrike", parseFloat(e.target.value) || 0)}
-                placeholder="140.00"
-              />
-            </div>
-
-            <div>
-              <Label htmlFor="creditReceived">Premium Paid/Collected</Label>
-              <Input
-                id="creditReceived"
-                type="number"
-                step="0.01"
-                value={formData.creditReceived || ""}
-                onChange={(e) => handleInputChange("creditReceived", parseFloat(e.target.value) || 0)}
-                placeholder="1.25"
-              />
-            </div>
+            {/* Strategy-specific fields */}
+            <StrategyFields />
           </div>
         </CardContent>
       </Card>
 
-      {/* IPS Factors Section */}
+      {/* Factor Sections */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* API Factors */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Database className="h-5 w-5 text-blue-600" />
-              API Factors ({getAPIFactors().length})
-              <Badge variant="outline" className={`${
-                apiStatus === "connected" ? "bg-green-50 text-green-700" : 
-                apiStatus === "disconnected" ? "bg-red-50 text-red-700" : 
-                "bg-yellow-50 text-yellow-700"
-              }`}>
-                {apiStatus === "connected" ? "Auto-populated" : 
-                 apiStatus === "disconnected" ? "Manual Entry Required" : 
-                 "Loading..."}
+              <Database className="h-5 w-5 text-blue-600" /> API Factors ({apiRules.length})
+              <Badge
+                variant="outline"
+                className={`$${""} {
+                  apiStatus === "connected"
+                    ? "bg-green-50 text-green-700"
+                    : apiStatus === "disconnected"
+                    ? "bg-red-50 text-red-700"
+                    : "bg-yellow-50 text-yellow-700"
+                }`}
+              >
+                {apiStatus === "connected" ? "Auto-populated" : apiStatus === "disconnected" ? "Manual Entry" : "Loading…"}
               </Badge>
             </CardTitle>
           </CardHeader>
@@ -825,92 +1081,58 @@ function EnhancedTradeEntryForm({
               <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
                 <div className="flex items-center gap-2">
                   <AlertCircle className="h-4 w-4 text-red-600" />
-                  <span className="text-sm text-red-700">
-                    API connection failed. Please enter values manually below.
-                  </span>
+                  <span className="text-sm text-red-700">API connection failed. Enter values below.</span>
                 </div>
               </div>
             )}
 
             <div className="space-y-4">
-              {getAPIFactors().map((factorName) => {
-                const hasValue = formData.apiFactors[factorName] !== undefined;
-                const value = formData.apiFactors[factorName];
-                const factor = ALL_FACTORS.find(f => f.name === factorName);
-
+              {apiRules.map((r) => {
+                const val = formData.apiFactors[r.key] ?? "";
                 return (
-                  <div
-                    key={factorName}
-                    className={`p-3 rounded-lg border ${
-                      apiStatus === "connected" && hasValue
-                        ? "bg-green-50 border-green-200"
-                        : apiStatus === "loading"
-                        ? "bg-yellow-50 border-yellow-200"
-                        : "bg-gray-50 border-gray-200"
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <div>
-                        <Label className="font-medium text-sm">{factorName}</Label>
-                        <div className="text-xs text-gray-500">{factor?.category || 'Financial'}</div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {apiStatus === "connected" && hasValue ? (
-                          <>
-                            <CheckCircle className="h-4 w-4 text-green-600" />
-                            <span className="text-sm font-medium text-green-700">
-                              {typeof value === "number" ? value.toFixed(2) : value}
-                              <span className="text-xs ml-1">{factor?.unit || ''}</span>
-                            </span>
-                          </>
-                        ) : apiStatus === "loading" ? (
-                          <>
-                            <RefreshCw className="h-4 w-4 animate-spin text-blue-600" />
-                            <span className="text-sm text-blue-700">Loading...</span>
-                          </>
-                        ) : (
-                          <span className="text-sm text-gray-600">
-                            {apiStatus === "disconnected" ? "Manual input required" : "Will auto-populate"}
-                          </span>
-                        )}
-                      </div>
+                  <div key={r.key} className="p-3 rounded-lg border bg-gray-50">
+                    <div className="flex items-center justify-between mb-1">
+                      <Label className="font-medium text-sm">
+                        {r.label ?? r.key} • Rule: {ruleText(r)}
+                      </Label>
+                      <small className="text-gray-500">{r.unit ?? ""}</small>
                     </div>
-
-                    {/* Manual input when API is down or for override */}
-                    {(apiStatus === "disconnected" || !hasValue) && (
-                      <Input
-                        type="number"
-                        step={factor?.data_type === 'percentage' ? "0.01" : "0.01"}
-                        value={formData.apiFactors[factorName] ?? ""}
-                        onChange={(e) => handleAPIFactorOverride(factorName, parseFloat(e.target.value) || "")}
-                        placeholder={`Enter ${factorName.toLowerCase()}`}
-                        className="mt-2"
-                      />
-                    )}
+                    <Input
+                      type="number"
+                      step="0.0001"
+                      value={val}
+                      onChange={(e) =>
+                        setFormData((p) => ({
+                          ...p,
+                          apiFactors: {
+                            ...p.apiFactors,
+                            [r.key]: e.target.value === "" ? "" : parseFloat(e.target.value),
+                          },
+                        }))
+                      }
+                      placeholder={`Enter ${r.label ?? r.key}`}
+                    />
                   </div>
                 );
               })}
             </div>
 
-            {/* Refresh API Button */}
             {formData.symbol && (
               <div className="mt-4 pt-4 border-t">
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => loadAPIFactors(formData.symbol, selectedIPS.id)}
+                  onClick={() => loadAPIFactors(formData.symbol!)}
                   disabled={apiStatus === "loading"}
                   className="w-full flex items-center gap-2"
                 >
                   {apiStatus === "loading" ? (
                     <>
-                      <RefreshCw className="h-4 w-4 animate-spin" />
-                      Loading API Data...
+                      <RefreshCw className="h-4 w-4 animate-spin" /> Loading API Data…
                     </>
                   ) : (
                     <>
-                      <Database className="h-4 w-4" />
-                      Refresh API Data
+                      <Database className="h-4 w-4" /> Refresh API Data
                     </>
                   )}
                 </Button>
@@ -923,41 +1145,61 @@ function EnhancedTradeEntryForm({
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-orange-600" />
-              Manual Input Required ({getManualFactors().length})
+              <Users className="h-5 w-5 text-orange-600" /> Manual Input Required ({manualRules.length})
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {getManualFactors().map((factorName) => {
-                const value = formData.ipsFactors[factorName];
-                const hasValue = value !== undefined && value !== "";
-                const factor = ALL_FACTORS.find(f => f.name === factorName);
-
+              {manualRules.map((r) => {
+                const val = formData.ipsFactors[r.key] ?? "";
+                const hasValue = val !== "" && val !== undefined;
                 return (
-                  <div key={factorName} className="space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Label className="font-medium text-sm">{factorName}</Label>
-                      {hasValue && <CheckCircle className="h-4 w-4 text-green-600" />}
+                  <div key={r.key} className="p-3 rounded-lg border bg-gray-50">
+                    <div className="mb-1">
+                      <Label className="font-medium text-sm">
+                        {r.label ?? r.key} • Rule: {ruleText(r)}
+                      </Label>
                     </div>
-                    <div className="text-xs text-gray-500 mb-1">{factor?.category || 'Management'}</div>
-                    <select
-                      value={value ?? ""}
-                      onChange={(e) => handleFactorChange(factorName, parseInt(e.target.value))}
-                      className={`w-full p-2 border rounded-md ${
-                        hasValue ? "border-green-300 bg-green-50" : "border-gray-300"
-                      }`}
-                    >
-                      <option value="">Select rating</option>
-                      <option value="1">1 - Poor</option>
-                      <option value="2">2 - Below Average</option>
-                      <option value="3">3 - Average</option>
-                      <option value="4">4 - Good</option>
-                      <option value="5">5 - Excellent</option>
-                    </select>
-                    <div className="text-xs text-gray-500">
-                      Rate this factor from 1 (poor) to 5 (excellent)
-                    </div>
+                    {r.dataType === "qualitative" ? (
+                      <select
+                        value={val}
+                        onChange={(e) =>
+                          setFormData((p) => ({
+                            ...p,
+                            ipsFactors: { ...p.ipsFactors, [r.key]: e.target.value ? parseInt(e.target.value) : "" },
+                          }))
+                        }
+                        className={`w-full p-2 border rounded-md ${hasValue ? "border-green-300 bg-green-50" : "border-gray-300"}`}
+                      >
+                        <option value="">Select rating</option>
+                        <option value="1">1 - Poor</option>
+                        <option value="2">2 - Below Average</option>
+                        <option value="3">3 - Average</option>
+                        <option value="4">4 - Good</option>
+                        <option value="5">5 - Excellent</option>
+                      </select>
+                    ) : (
+                      <Input
+                        type="number"
+                        step="0.0001"
+                        value={val}
+                        onChange={(e) =>
+                          setFormData((p) => ({
+                            ...p,
+                            ipsFactors: {
+                              ...p.ipsFactors,
+                              [r.key]: e.target.value === "" ? "" : parseFloat(e.target.value),
+                            },
+                          }))
+                        }
+                        placeholder={`Enter ${r.label ?? r.key}`}
+                      />
+                    )}
+                    {hasValue && (
+                      <div className="mt-1 flex items-center gap-1 text-green-700 text-xs">
+                        <CheckCircle className="h-3 w-3" /> Filled
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -966,12 +1208,11 @@ function EnhancedTradeEntryForm({
         </Card>
       </div>
 
-      {/* Score Calculation and Actions */}
+      {/* Score & Actions */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Calculator className="h-5 w-5" />
-            IPS Score & Actions
+            <Calculator className="h-5 w-5" /> IPS Score & Actions
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -979,25 +1220,23 @@ function EnhancedTradeEntryForm({
             <div>
               <div className="font-medium">Calculate IPS Score</div>
               <div className="text-sm text-gray-600">
-                {isFormValid() ? 
-                  `Ready to calculate using ${getAPIFactors().length} API + ${getManualFactors().length} manual factors` : 
-                  "Complete all fields to enable calculation"}
+                {isFormValid
+                  ? `Ready to calculate using ${factorRules.length} IPS factors`
+                  : "Complete required fields and factors to enable calculation"}
               </div>
             </div>
             <Button
               onClick={() => onCalculateScore(formData)}
-              disabled={!isFormValid() || isLoading}
+              disabled={!isFormValid || isLoading}
               className="flex items-center gap-2"
             >
               {isLoading ? (
                 <>
-                  <RefreshCw className="h-4 w-4 animate-spin" />
-                  Calculating...
+                  <RefreshCw className="h-4 w-4 animate-spin" /> Calculating…
                 </>
               ) : (
                 <>
-                  <Calculator className="h-4 w-4" />
-                  Calculate Score
+                  <Calculator className="h-4 w-4" /> Calculate Score
                 </>
               )}
             </Button>
@@ -1007,37 +1246,44 @@ function EnhancedTradeEntryForm({
             <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-xl font-bold text-blue-900">
-                    IPS Score: {calculatedScore.toFixed(1)}
-                  </div>
+                  <div className="text-xl font-bold text-blue-900">IPS Score: {calculatedScore.toFixed(1)}</div>
                   <div className="text-sm text-blue-700">
-                    {calculatedScore >= 80 ? "Excellent Trade Opportunity" : 
-                     calculatedScore >= 70 ? "Good Trade Setup" : 
-                     calculatedScore >= 60 ? "Average Trade" : 
-                     "Poor Trade - Consider Alternatives"}
+                    {calculatedScore >= 80
+                      ? "Excellent Trade Opportunity"
+                      : calculatedScore >= 70
+                      ? "Good Trade Setup"
+                      : calculatedScore >= 60
+                      ? "Average Trade"
+                      : "Poor Trade – Consider Alternatives"}
                   </div>
-                  <div className="text-xs text-gray-600 mt-1">
-                    Based on {getAPIFactors().length} API factors + {getManualFactors().length} manual factors
-                  </div>
+                  <div className="text-xs text-gray-600 mt-1">Based on {factorRules.length} IPS factors</div>
                 </div>
                 <div className="text-right">
                   <Progress value={calculatedScore} className="w-24 mb-2" />
-                  <div className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${
-                    calculatedScore >= 80 ? "bg-green-100 text-green-800" :
-                    calculatedScore >= 70 ? "bg-blue-100 text-blue-800" :
-                    calculatedScore >= 60 ? "bg-yellow-100 text-yellow-800" :
-                    "bg-red-100 text-red-800"
-                  }`}>
-                    {calculatedScore >= 80 ? "EXCELLENT" : 
-                     calculatedScore >= 70 ? "GOOD" : 
-                     calculatedScore >= 60 ? "AVERAGE" : "POOR"}
+                  <div
+                    className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${
+                      calculatedScore >= 80
+                        ? "bg-green-100 text-green-800"
+                        : calculatedScore >= 70
+                        ? "bg-blue-100 text-blue-800"
+                        : calculatedScore >= 60
+                        ? "bg-yellow-100 text-yellow-800"
+                        : "bg-red-100 text-red-800"
+                    }`}
+                  >
+                    {calculatedScore >= 80
+                      ? "EXCELLENT"
+                      : calculatedScore >= 70
+                      ? "GOOD"
+                      : calculatedScore >= 60
+                      ? "AVERAGE"
+                      : "POOR"}
                   </div>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Action Buttons */}
           <div className="flex items-center justify-between pt-4 border-t">
             <Button
               variant="outline"
@@ -1046,17 +1292,25 @@ function EnhancedTradeEntryForm({
                   setFormData({
                     name: "",
                     symbol: "",
-                    currentPrice: 0,
+                    currentPrice: undefined,
                     expirationDate: "",
                     contractType: "put-credit-spread",
                     numberOfContracts: 1,
-                    shortStrike: 0,
-                    longStrike: 0,
-                    creditReceived: 0,
+                    shortPutStrike: undefined,
+                    longPutStrike: undefined,
+                    creditReceived: undefined,
+                    shortCallStrike: undefined,
+                    longCallStrike: undefined,
+                    optionStrike: undefined,
+                    debitPaid: undefined,
+                    sharesOwned: undefined,
+                    callStrike: undefined,
+                    premiumReceived: undefined,
+                    shares: undefined,
+                    entryPrice: undefined,
                     ipsFactors: {},
                     apiFactors: {},
                   });
-                  setLocalCalculatedScore(null);
                 }
               }}
               className="text-red-600 border-red-200 hover:bg-red-50"
@@ -1068,62 +1322,15 @@ function EnhancedTradeEntryForm({
               <Button variant="outline" onClick={onCancel}>
                 Cancel
               </Button>
-
               <Button
-                onClick={() => onSubmit(formData)}
-                disabled={!isFormValid() || isLoading}
+                onClick={() => onSubmit(formData, calculateScore())}
+                disabled={!isFormValid || isLoading}
                 className="flex items-center gap-2"
               >
-                <Target className="h-4 w-4" />
-                {isLoading ? "Saving..." : "Move to Prospective Trades"}
+                <Target className="h-4 w-4" /> {isLoading ? "Saving…" : "Move to Prospective Trades"}
               </Button>
             </div>
           </div>
-
-          {/* Trade Summary */}
-          {isFormValid() && (
-            <div className="mt-6 p-4 bg-gray-50 rounded-lg">
-              <h4 className="font-medium mb-3">Trade Summary</h4>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                <div>
-                  <div className="text-gray-600">Symbol</div>
-                  <div className="font-medium">{formData.symbol}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600">Strategy</div>
-                  <div className="font-medium">{formData.contractType.replace('-', ' ').toUpperCase()}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600">Credit/Debit</div>
-                  <div className="font-medium">${formData.creditReceived}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600">Contracts</div>
-                  <div className="font-medium">{formData.numberOfContracts}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600">Short Strike</div>
-                  <div className="font-medium">${formData.shortStrike}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600">Long Strike</div>
-                  <div className="font-medium">${formData.longStrike}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600">Max Gain</div>
-                  <div className="font-medium text-green-600">
-                    ${(formData.creditReceived * formData.numberOfContracts * 100).toFixed(0)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-gray-600">Max Loss</div>
-                  <div className="font-medium text-red-600">
-                    ${((Math.abs(formData.shortStrike - formData.longStrike) - formData.creditReceived) * formData.numberOfContracts * 100).toFixed(0)}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
     </div>
