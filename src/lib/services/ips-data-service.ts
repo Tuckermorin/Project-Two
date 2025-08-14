@@ -326,6 +326,10 @@ class IPSDataService {
                   }
                 })()
               : [],
+            // Handle various representations of the active flag from the view
+            is_active: toBoolean(
+              (r as any)?.ips_is_active ?? (r as any)?.is_active ?? (r as any)?.active
+            ),
             is_active: toBoolean(r?.is_active),
             // FIX: Add the missing required properties
             created_at: String(r?.created_at ?? new Date().toISOString()),
@@ -364,11 +368,12 @@ class IPSDataService {
       }
 
       const list = Object.values(grouped) as IPSConfiguration[];
+      const userOnly = list.filter((ips) => ips.user_id === userId);
 
       // Cache for potential future use
-      this.ipsConfigurations.set(userId, list);
+      this.ipsConfigurations.set(userId, userOnly);
 
-      return list;
+      return userOnly;
     } catch (error) {
       console.error('Error fetching IPS configurations:', error);
       // Fallback to any cached entries
