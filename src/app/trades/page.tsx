@@ -242,7 +242,7 @@ export default function TradesPage() {
       try {
         setIsLoading(true);
         const userIPSs = await ipsDataService.getAllUserIPSs(userId);
-        const activeOnly = userIPSs.filter((ips) => ips.is_active);
+        const activeOnly = userIPSs.filter((ips) => ips.is_active === true);
         setActiveIPSs(activeOnly);
       } catch (e) {
         console.error("Error loading IPS data:", e);
