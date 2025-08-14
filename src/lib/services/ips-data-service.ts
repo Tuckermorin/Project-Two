@@ -308,7 +308,6 @@ class IPSDataService {
         if (!id) continue;
 
         if (!grouped[id]) {
-          // Base configuration - FIXED: Added missing created_at property
           grouped[id] = {
             id,
             user_id: String(r?.user_id ?? r?.owner_id ?? userId),
@@ -326,12 +325,10 @@ class IPSDataService {
                   }
                 })()
               : [],
-            // Handle various representations of the active flag from the view
+            // Merge all possible “active” flags into one property
             is_active: toBoolean(
-              (r as any)?.ips_is_active ?? (r as any)?.is_active ?? (r as any)?.active
+              (r as any)?.is_active ?? (r as any)?.ips_is_active ?? (r as any)?.active
             ),
-            is_active: toBoolean(r?.is_active),
-            // FIX: Add the missing required properties
             created_at: String(r?.created_at ?? new Date().toISOString()),
             total_factors: Number(r?.total_factors ?? 0),
             active_factors: Number(r?.active_factors ?? 0),

@@ -1,15 +1,13 @@
-// src/app/api/ips/route.ts
+// Fixed src/app/api/ips/route.ts
+// Use the same environment variables as the frontend
+
 import { NextRequest } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Verify environment variables
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
-  console.error('Missing Supabase environment variables for API route');
-}
-
+// Use the same environment variables as the frontend
 const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
 type NewFactor = { factor_id: string; weight: number; target_value?: number | null };
@@ -39,7 +37,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    // 1) create IPS config
+    // 1) create IPS config - Use the same table as the frontend
     const { data: ipsRows, error: ipsErr } = await supabase
       .from('ips_configurations')
       .insert([{ user_id, name, description, is_active }])
@@ -61,18 +59,19 @@ export async function POST(req: NextRequest) {
       return new Response(JSON.stringify({ error: facErr.message, ips_id }), { status: 500 });
     }
 
-    // 3) return hydrated IPS (from the view for convenience)
+    // 3) return hydrated IPS - Use same table as frontend for consistency
     const { data, error } = await supabase
-      .from('ips_with_factors')
+      .from('ips_configurations')
       .select('*')
-      .eq('ips_id', ips_id);
+      .eq('id', ips_id)
+      .single();
 
     if (error) {
-      console.error('Select ips_with_factors failed:', error);
+      console.error('Select ips_configurations failed:', error);
       return new Response(JSON.stringify({ error: error.message, ips_id }), { status: 500 });
     }
 
-    return new Response(JSON.stringify({ ips_id, rows: data }), { status: 201 });
+    return new Response(JSON.stringify({ ips_id, data }), { status: 201 });
   } catch (e: any) {
     console.error('API Route: Unexpected error:', e);
     return new Response(JSON.stringify({ error: e.message }), { status: 500 });
@@ -80,8 +79,15 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  // list all IPS with factor summaries (one row per factor; fine for now)
-  const { data, error } = await supabase.from('ips_with_factors').select('*').order('ips_name', { ascending: true });
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  // Use the same table as the frontend for consistency
+  const { data, error } = await supabase
+    .from('ips_configurations')
+    .select('*')
+    .order('created_at', { ascending: false });
+
+  if (error) {
+    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
+  }
+
   return new Response(JSON.stringify(data), { status: 200 });
 }
