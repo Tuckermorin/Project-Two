@@ -86,14 +86,16 @@ function normalizeIPSRules(ips: IPSWithRules): FactorRule[] {
   // 1) canonical array from builder
   if (Array.isArray(ips.factorRules) && ips.factorRules.length) {
     return ips.factorRules.map((r) => ({
-      source: "manual",
-      dataType: "number",
-      operator: "eq",
-      weight: 1,
-      unit: "raw",
+      // Spread the object first, then apply defaults for missing properties
       ...r,
+      source: r.source ?? "manual",
+      dataType: r.dataType ?? "number", 
+      operator: r.operator ?? "eq",
+      weight: r.weight ?? 1,
+      unit: r.unit ?? "raw",
     }));
   }
+  
   // 2) object map fallback
   if (ips.configurations && typeof ips.configurations === "object") {
     return Object.entries(ips.configurations)
@@ -111,6 +113,7 @@ function normalizeIPSRules(ips: IPSWithRules): FactorRule[] {
         unit: cfg?.unit ?? "raw",
       }));
   }
+  
   // 3) factor key list fallback → qualitative manual >= 3
   if (Array.isArray(ips.factors) && ips.factors.length) {
     return ips.factors.map((key: string) => ({
@@ -124,6 +127,7 @@ function normalizeIPSRules(ips: IPSWithRules): FactorRule[] {
       unit: "raw",
     }));
   }
+  
   return [];
 }
 

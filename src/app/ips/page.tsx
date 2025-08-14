@@ -276,7 +276,7 @@ export default function IPSPage() {
     }
   }
 
-  // Save new IPS (quick create)
+// Save new IPS (quick create)
   async function saveIPS() {
     if (!name.trim()) {
       toast.error("Please enter an IPS name");
@@ -310,9 +310,15 @@ export default function IPSPage() {
         setName("");
         setDescription("");
         await fetchIPS();
-        const inserted = Array.isArray(data) && data[0];
-        if (inserted?.name) {
-          toast.success(`IPS "${inserted.name}" created`);
+        
+        // Fixed: Proper type checking for the inserted data
+        if (data && Array.isArray(data) && data.length > 0) {
+          const inserted = data[0] as any; // Type assertion since we know the structure
+          if (inserted?.name) {
+            toast.success(`IPS "${inserted.name}" created`);
+          } else {
+            toast.success("IPS created");
+          }
         } else {
           toast.success("IPS created");
         }

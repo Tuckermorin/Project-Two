@@ -298,7 +298,7 @@ class IPSDataService {
         if (!id) continue;
 
         if (!grouped[id]) {
-          // Base configuration
+          // Base configuration - FIXED: Added missing created_at property
           grouped[id] = {
             id,
             user_id: String(r?.user_id ?? r?.owner_id ?? userId),
@@ -322,6 +322,12 @@ class IPSDataService {
                 : r?.is_active != null
                 ? Boolean(r.is_active)
                 : false,
+            // FIX: Add the missing required properties
+            created_at: String(r?.created_at ?? new Date().toISOString()),
+            total_factors: Number(r?.total_factors ?? 0),
+            active_factors: Number(r?.active_factors ?? 0),
+            total_weight: Number(r?.total_weight ?? 0),
+            avg_weight: Number(r?.avg_weight ?? 0),
             factorRules: [],
           } as IPSConfiguration & { factorRules: any[] };
         }
