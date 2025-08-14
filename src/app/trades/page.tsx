@@ -341,7 +341,7 @@ export default function TradesPage() {
                     <div className="space-y-2 text-sm">
                       <div className="flex items-center justify-between">
                         <span className="text-gray-600">Strategies:</span>
-                        <span className="font-medium">{ips.strategies.length}</span>
+                        <span className="font-medium">{ips.strategies?.length ?? 0}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-gray-600">IPS Factors:</span>
@@ -487,7 +487,8 @@ export default function TradesPage() {
                   <BarChart3 className="h-5 w-5 text-purple-600" />
                   <div>
                     <div className="text-2xl font-bold">
-                      {prospectiveTrades.length
+                      {prospectiveTrades.length &&
+                      prospectiveTrades.some((t) => t.score !== undefined)
                         ? (
                             prospectiveTrades.reduce((s, t) => s + (t.score ?? 0), 0) /
                             prospectiveTrades.filter((t) => t.score !== undefined).length
@@ -608,7 +609,7 @@ export default function TradesPage() {
             <h1 className="text-3xl font-bold">Active Trades</h1>
             <p className="text-gray-600">Monitor your current positions</p>
           </div>
-          <div className="flex gap-2">
+        <div className="flex gap-2">
             <Button variant="outline" onClick={() => setCurrentView("selection")}>
               <Plus className="h-4 w-4 mr-2" /> New Trade
             </Button>
@@ -769,7 +770,7 @@ function EnhancedTradeEntryForm({
     }
   }
 
-  // Auto-load API factors on symbol change (min 1 char to avoid spam; adjust as needed)
+  // Auto-load API factors on symbol change
   useEffect(() => {
     if (formData.symbol) loadAPIFactors(formData.symbol);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -961,6 +962,8 @@ function EnhancedTradeEntryForm({
     return (achieved / totalWeight) * 100;
   }
 
+  const scoreNow = calculateScore();
+
   return (
     <div className="space-y-6">
       {/* Progress Header */}
@@ -1064,78 +1067,80 @@ function EnhancedTradeEntryForm({
               <Database className="h-5 w-5 text-blue-600" /> API Factors ({apiRules.length})
               <Badge
                 variant="outline"
-                className={`$${""} {
+                className={
                   apiStatus === "connected"
-                    ? "bg-green-50 text-green-700"
+                    ? "ml-2 bg-green-50 text-green-700"
                     : apiStatus === "disconnected"
-                    ? "bg-red-50 text-red-700"
-                    : "bg-yellow-50 text-yellow-700"
-                }`}
+                    ? "ml-2 bg-red-50 text-red-700"
+                    : "ml-2 bg-blue-50 text-blue-700"
+                }
               >
-                {apiStatus === "connected" ? "Auto-populated" : apiStatus === "disconnected" ? "Manual Entry" : "Loading…"}
+                {apiStatus === "connected" ? "Connected" : apiStatus === "disconnected" ? "Disconnected" : "Loading…"}
               </Badge>
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            {apiStatus === "disconnected" && (
-              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg">
-                <div className="flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4 text-red-600" />
-                  <span className="text-sm text-red-700">API connection failed. Enter values below.</span>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-4">
-              {apiRules.map((r) => {
-                const val = formData.apiFactors[r.key] ?? "";
-                return (
-                  <div key={r.key} className="p-3 rounded-lg border bg-gray-50">
-                    <div className="flex items-center justify-between mb-1">
-                      <Label className="font-medium text-sm">
-                        {r.label ?? r.key} • Rule: {ruleText(r)}
-                      </Label>
-                      <small className="text-gray-500">{r.unit ?? ""}</small>
-                    </div>
-                    <Input
-                      type="number"
-                      step="0.0001"
-                      value={val}
-                      onChange={(e) =>
-                        setFormData((p) => ({
-                          ...p,
-                          apiFactors: {
-                            ...p.apiFactors,
-                            [r.key]: e.target.value === "" ? "" : parseFloat(e.target.value),
-                          },
-                        }))
-                      }
-                      placeholder={`Enter ${r.label ?? r.key}`}
-                    />
-                  </div>
-                );
-              })}
+          <CardContent className="space-y-4">
+            <div className="flex gap-2">
+              <Input
+                value={formData.symbol}
+                onChange={(e) => setFormData((p) => ({ ...p, symbol: e.target.value.toUpperCase() }))}
+                placeholder="Symbol (e.g., AAPL)"
+              />
+              <Button
+                variant="outline"
+                onClick={() => formData.symbol && loadAPIFactors(formData.symbol)}
+                disabled={!formData.symbol || apiStatus === "loading"}
+              >
+                <RefreshCw className={`h-4 w-4 mr-2 ${apiStatus === "loading" ? "animate-spin" : ""}`} />
+                Refresh
+              </Button>
             </div>
 
-            {formData.symbol && (
-              <div className="mt-4 pt-4 border-t">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => loadAPIFactors(formData.symbol!)}
-                  disabled={apiStatus === "loading"}
-                  className="w-full flex items-center gap-2"
-                >
-                  {apiStatus === "loading" ? (
-                    <>
-                      <RefreshCw className="h-4 w-4 animate-spin" /> Loading API Data…
-                    </>
-                  ) : (
-                    <>
-                      <Database className="h-4 w-4" /> Refresh API Data
-                    </>
-                  )}
-                </Button>
+            {apiRules.length === 0 ? (
+              <div className="text-sm text-gray-600">No API-driven factors for this IPS.</div>
+            ) : (
+              <div className="space-y-3">
+                {apiRules.map((r) => {
+                  const val = formData.apiFactors[r.key];
+                  const pass = evaluateRule(r, val);
+                  return (
+                    <div key={`api-${r.key}`} className="grid grid-cols-12 items-center gap-2">
+                      <div className="col-span-5">
+                        <div className="text-sm font-medium">{r.label ?? r.key}</div>
+                        <div className="text-xs text-gray-500">Rule: {ruleText(r)}</div>
+                      </div>
+                      <div className="col-span-3">
+                        <Input
+                          value={val === undefined || val === "" ? "" : String(val)}
+                          onChange={(e) =>
+                            setFormData((p) => ({
+                              ...p,
+                              apiFactors: {
+                                ...p.apiFactors,
+                                [r.key]: e.target.value === "" ? "" : Number(e.target.value),
+                              },
+                            }))
+                          }
+                          type="number"
+                          step="0.0001"
+                          placeholder="auto"
+                        />
+                      </div>
+                      <div className="col-span-2 text-xs text-gray-500">{r.unit ?? "raw"}</div>
+                      <div className="col-span-2 flex items-center">
+                        {pass ? (
+                          <Badge className="bg-green-50 text-green-700">
+                            <CheckCircle className="h-3 w-3 mr-1" /> Pass
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                            <AlertCircle className="h-3 w-3 mr-1" /> Miss
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
             )}
           </CardContent>
@@ -1145,191 +1150,116 @@ function EnhancedTradeEntryForm({
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-orange-600" /> Manual Input Required ({manualRules.length})
+              <Users className="h-5 w-5 text-orange-600" /> Manual Factors ({manualRules.length})
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {manualRules.map((r) => {
-                const val = formData.ipsFactors[r.key] ?? "";
-                const hasValue = val !== "" && val !== undefined;
+          <CardContent className="space-y-3">
+            {manualRules.length === 0 ? (
+              <div className="text-sm text-gray-600">No manual factors for this IPS.</div>
+            ) : (
+              manualRules.map((r) => {
+                const val = formData.ipsFactors[r.key];
+                const pass = evaluateRule(r, val);
+                // For qualitative factors, suggest 1–5 scale
+                const step = r.dataType === "qualitative" ? "1" : "0.0001";
                 return (
-                  <div key={r.key} className="p-3 rounded-lg border bg-gray-50">
-                    <div className="mb-1">
-                      <Label className="font-medium text-sm">
-                        {r.label ?? r.key} • Rule: {ruleText(r)}
-                      </Label>
+                  <div key={`manual-${r.key}`} className="grid grid-cols-12 items-center gap-2">
+                    <div className="col-span-5">
+                      <div className="text-sm font-medium">{r.label ?? r.key}</div>
+                      <div className="text-xs text-gray-500">
+                        Rule: {ruleText(r)}{" "}
+                        {r.dataType === "qualitative" ? "(enter 1–5 assessment)" : ""}
+                      </div>
                     </div>
-                    {r.dataType === "qualitative" ? (
-                      <select
-                        value={val}
-                        onChange={(e) =>
-                          setFormData((p) => ({
-                            ...p,
-                            ipsFactors: { ...p.ipsFactors, [r.key]: e.target.value ? parseInt(e.target.value) : "" },
-                          }))
-                        }
-                        className={`w-full p-2 border rounded-md ${hasValue ? "border-green-300 bg-green-50" : "border-gray-300"}`}
-                      >
-                        <option value="">Select rating</option>
-                        <option value="1">1 - Poor</option>
-                        <option value="2">2 - Below Average</option>
-                        <option value="3">3 - Average</option>
-                        <option value="4">4 - Good</option>
-                        <option value="5">5 - Excellent</option>
-                      </select>
-                    ) : (
+                    <div className="col-span-3">
                       <Input
-                        type="number"
-                        step="0.0001"
-                        value={val}
+                        value={val === undefined || val === "" ? "" : String(val)}
                         onChange={(e) =>
                           setFormData((p) => ({
                             ...p,
                             ipsFactors: {
                               ...p.ipsFactors,
-                              [r.key]: e.target.value === "" ? "" : parseFloat(e.target.value),
+                              [r.key]: e.target.value === "" ? "" : Number(e.target.value),
                             },
                           }))
                         }
-                        placeholder={`Enter ${r.label ?? r.key}`}
+                        type="number"
+                        step={step}
+                        min={r.dataType === "qualitative" ? 1 : undefined}
+                        max={r.dataType === "qualitative" ? 5 : undefined}
+                        placeholder={r.dataType === "qualitative" ? "1–5" : "value"}
                       />
-                    )}
-                    {hasValue && (
-                      <div className="mt-1 flex items-center gap-1 text-green-700 text-xs">
-                        <CheckCircle className="h-3 w-3" /> Filled
-                      </div>
-                    )}
+                    </div>
+                    <div className="col-span-2 text-xs text-gray-500">{r.unit ?? "raw"}</div>
+                    <div className="col-span-2 flex items-center">
+                      {pass ? (
+                        <Badge className="bg-green-50 text-green-700">
+                          <CheckCircle className="h-3 w-3 mr-1" /> Pass
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="bg-red-50 text-red-700 border-red-200">
+                          <AlertCircle className="h-3 w-3 mr-1" /> Miss
+                        </Badge>
+                      )}
+                    </div>
                   </div>
                 );
-              })}
-            </div>
+              })
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Score & Actions */}
+      {/* Actions / Scoring */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Calculator className="h-5 w-5" /> IPS Score & Actions
+            <Calculator className="h-5 w-5" /> Score & Actions
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-medium">Calculate IPS Score</div>
-              <div className="text-sm text-gray-600">
-                {isFormValid
-                  ? `Ready to calculate using ${factorRules.length} IPS factors`
-                  : "Complete required fields and factors to enable calculation"}
-              </div>
-            </div>
-            <Button
-              onClick={() => onCalculateScore(formData)}
-              disabled={!isFormValid || isLoading}
-              className="flex items-center gap-2"
-            >
-              {isLoading ? (
-                <>
-                  <RefreshCw className="h-4 w-4 animate-spin" /> Calculating…
-                </>
-              ) : (
-                <>
-                  <Calculator className="h-4 w-4" /> Calculate Score
-                </>
-              )}
-            </Button>
-          </div>
-
-          {calculatedScore !== null && (
-            <div className="p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg border border-blue-200">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-xl font-bold text-blue-900">IPS Score: {calculatedScore.toFixed(1)}</div>
-                  <div className="text-sm text-blue-700">
-                    {calculatedScore >= 80
-                      ? "Excellent Trade Opportunity"
-                      : calculatedScore >= 70
-                      ? "Good Trade Setup"
-                      : calculatedScore >= 60
-                      ? "Average Trade"
-                      : "Poor Trade – Consider Alternatives"}
-                  </div>
-                  <div className="text-xs text-gray-600 mt-1">Based on {factorRules.length} IPS factors</div>
-                </div>
-                <div className="text-right">
-                  <Progress value={calculatedScore} className="w-24 mb-2" />
-                  <div
-                    className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${
-                      calculatedScore >= 80
-                        ? "bg-green-100 text-green-800"
-                        : calculatedScore >= 70
-                        ? "bg-blue-100 text-blue-800"
-                        : calculatedScore >= 60
-                        ? "bg-yellow-100 text-yellow-800"
-                        : "bg-red-100 text-red-800"
-                    }`}
-                  >
-                    {calculatedScore >= 80
-                      ? "EXCELLENT"
-                      : calculatedScore >= 70
-                      ? "GOOD"
-                      : calculatedScore >= 60
-                      ? "AVERAGE"
-                      : "POOR"}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="flex items-center justify-between pt-4 border-t">
+        <CardContent className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div className="flex items-center gap-3">
             <Button
               variant="outline"
-              onClick={() => {
-                if (confirm("Delete this trade and start over?")) {
-                  setFormData({
-                    name: "",
-                    symbol: "",
-                    currentPrice: undefined,
-                    expirationDate: "",
-                    contractType: "put-credit-spread",
-                    numberOfContracts: 1,
-                    shortPutStrike: undefined,
-                    longPutStrike: undefined,
-                    creditReceived: undefined,
-                    shortCallStrike: undefined,
-                    longCallStrike: undefined,
-                    optionStrike: undefined,
-                    debitPaid: undefined,
-                    sharesOwned: undefined,
-                    callStrike: undefined,
-                    premiumReceived: undefined,
-                    shares: undefined,
-                    entryPrice: undefined,
-                    ipsFactors: {},
-                    apiFactors: {},
-                  });
-                }
-              }}
-              className="text-red-600 border-red-200 hover:bg-red-50"
+              onClick={() => onCalculateScore(formData)}
+              disabled={isLoading || !factorRules.length}
             >
-              Delete & Start Over
+              <Calculator className="h-4 w-4 mr-2" />
+              Calculate Score
             </Button>
-
-            <div className="flex items-center gap-3">
-              <Button variant="outline" onClick={onCancel}>
-                Cancel
-              </Button>
-              <Button
-                onClick={() => onSubmit(formData, calculateScore())}
-                disabled={!isFormValid || isLoading}
-                className="flex items-center gap-2"
-              >
-                <Target className="h-4 w-4" /> {isLoading ? "Saving…" : "Move to Prospective Trades"}
-              </Button>
+            <div className="text-sm text-gray-600">
+              {calculatedScore !== null ? (
+                <span>
+                  Score:&nbsp;
+                  <Badge
+                    className={
+                      calculatedScore >= 80
+                        ? "bg-green-50 text-green-700"
+                        : calculatedScore >= 60
+                        ? "bg-yellow-50 text-yellow-700"
+                        : "bg-red-50 text-red-700"
+                    }
+                  >
+                    {calculatedScore.toFixed(1)}%
+                  </Badge>
+                </span>
+              ) : scoreNow !== null ? (
+                <span className="text-gray-600">Estimated: {scoreNow.toFixed(1)}%</span>
+              ) : (
+                <span className="text-gray-500">No score yet</span>
+              )}
             </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={onCancel}>Cancel</Button>
+            <Button
+              onClick={() => onSubmit(formData, calculatedScore ?? scoreNow)}
+              disabled={!isFormValid}
+              className="bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Submit Prospective Trade
+            </Button>
           </div>
         </CardContent>
       </Card>
