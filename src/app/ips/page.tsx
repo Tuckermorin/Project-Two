@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
+import { toast } from "sonner";
 import {
   FileText,
   Settings,
@@ -21,6 +22,7 @@ import {
   MoreVertical,
   Trash2,
   Layers,
+  AlertTriangle,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -29,6 +31,14 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // Import components
 import { IPSStrategySelector } from "@/components/ips/ips-strategy-selector";
@@ -43,6 +53,76 @@ import {
   type IPSConfiguration,
   type TradingStrategy,
 } from "@/lib/services/ips-data-service";
+
+// -------------------------------
+// Delete Confirmation Dialog Component
+// -------------------------------
+interface DeleteConfirmationDialogProps {
+  isOpen: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+  title?: string;
+  description?: string;
+  isLoading?: boolean;
+}
+
+function DeleteConfirmationDialog({
+  isOpen,
+  onConfirm,
+  onCancel,
+  title = "Delete IPS Configuration",
+  description = "Are you sure you want to delete this IPS? This action cannot be undone and will permanently remove all associated data.",
+  isLoading = false
+}: DeleteConfirmationDialogProps) {
+  return (
+    <Dialog open={isOpen} onOpenChange={onCancel}>
+      <DialogContent className="sm:max-w-[425px]">
+        <DialogHeader>
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-red-100 dark:bg-red-900/20">
+              <AlertTriangle className="h-5 w-5 text-red-600 dark:text-red-400" />
+            </div>
+            <div className="flex-1">
+              <DialogTitle className="text-left">{title}</DialogTitle>
+            </div>
+          </div>
+        </DialogHeader>
+        
+        <DialogDescription className="text-left py-2">
+          {description}
+        </DialogDescription>
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button
+            variant="outline"
+            onClick={onCancel}
+            disabled={isLoading}
+          >
+            Cancel
+          </Button>
+          <Button
+            variant="destructive"
+            onClick={onConfirm}
+            disabled={isLoading}
+            className="gap-2"
+          >
+            {isLoading ? (
+              <>
+                <div className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                Deleting...
+              </>
+            ) : (
+              <>
+                <Trash2 className="h-4 w-4" />
+                Delete IPS
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
 
 // -------------------------------
 // Runtime row normalizer (no deps)
@@ -162,6 +242,14 @@ export default function IPSPage() {
   const [factorDefinitions, setFactorDefinitions] = useState<any>(null);
   const [creating, setCreating] = useState(false);
 
+  // Delete confirmation dialog state
+  const [deleteDialog, setDeleteDialog] = useState({
+    isOpen: false,
+    ipsId: "",
+    ipsName: "",
+    isDeleting: false,
+  });
+
   // Quick creator state
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -191,7 +279,7 @@ export default function IPSPage() {
   // Save new IPS (quick create)
   async function saveIPS() {
     if (!name.trim()) {
-      alert("Please enter an IPS name");
+      toast.error("Please enter an IPS name");
       return;
     }
 
@@ -217,38 +305,74 @@ export default function IPSPage() {
 
       if (error) {
         console.error("Error inserting IPS:", error);
-        alert("Failed to save IPS: " + error.message);
+        toast.error("Failed to save IPS: " + error.message);
       } else {
         setName("");
         setDescription("");
         await fetchIPS();
+        const inserted = Array.isArray(data) && data[0];
+        if (inserted?.name) {
+          toast.success(`IPS "${inserted.name}" created`);
+        } else {
+          toast.success("IPS created");
+        }
       }
     } catch (err) {
       console.error("Unexpected error saving IPS:", err);
-      alert("Unexpected error saving IPS");
+      toast.error("Unexpected error saving IPS");
     }
   }
 
-  // Delete IPS
-  async function deleteIPS(ipsId: string) {
-    if (!confirm("Are you sure you want to delete this IPS? This action cannot be undone.")) {
-      return;
-    }
+  // Show delete confirmation dialog
+  const showDeleteConfirmation = (ipsId: string) => {
+    const ips = ipsList.find((ips: any) => ips.id === ipsId);
+    setDeleteDialog({
+      isOpen: true,
+      ipsId,
+      ipsName: ips?.name || "this IPS",
+      isDeleting: false,
+    });
+  };
+
+  // Cancel delete
+  const cancelDelete = () => {
+    setDeleteDialog({
+      isOpen: false,
+      ipsId: "",
+      ipsName: "",
+      isDeleting: false,
+    });
+  };
+
+  // Confirm delete
+  const confirmDelete = async () => {
+    setDeleteDialog(prev => ({ ...prev, isDeleting: true }));
 
     try {
-      const { error } = await supabase.from("ips_configurations").delete().eq("id", ipsId);
+      const { error } = await supabase
+        .from("ips_configurations")
+        .delete()
+        .eq("id", deleteDialog.ipsId);
 
       if (error) {
         console.error("Error deleting IPS:", error);
-        alert("Failed to delete IPS: " + error.message);
+        toast.error("Failed to delete IPS: " + error.message);
       } else {
         await fetchIPS();
+        toast.success(`IPS "${deleteDialog.ipsName}" deleted successfully`);
+        setDeleteDialog({
+          isOpen: false,
+          ipsId: "",
+          ipsName: "",
+          isDeleting: false,
+        });
       }
     } catch (err) {
       console.error("Unexpected error deleting IPS:", err);
-      alert("Unexpected error deleting IPS");
+      toast.error("Unexpected error deleting IPS");
+      setDeleteDialog(prev => ({ ...prev, isDeleting: false }));
     }
-  }
+  };
 
   // Load data on mount
   useEffect(() => {
@@ -383,9 +507,10 @@ export default function IPSPage() {
         currentIPSId: null,
         isLoading: false,
       });
+      toast.success(`IPS "${ipsData.name}" saved`);
     } catch (error: any) {
       console.error("Error saving IPS:", error);
-      alert("Error saving IPS: " + error.message);
+      toast.error("Error saving IPS: " + error.message);
     } finally {
       setCreating(false);
     }
@@ -405,7 +530,7 @@ export default function IPSPage() {
           await fetchIPS();
           break;
         case "delete":
-          await deleteIPS(ipsId);
+          showDeleteConfirmation(ipsId);
           break;
       }
     } catch (error) {
@@ -688,6 +813,16 @@ export default function IPSPage() {
           </div>
         )}
       </div>
+
+      {/* Delete Confirmation Dialog */}
+      <DeleteConfirmationDialog
+        isOpen={deleteDialog.isOpen}
+        onConfirm={confirmDelete}
+        onCancel={cancelDelete}
+        isLoading={deleteDialog.isDeleting}
+        title="Delete IPS Configuration"
+        description={`Are you sure you want to delete "${deleteDialog.ipsName}"? This action cannot be undone and will permanently remove all associated data including factor configurations, weights, and historical performance data.`}
+      />
     </div>
   );
 }
