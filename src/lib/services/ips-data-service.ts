@@ -228,6 +228,16 @@ const ALL_FACTORS = [
   ...OPTIONS_FACTORS
 ];
 
+function toBoolean(value: unknown): boolean {
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value === 1;
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    return v === 'true' || v === 't' || v === '1' || v === 'yes';
+  }
+  return false;
+}
+
 class IPSDataService {
   // Store IPS configurations in memory (replace with database in production)
   private ipsConfigurations: Map<string, IPSConfiguration[]> = new Map();
@@ -316,12 +326,7 @@ class IPSDataService {
                   }
                 })()
               : [],
-            is_active:
-              typeof r?.is_active === 'boolean'
-                ? r.is_active
-                : r?.is_active != null
-                ? Boolean(r.is_active)
-                : false,
+            is_active: toBoolean(r?.is_active),
             // FIX: Add the missing required properties
             created_at: String(r?.created_at ?? new Date().toISOString()),
             total_factors: Number(r?.total_factors ?? 0),
