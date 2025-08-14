@@ -281,9 +281,88 @@ class IPSDataService {
 
   // CRUD operations for IPS configurations
   async getAllUserIPSs(userId: string): Promise<IPSConfiguration[]> {
-    // TODO: Replace with database query
-    const userIPSs = this.ipsConfigurations.get(userId) || [];
-    return Promise.resolve(userIPSs);
+    try {
+      // Fetch from the Next.js API which proxies Supabase
+      const res = await fetch('/api/ips', { cache: 'no-store' });
+      const rows = await res.json();
+
+      if (!Array.isArray(rows)) {
+        throw new Error('Invalid IPS response');
+      }
+
+      // Group rows by IPS id because the view returns one row per factor
+      const grouped: Record<string, any> = {};
+
+      for (const r of rows) {
+        const id = String(r?.ips_id ?? r?.id ?? '');
+        if (!id) continue;
+
+        if (!grouped[id]) {
+          // Base configuration
+          grouped[id] = {
+            id,
+            user_id: String(r?.user_id ?? r?.owner_id ?? userId),
+            name: String(r?.ips_name ?? r?.name ?? 'Untitled IPS'),
+            description: String(r?.description ?? ''),
+            strategies: Array.isArray(r?.strategies)
+              ? r.strategies
+              : typeof r?.strategies === 'string'
+              ? (() => {
+                  try {
+                    const parsed = JSON.parse(r.strategies);
+                    return Array.isArray(parsed) ? parsed : [];
+                  } catch {
+                    return [];
+                  }
+                })()
+              : [],
+            is_active:
+              typeof r?.is_active === 'boolean'
+                ? r.is_active
+                : r?.is_active != null
+                ? Boolean(r.is_active)
+                : false,
+            factorRules: [],
+          } as IPSConfiguration & { factorRules: any[] };
+        }
+
+        // Attach factor information if present
+        const key = r?.factor_id || r?.factor_key || r?.key;
+        if (key) {
+          grouped[id].factorRules.push({
+            key: String(key),
+            label: r?.factor_name || r?.label || String(key),
+            source:
+              r?.source === 'api' || r?.factor_source === 'api'
+                ? 'api'
+                : 'manual',
+            dataType: r?.data_type || 'number',
+            operator: r?.operator || 'eq',
+            threshold:
+              r?.target_value !== undefined
+                ? Number(r.target_value)
+                : r?.threshold !== undefined
+                ? Number(r.threshold)
+                : undefined,
+            min: r?.min !== undefined ? Number(r.min) : undefined,
+            max: r?.max !== undefined ? Number(r.max) : undefined,
+            unit: r?.unit || 'raw',
+            weight: r?.weight !== undefined ? Number(r.weight) : 1,
+          });
+        }
+      }
+
+      const list = Object.values(grouped) as IPSConfiguration[];
+
+      // Cache for potential future use
+      this.ipsConfigurations.set(userId, list);
+
+      return list;
+    } catch (error) {
+      console.error('Error fetching IPS configurations:', error);
+      // Fallback to any cached entries
+      return this.ipsConfigurations.get(userId) || [];
+    }
   }
 
   async getIPSById(ipsId: string): Promise<IPSConfiguration | null> {
