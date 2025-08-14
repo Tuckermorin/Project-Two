@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
+import { toast } from "sonner";
 import {
   FileText,
   Settings,
@@ -191,7 +192,7 @@ export default function IPSPage() {
   // Save new IPS (quick create)
   async function saveIPS() {
     if (!name.trim()) {
-      alert("Please enter an IPS name");
+      toast.error("Please enter an IPS name");
       return;
     }
 
@@ -217,15 +218,21 @@ export default function IPSPage() {
 
       if (error) {
         console.error("Error inserting IPS:", error);
-        alert("Failed to save IPS: " + error.message);
+        toast.error("Failed to save IPS: " + error.message);
       } else {
         setName("");
         setDescription("");
         await fetchIPS();
+        const inserted = Array.isArray(data) && data[0];
+        if (inserted?.name) {
+          toast.success(`IPS "${inserted.name}" created`);
+        } else {
+          toast.success("IPS created");
+        }
       }
     } catch (err) {
       console.error("Unexpected error saving IPS:", err);
-      alert("Unexpected error saving IPS");
+      toast.error("Unexpected error saving IPS");
     }
   }
 
@@ -240,13 +247,14 @@ export default function IPSPage() {
 
       if (error) {
         console.error("Error deleting IPS:", error);
-        alert("Failed to delete IPS: " + error.message);
+        toast.error("Failed to delete IPS: " + error.message);
       } else {
         await fetchIPS();
+        toast.success("IPS deleted");
       }
     } catch (err) {
       console.error("Unexpected error deleting IPS:", err);
-      alert("Unexpected error deleting IPS");
+      toast.error("Unexpected error deleting IPS");
     }
   }
 
@@ -383,9 +391,10 @@ export default function IPSPage() {
         currentIPSId: null,
         isLoading: false,
       });
+      toast.success(`IPS "${ipsData.name}" saved`);
     } catch (error: any) {
       console.error("Error saving IPS:", error);
-      alert("Error saving IPS: " + error.message);
+      toast.error("Error saving IPS: " + error.message);
     } finally {
       setCreating(false);
     }
