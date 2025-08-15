@@ -1,6 +1,43 @@
 // src/app/trades/page.tsx
 "use client";
 
+import { createClient } from "@supabase/supabase-js";
+
+// ---- Supabase singleton (avoid multiple GoTrue instances) ----
+const globalForSupabase = globalThis as unknown as {
+  __supabase?: ReturnType<typeof createClient>;
+};
+
+const supabase =
+  globalForSupabase.__supabase ??
+  createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      auth: {
+        storageKey: "tenxiv-auth",
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: true,
+      },
+    }
+  );
+if (!globalForSupabase.__supabase) globalForSupabase.__supabase = supabase;
+
+// ---- Factor defs we build from DB rows ----
+type FactorDef = {
+  id: string;            // factor_definitions.id (or factors.id)
+  name: string;          // factor_definitions.name
+  type: "quantitative" | "qualitative" | "options";
+  category?: string | null;
+  data_type?: string | null;  // e.g., "percentage" | "number"
+  unit?: string | null;
+  source?: string | null;     // truthy => API factor
+  weight: number;             // ips_factors.weight
+  target_value: any;          // ips_factors.target_value (number or {op,value})
+};
+
+
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -238,26 +275,104 @@ export default function TradesPage() {
   const userId = "user-123"; // TODO: replace with auth
 
   useEffect(() => {
-    const loadIPSData = async () => {
+    const loadActiveIPS = async () => {
       try {
         setIsLoading(true);
-        const userIPSs = await ipsDataService.getAllUserIPSs(userId);
-        const activeOnly = userIPSs.filter((ips) => ips.is_active === true);
-        setActiveIPSs(activeOnly);
+        const { data, error } = await supabase
+          .from("ips_configurations")
+          .select("*")
+          .eq("is_active", true)
+          .order("created_at", { ascending: false });
+        if (error) throw error;
+        setActiveIPSs((data || []) as any[]);
       } catch (e) {
-        console.error("Error loading IPS data:", e);
+        console.error("Failed to load active IPS:", e);
+        setActiveIPSs([]);
       } finally {
         setIsLoading(false);
       }
     };
-    loadIPSData();
-  }, [userId]);
+    loadActiveIPS();
+  }, []);
 
-  function handleIPSSelection(ips: IPSConfiguration) {
-    setSelectedIPS(ips);
-    setCurrentView("entry");
-    setCalculatedScore(null);
+
+// local state to hold factor defs for the current IPS
+const [apiFactorDefs, setApiFactorDefs] = useState<FactorDef[]>([]);
+const [manualFactorDefs, setManualFactorDefs] = useState<FactorDef[]>([]);
+
+async function loadIpsFactorDefs(ipsId: string) {
+  // 1) rows from ips_factors (weight, target_value, factor_id)
+  const { data: linkRows, error: linkErr } = await supabase
+    .from("ips_factors")
+    .select("factor_id, weight, target_value")
+    .eq("ips_id", ipsId);
+
+  if (linkErr) throw linkErr;
+  const links = (linkRows || []).map((r: any) => ({
+    factor_id: String(r.factor_id),
+    weight: Number(r.weight ?? 5),
+    target_value: r.target_value,
+  }));
+
+  if (links.length === 0) {
+    setApiFactorDefs([]);
+    setManualFactorDefs([]);
+    return;
   }
+
+  // 2) try factor_definitions first; fallback to factors if that table is used
+  const ids = links.map((l) => l.factor_id);
+  let catalog: any[] = [];
+  {
+    const { data, error } = await supabase
+      .from("factor_definitions")
+      .select("id,name,type,category,data_type,unit,source")
+      .in("id", ids);
+    if (!error && Array.isArray(data)) catalog = data;
+  }
+  if (catalog.length === 0) {
+    const { data, error } = await supabase
+      .from("factors")
+      .select("id,name,type,category,data_type,unit,source")
+      .in("id", ids);
+    if (!error && Array.isArray(data)) catalog = data || [];
+  }
+
+  const byId = new Map<string, any>();
+  catalog.forEach((c: any) => byId.set(String(c.id), c));
+
+  const merged: FactorDef[] = links.map((l) => {
+    const c = byId.get(l.factor_id) || {};
+    return {
+      id: l.factor_id,
+      name: String(c.name ?? l.factor_id),
+      type: (c.type as FactorDef["type"]) || "quantitative",
+      category: c.category ?? null,
+      data_type: c.data_type ?? null,
+      unit: c.unit ?? null,
+      source: c.source ?? null,
+      weight: l.weight,
+      target_value: l.target_value,
+    };
+  });
+
+  setApiFactorDefs(merged.filter((f) => !!f.source));
+  setManualFactorDefs(merged.filter((f) => !f.source));
+}
+
+async function handleIPSSelection(ips: IPSConfiguration) {
+  setSelectedIPS(ips);
+  setCurrentView("entry");
+  setCalculatedScore(null);
+  try {
+    await loadIpsFactorDefs(ips.id);
+  } catch (e) {
+    console.error("Failed loading IPS factors:", e);
+    setApiFactorDefs([]);
+    setManualFactorDefs([]);
+  }
+}
+
 
   function handleTradeSubmit(formData: TradeFormData, score: number | null) {
     if (!selectedIPS) return;
@@ -275,15 +390,46 @@ export default function TradesPage() {
 
   function handleCalculateScore(formData: TradeFormData) {
     if (!selectedIPS) return;
-    const rules = normalizeIPSRules(selectedIPS as IPSWithRules);
-    const totalWeight = rules.reduce((s, r) => s + (r.weight ?? 1), 0) || 1;
-    const achieved = rules.reduce((s, r) => {
-      const bag = r.source === "api" ? formData.apiFactors : formData.ipsFactors;
-      const pass = evaluateRule(r, bag[r.key]);
-      return s + (pass ? (r.weight ?? 1) : 0);
-    }, 0);
-    const score = (achieved / totalWeight) * 100;
-    setCalculatedScore(score);
+// Build a flat bag of values by factor name
+    const bag: Record<string, number> = {};
+    Object.entries(formData.apiFactors || {}).forEach(([k, v]) => { if (v !== "" && v != null) bag[k] = Number(v); });
+    Object.entries(formData.ipsFactors || {}).forEach(([k, v]) => { if (v !== "" && v != null) bag[k] = Number(v); });
+
+    const factors = [...apiFactorDefs, ...manualFactorDefs];
+
+    let totalWeight = 0;
+    let totalWeighted = 0;
+    for (const f of factors) {
+      const v = bag[f.name];
+      let score = 0;
+
+      if (v == null || Number.isNaN(Number(v))) score = 0;
+      else if (typeof f.target_value === "number") {
+        // default rule: meet or exceed numeric target
+        score = Number(v) >= Number(f.target_value) ? 100 : 0;
+      } else if (f.target_value && typeof f.target_value === "object" && "op" in f.target_value) {
+        const tv = Number((f.target_value as any).value);
+        const op = String((f.target_value as any).op || ">=");
+        const vv = Number(v);
+        score = op === ">=" ? (vv >= tv ? 100 : 0)
+            : op === ">"  ? (vv >  tv ? 100 : 0)
+            : op === "<=" ? (vv <= tv ? 100 : 0)
+            : op === "<"  ? (vv <  tv ? 100 : 0)
+            : op === "eq" ? (vv === tv ? 100 : 0)
+            : 0;
+      } else if (f.type === "qualitative") {
+        const vv = Math.max(1, Math.min(5, Number(v)));
+        score = (vv - 1) * 25; // map 1..5 to 0..100
+      } else {
+        score = Math.max(0, Math.min(100, Number(v) * 2 + 50)); // fallback scaling
+      }
+
+      const w = Number(f.weight ?? 5);
+      totalWeight += w;
+      totalWeighted += score * w;
+    }
+    const final = totalWeight ? Math.round(totalWeighted / totalWeight) : 0;
+    setCalculatedScore(final);
   }
 
   if (isLoading && currentView === "selection") {
@@ -415,6 +561,8 @@ export default function TradesPage() {
 
         <EnhancedTradeEntryForm
           selectedIPS={selectedIPS}
+          apiFactors={apiFactorDefs}           // <-- add this
+          manualFactors={manualFactorDefs}     // <-- and this
           onSubmit={(fd, score) => handleTradeSubmit(fd, score)}
           onCalculateScore={(fd) => handleCalculateScore(fd)}
           onCancel={() => setCurrentView("selection")}

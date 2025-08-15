@@ -73,8 +73,9 @@ interface TradeFormData {
 }
 
 interface TradeEntryFormProps {
-  selectedIPS: IPSConfiguration;
-  availableFactors: FactorDefinition[];
+  selectedIPS: { id: string; name: string; strategies?: string[] };
+  apiFactors: Array<{ id: string; name: string; type: 'quantitative' | 'qualitative' | 'options'; data_type?: string | null; unit?: string | null }>;
+  manualFactors: Array<{ id: string; name: string; type: 'quantitative' | 'qualitative' | 'options'; data_type?: string | null; unit?: string | null }>;
   onSubmit: (tradeData: TradeFormData) => void;
   onCalculateScore: (tradeData: TradeFormData) => void;
   onCancel: () => void;
@@ -82,7 +83,8 @@ interface TradeEntryFormProps {
 
 export function TradeEntryForm({
   selectedIPS,
-  availableFactors,
+  apiFactors,
+  manualFactors,
   onSubmit,
   onCalculateScore,
   onCancel
@@ -280,7 +282,7 @@ export function TradeEntryForm({
           </TabsTrigger>
           <TabsTrigger value="ips-factors" className="flex items-center gap-2">
             <BarChart3 className="h-4 w-4" />
-            IPS Factors ({getManualFactors().length})
+            IPS Factors ({manualFactors.length})
           </TabsTrigger>
           <TabsTrigger value="review" className="flex items-center gap-2">
             <Target className="h-4 w-4" />
