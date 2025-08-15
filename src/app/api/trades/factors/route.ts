@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
 
     // Get IPS configuration from database
     const { data: ips, error: ipsError } = await supabase
-      .from('investment_performance_systems')
+      .from('ips_configurations')
       .select('*')
       .eq('id', ipsId)
       .single();
@@ -271,10 +271,10 @@ export async function POST(request: NextRequest) {
       throw new Error(`Failed to save factor: ${insertError.message}`);
     }
 
-    // If tradeId provided, also save to trade_factors
+    // If tradeId provided, also save to trade_evaluations
     if (tradeId) {
       const { error: tradeFactorError } = await supabase
-        .from('trade_factors')
+        .from('trade_evaluations')
         .upsert({
           trade_id: tradeId,
           factor_name: factorName,
