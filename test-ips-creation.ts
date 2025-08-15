@@ -9,12 +9,12 @@ async function testIPSCreation() {
   
   // Check environment variables
   console.log('1. Checking environment variables...');
-  const url = process.env.SUPABASE_URL;
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   
   if (!url || !key) {
     console.error('❌ Missing environment variables!');
-    console.log('   SUPABASE_URL:', url ? '✓ Set' : '✗ Missing');
+    console.log('   NEXT_PUBLIC_SUPABASE_URL:', url ? '✓ Set' : '✗ Missing');
     console.log('   SUPABASE_SERVICE_ROLE_KEY:', key ? '✓ Set' : '✗ Missing');
     process.exit(1);
   }
@@ -77,11 +77,14 @@ async function testIPSCreation() {
     }
     
     // Test 3: Query the view
-    console.log('\n5. Testing view query (ips_with_factors)...');
+    console.log('\n5. Testing view query (ips_configurations)...');
     const { data: viewData, error: viewError } = await supabase
-      .from('ips_with_factors')
-      .select('*')
-      .eq('ips_id', data.id);
+      .from('ips_configurations')
+      .select(`
+        *,
+        ips_factors (*)
+      `)
+      .eq('id', data.id);
     
     if (viewError) {
       console.error('❌ Failed to query view:', viewError.message);

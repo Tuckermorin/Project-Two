@@ -200,7 +200,7 @@ export async function POST(request: NextRequest) {
     const targetsMetCount = factorScores.filter(f => f.targetMet).length;
     const targetPercentage = factorScores.length > 0 ? (targetsMetCount / factorScores.length) * 100 : 0;
 
-    // Save score calculation to database
+    // Save trade evaluation to database
     const scoreData = {
       ips_id: ipsId,
       trade_id: tradeId || null,
@@ -218,7 +218,7 @@ export async function POST(request: NextRequest) {
     };
 
     const { data: savedScore, error: scoreError } = await supabase
-      .from('ips_score_calculations')
+      .from('trade_evaluations')
       .insert(scoreData)
       .select()
       .single();
@@ -229,7 +229,7 @@ export async function POST(request: NextRequest) {
 
     // Also save individual factor scores
     const factorScoreInserts = factorScores.map(fs => ({
-      ips_score_calculation_id: savedScore?.id,
+      trade_evaluation_id: savedScore?.id,
       factor_name: fs.factorName,
       factor_value: fs.value,
       weight: fs.weight,
