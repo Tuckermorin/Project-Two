@@ -3,49 +3,111 @@ import { createClient } from '@supabase/supabase-js';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
+// GET - Fetch trades
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get('userId') || 'default-user';
+    const status = searchParams.get('status');
+    const ipsId = searchParams.get('ipsId');
+
+    let query = supabase
+      .from('trades')
+      .select(`
+        *,
+        ips_configurations (
+          name,
+          description
+        )
+      `)
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+
+    if (status) {
+      query = query.eq('status', status);
+    }
+
+    if (ipsId) {
+      query = query.eq('ips_id', ipsId);
+    }
+
+    const { data, error } = await query;
+
+    if (error) {
+      throw new Error(`Failed to fetch trades: ${error.message}`);
+    }
+
+    return NextResponse.json({
+      success: true,
+      data: data || []
+    });
+
+  } catch (error) {
+    console.error('Error fetching trades:', error);
+    return NextResponse.json(
+      { error: 'Failed to fetch trades' },
+      { status: 500 }
+    );
+  }
+}
+
+// POST - Create new trade
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { 
-      userId, 
-      ipsId, 
-      tradeData, 
-      factorValues, 
-      ipsScore,
-      scoreId 
+    const {
+      user_id = 'default-user',
+      ips_id,
+      symbol,
+      strategy_type,
+      entry_date,
+      expiration_date,
+      quantity,
+      entry_price,
+      strike_price,
+      strike_price_short,
+      strike_price_long,
+      premium_collected,
+      premium_paid,
+      contracts,
+      notes,
+      ips_score,
+      factors_met,
+      total_factors
     } = body;
-    
-    if (!userId || !ipsId || !tradeData) {
-      return NextResponse.json({ 
-        error: 'Missing required fields: userId, ipsId, tradeData' 
-      }, { status: 400 });
+
+    if (!symbol || !strategy_type || !entry_date) {
+      return NextResponse.json(
+        { error: 'Symbol, strategy type, and entry date are required' },
+        { status: 400 }
+      );
     }
 
-    // Start transaction
     const { data: trade, error: tradeError } = await supabase
       .from('trades')
       .insert({
-        user_id: userId,
-        ips_id: ipsId,
-        ips_score_calculation_id: scoreId,
+        user_id,
+        ips_id,
+        symbol,
+        strategy_type,
+        entry_date,
+        expiration_date,
         status: 'prospective',
-        name: tradeData.name,
-        symbol: tradeData.symbol,
-        contract_type: tradeData.contractType,
-        current_price: tradeData.currentPrice,
-        expiration_date: tradeData.expirationDate,
-        number_of_contracts: tradeData.numberOfContracts,
-        short_strike: tradeData.shortStrike,
-        long_strike: tradeData.longStrike,
-        credit_received: tradeData.creditReceived,
-        ips_score: ipsScore,
-        max_gain: (tradeData.creditReceived * tradeData.numberOfContracts * 100),
-        max_loss: ((Math.abs(tradeData.shortStrike - tradeData.longStrike) - tradeData.creditReceived) * tradeData.numberOfContracts * 100),
-        spread_width: Math.abs(tradeData.shortStrike - tradeData.longStrike),
-        created_at: new Date().toISOString()
+        quantity,
+        entry_price,
+        strike_price,
+        strike_price_short,
+        strike_price_long,
+        premium_collected,
+        premium_paid,
+        contracts,
+        notes,
+        ips_score,
+        factors_met,
+        total_factors
       })
       .select()
       .single();
@@ -54,160 +116,54 @@ export async function POST(request: NextRequest) {
       throw new Error(`Failed to create trade: ${tradeError.message}`);
     }
 
-    // Save all factor values used in this trade
-    if (factorValues && Object.keys(factorValues).length > 0) {
-      const factorInserts = Object.entries(factorValues).map(([factorName, factorData]: [string, any]) => {
-        const value = typeof factorData === 'object' ? factorData.value : factorData;
-        const source = typeof factorData === 'object' ? factorData.source : 'manual';
-        const confidence = typeof factorData === 'object' ? factorData.confidence : (source === 'manual' ? 0.7 : 0.95);
-        
-        return {
-          trade_id: trade.id,
-          factor_name: factorName,
-          factor_value: value,
-          source,
-          confidence,
-          created_at: new Date().toISOString()
-        };
-      });
-
-      const { error: factorsError } = await supabase
-        .from('trade_factors')
-        .insert(factorInserts);
-
-      if (factorsError) {
-        console.error('Error saving trade factors:', factorsError);
-        // Don't fail the entire request, just log the error
-      }
+    // If IPS score was calculated, update IPS stats
+    if (ips_id && ips_score !== null) {
+      await updateIPSStats(ips_id);
     }
 
-    // Update trade analytics
-    await updateTradeAnalytics(userId, ipsId);
-    
     return NextResponse.json({
       success: true,
-      data: {
-        tradeId: trade.id,
-        status: trade.status,
-        ipsScore: trade.ips_score,
-        maxGain: trade.max_gain,
-        maxLoss: trade.max_loss
-      }
-    });
+      data: trade
+    }, { status: 201 });
 
   } catch (error) {
     console.error('Error creating trade:', error);
-    
     return NextResponse.json(
-      { 
-        error: 'Failed to create trade', 
-        message: error instanceof Error ? error.message : 'Unknown error' 
-      },
+      { error: error instanceof Error ? error.message : 'Failed to create trade' },
       { status: 500 }
     );
   }
 }
 
-async function updateTradeAnalytics(userId: string, ipsId: string) {
+// Helper function to update IPS statistics
+async function updateIPSStats(ipsId: string) {
   try {
-    // Update user trade statistics
-    const { data: userStats } = await supabase
+    // Get all trades for this IPS
+    const { data: trades } = await supabase
       .from('trades')
-      .select('status, ips_score')
-      .eq('user_id', userId);
-
-    if (userStats) {
-      const totalTrades = userStats.length;
-      const avgScore = userStats.reduce((sum, trade) => sum + (trade.ips_score || 0), 0) / totalTrades;
-      
-      await supabase
-        .from('user_statistics')
-        .upsert({
-          user_id: userId,
-          total_trades: totalTrades,
-          avg_ips_score: avgScore,
-          updated_at: new Date().toISOString()
-        }, {
-          onConflict: 'user_id'
-        });
-    }
-
-    // Update IPS performance statistics
-    const { data: ipsStats } = await supabase
-      .from('trades')
-      .select('status, ips_score')
+      .select('ips_score, status')
       .eq('ips_id', ipsId);
 
-    if (ipsStats) {
-      const totalTrades = ipsStats.length;
-      const avgScore = ipsStats.reduce((sum, trade) => sum + (trade.ips_score || 0), 0) / totalTrades;
-      
-      await supabase
-        .from('investment_performance_systems')
-        .update({
-          total_trades: totalTrades,
-          avg_score: avgScore,
-          last_used: new Date().toISOString()
-        })
-        .eq('id', ipsId);
-    }
-  } catch (error) {
-    console.error('Error updating analytics:', error);
-  }
-}
+    if (!trades || trades.length === 0) return;
 
-export async function GET(request: NextRequest) {
-  try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId');
-    const status = searchParams.get('status') || 'prospective';
-    
-    if (!userId) {
-      return NextResponse.json({ 
-        error: 'Missing userId parameter' 
-      }, { status: 400 });
-    }
+    // Calculate statistics
+    const totalTrades = trades.length;
+    const closedTrades = trades.filter(t => t.status === 'closed');
+    const winningTrades = closedTrades.filter(t => t.ips_score && t.ips_score >= 70);
+    const winRate = closedTrades.length > 0 
+      ? (winningTrades.length / closedTrades.length) * 100 
+      : null;
 
-    const { data: trades, error } = await supabase
-      .from('trades')
-      .select(`
-        *,
-        investment_performance_systems(name, description),
-        trade_factors(
-          factor_name,
-          factor_value,
-          source,
-          confidence
-        ),
-        ips_score_calculations(
-          final_score,
-          factors_used,
-          targets_met,
-          target_percentage
-        )
-      `)
-      .eq('user_id', userId)
-      .eq('status', status)
-      .order('created_at', { ascending: false });
-
-    if (error) {
-      throw new Error(`Failed to fetch trades: ${error.message}`);
-    }
-    
-    return NextResponse.json({
-      success: true,
-      data: trades || []
-    });
+    // Update IPS configuration
+    await supabase
+      .from('ips_configurations')
+      .update({
+        total_trades: totalTrades,
+        win_rate: winRate
+      })
+      .eq('id', ipsId);
 
   } catch (error) {
-    console.error('Error fetching trades:', error);
-    
-    return NextResponse.json(
-      { 
-        error: 'Failed to fetch trades', 
-        message: error instanceof Error ? error.message : 'Unknown error' 
-      },
-      { status: 500 }
-    );
+    console.error('Error updating IPS stats:', error);
   }
 }

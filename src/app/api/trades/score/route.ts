@@ -19,7 +19,7 @@ export async function POST(request: NextRequest) {
 
     // Get IPS configuration and factors from database
     const { data: ips, error: ipsError } = await supabase
-      .from('investment_performance_systems')
+      .from('ips_configurations')
       .select('*')
       .eq('id', ipsId)
       .single();
