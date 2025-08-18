@@ -522,20 +522,93 @@ class IPSDataService {
   }
 
   // Save factor configurations
-  async saveFactorConfigurations(ipsId: string, configurations: any[]): Promise<void> {
-    // TODO: Implement database save for factor configurations
+async saveFactorConfigurations(ipsId: string, configurations: any[]): Promise<void> {
+  try {
     console.log('Saving factor configurations for IPS:', ipsId, configurations);
-    return Promise.resolve();
-  }
+    
+    if (!configurations || configurations.length === 0) {
+      console.log('No configurations to save');
+      return;
+    }
 
-  // Get factor configurations
-  async getFactorConfigurations(ipsId: string): Promise<any[]> {
-    // TODO: Implement database retrieval for factor configurations
-    return Promise.resolve([]);
+    // Transform the frontend configuration format to database format
+    const factorRows = configurations.map(config => ({
+      ips_id: ipsId,
+      factor_id: config.factorId,
+      weight: config.weight || 1,
+      target_value: config.targetConfig?.threshold || config.targetConfig?.targetValue || null,
+      target_operator: config.targetConfig?.operator || 'eq',
+      preference_direction: config.targetConfig?.preferenceDirection || 'higher',
+      enabled: config.enabled !== false
+    }));
+
+    console.log('Transformed factor rows for database:', factorRows);
+
+    // Use direct Supabase client (same as IPS page)
+    const { createClient } = await import('@supabase/supabase-js');
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
+    // First, delete existing factors for this IPS to avoid duplicates
+    const { error: deleteError } = await supabase
+      .from('ips_factors')
+      .delete()
+      .eq('ips_id', ipsId);
+
+    if (deleteError) {
+      console.error('Error deleting existing factors:', deleteError);
+      throw new Error(`Failed to delete existing factors: ${deleteError.message}`);
+    }
+
+    // Insert new factor configurations
+    const { data, error: insertError } = await supabase
+      .from('ips_factors')
+      .insert(factorRows)
+      .select();
+
+    if (insertError) {
+      console.error('Error inserting factor configurations:', insertError);
+      throw new Error(`Failed to save factor configurations: ${insertError.message}`);
+    }
+
+    console.log('✅ Factor configurations saved successfully:', data);
+    
+  } catch (error) {
+    console.error('❌ Error in saveFactorConfigurations:', error);
+    throw error;
   }
 }
 
-// src/lib/services/ips-data-service.ts
+// Get factor configurations
+  async getFactorConfigurations(ipsId: string): Promise<any[]> {
+    try {
+      const { createClient } = await import('@supabase/supabase-js');
+      const supabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+      );
+
+      const { data, error } = await supabase
+        .from('ips_factors')
+        .select('*')
+        .eq('ips_id', ipsId)
+        .eq('enabled', true);
+
+      if (error) {
+        console.error('Error fetching factor configurations:', error);
+        throw new Error(`Failed to fetch factor configurations: ${error.message}`);
+      }
+
+      return data || [];
+    } catch (error) {
+      console.error('Error in getFactorConfigurations:', error);
+      return [];
+    }
+  }
+}
+
 export type NewIPS = {
   name: string;
   description?: string;
