@@ -393,12 +393,18 @@ class IPSDataService {
     console.log('IPS Data received:', ipsData);
     
     // Build the request body for the API
+    const factors = ipsData.factors || 
+               (ipsData.strategies && ipsData.strategies[0]?.factors) || 
+               [];
+
+    console.log('Extracted factors:', factors);
+
     const requestBody = {
       user_id: userId,
       name: ipsData.name || 'Untitled Strategy',
       description: ipsData.description || '',
       is_active: ipsData.is_active ?? true,
-      factors: ipsData.factors || []
+      factors: factors
     };
 
     console.log('Request body for API:', requestBody);
@@ -521,92 +527,67 @@ class IPSDataService {
     return this.createIPS(userId, duplicate);
   }
 
-  // Save factor configurations
-async saveFactorConfigurations(ipsId: string, configurations: any[]): Promise<void> {
-  try {
-    console.log('Saving factor configurations for IPS:', ipsId, configurations);
+// Get factor configurations
+async saveFactorConfigurations(ipsId: string, configurations: any[]): Promise<any> {
+  console.log(`Saving factor configurations for IPS: ${ipsId}`, configurations);
+  
+  const transformedFactors = configurations.map(factor => {
+    const factorName = factor.factor_name || 
+                      factor.name || 
+                      factor.factorName || 
+                      factor.factor?.name || 
+                      '';
     
-    if (!configurations || configurations.length === 0) {
-      console.log('No configurations to save');
-      return;
+    if (!factorName) {
+      console.warn('Warning: Missing factor_name for factor:', factor);
     }
-
-    // Transform the frontend configuration format to database format
-    const factorRows = configurations.map(config => ({
+    
+    return {
       ips_id: ipsId,
-      factor_id: config.factorId,
-      weight: config.weight || 1,
-      target_value: config.targetConfig?.threshold || config.targetConfig?.targetValue || null,
-      target_operator: config.targetConfig?.operator || 'eq',
-      preference_direction: config.targetConfig?.preferenceDirection || 'higher',
-      enabled: config.enabled !== false
-    }));
+      factor_id: factor.factor_id || factor.id,
+      factor_name: factorName,
+      weight: factor.weight || 0,
+      target_value: factor.target_value || factor.targetValue || null,
+      target_operator: factor.target_operator || factor.targetOperator || null,
+      preference_direction: factor.preference_direction || factor.preferenceDirection || null,
+      enabled: factor.enabled !== undefined ? factor.enabled : true
+    };
+  });
+  
+  console.log('Transformed factor rows for database:', transformedFactors);
 
-    console.log('Transformed factor rows for database:', factorRows);
-
-    // Use direct Supabase client (same as IPS page)
+      // Use direct Supabase client (same as IPS page)
     const { createClient } = await import('@supabase/supabase-js');
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
     );
-
-    // First, delete existing factors for this IPS to avoid duplicates
-    const { error: deleteError } = await supabase
+  
+  const invalidFactors = transformedFactors.filter(f => !f.factor_name || !f.factor_id);
+  if (invalidFactors.length > 0) {
+    console.error('Invalid factors found (missing required fields):', invalidFactors);
+    throw new Error('Some factors are missing required fields (factor_name or factor_id)');
+  }
+  
+  try {
+    const { data, error } = await supabase
       .from('ips_factors')
-      .delete()
-      .eq('ips_id', ipsId);
-
-    if (deleteError) {
-      console.error('Error deleting existing factors:', deleteError);
-      throw new Error(`Failed to delete existing factors: ${deleteError.message}`);
-    }
-
-    // Insert new factor configurations
-    const { data, error: insertError } = await supabase
-      .from('ips_factors')
-      .insert(factorRows)
+      .insert(transformedFactors)
       .select();
-
-    if (insertError) {
-      console.error('Error inserting factor configurations:', insertError);
-      throw new Error(`Failed to save factor configurations: ${insertError.message}`);
-    }
-
-    console.log('✅ Factor configurations saved successfully:', data);
     
+    if (error) {
+      console.error('Error inserting factor configurations:', error);
+      throw new Error(`Failed to save factor configurations: ${error.message}`);
+    }
+    
+    console.log('✅ Factor configurations saved successfully:', data);
+    return data;
   } catch (error) {
     console.error('❌ Error in saveFactorConfigurations:', error);
     throw error;
   }
 }
 
-// Get factor configurations
-  async getFactorConfigurations(ipsId: string): Promise<any[]> {
-    try {
-      const { createClient } = await import('@supabase/supabase-js');
-      const supabase = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      );
-
-      const { data, error } = await supabase
-        .from('ips_factors')
-        .select('*')
-        .eq('ips_id', ipsId)
-        .eq('enabled', true);
-
-      if (error) {
-        console.error('Error fetching factor configurations:', error);
-        throw new Error(`Failed to fetch factor configurations: ${error.message}`);
-      }
-
-      return data || [];
-    } catch (error) {
-      console.error('Error in getFactorConfigurations:', error);
-      return [];
-    }
-  }
 }
 
 export type NewIPS = {

@@ -462,65 +462,109 @@ export default function IPSPage() {
     setState((prev) => ({ ...prev, factorConfigurations: configurations }));
   };
 
-  const handleSaveIPS = async (ipsData: any) => {
-    try {
-      setCreating(true);
+const handleSaveIPS = async (ipsData: any) => {
+  console.log('Current IPS data:', ipsData);
+  console.log('Strategies:', ipsData.strategies);
 
-      const completeIPSData = {
-        name: ipsData.name,
-        description: ipsData.description,
-        strategies: state.selectedStrategies,
-        is_active: true,
-        total_factors: state.selectedFactors.size,
-        active_factors: Object.values(state.factorConfigurations).filter((c: any) => c?.enabled).length,
-        created_at: new Date().toISOString(),
+  // The factors come as an array of strings (factor names)
+  const factorNames = ipsData.factors || [];
+  console.log('Factor names received:', factorNames);
+
+  // We need to convert factor names to full factor objects
+  // Get all factor definitions from the service
+  const allFactors = ipsDataService.getAllFactors();
+  
+  // Map factor names to full factor objects with configurations
+  const factors = factorNames.map((factorName: string) => {
+    // Find the factor definition by matching the name
+    const factorDef = allFactors.find(f => f.name === factorName);
+    const config = ipsData.configurations?.[factorName] || {};
+    
+    if (!factorDef) {
+      console.warn(`Factor definition not found for: ${factorName}`);
+      // Create a minimal factor object if definition not found
+      return {
+        factor_id: factorName.toLowerCase().replace(/\s+/g, '-'),
+        factor_name: factorName,
+        weight: config.weight || 1,
+        enabled: config.enabled !== false,
+        target_value: config.targetValue || null,
+        target_operator: config.targetOperator || null,
+        preference_direction: config.preferenceDirection || null,
       };
-
-      let ipsConfig: IPSConfiguration;
-
-      if (state.currentIPSId) {
-        // Update existing IPS
-        ipsConfig = await ipsDataService.updateIPS(state.currentIPSId, completeIPSData);
-        setAllIPSs((prev) => prev.map((ips) => (ips.id === state.currentIPSId ? ipsConfig : ips)));
-      } else {
-        // Create new IPS — make sure your service accepts (userId, payload)
-        ipsConfig = await ipsDataService.createIPS(userId, completeIPSData);
-        setAllIPSs((prev) => [...prev, ipsConfig]);
-      }
-
-      // Save factor configurations if any
-      if (state.selectedFactors.size > 0) {
-        const factorConfigs = Array.from(state.selectedFactors).map((factorName) => {
-          const config = state.factorConfigurations[factorName] || {};
-          return {
-            factorId: config.factorId || factorName,
-            weight: config.weight || 1,
-            enabled: config.enabled !== false,
-            targetConfig: config.targetConfig || {},
-          };
-        });
-
-        await ipsDataService.saveFactorConfigurations(ipsConfig.id, factorConfigs);
-      }
-
-      await fetchIPS();
-
-      setState({
-        step: "list",
-        selectedStrategies: [],
-        selectedFactors: new Set(),
-        factorConfigurations: {},
-        currentIPSId: null,
-        isLoading: false,
-      });
-      toast.success(`IPS "${ipsData.name}" saved`);
-    } catch (error: any) {
-      console.error("Error saving IPS:", error);
-      toast.error("Error saving IPS: " + error.message);
-    } finally {
-      setCreating(false);
     }
-  };
+    
+    // Return a properly structured factor object
+    return {
+      factor_id: factorDef.id,
+      factor_name: factorDef.name,
+      weight: config.weight || 1,
+      enabled: config.enabled !== false,
+      target_value: config.targetValue || null,
+      target_operator: config.targetOperator || null,
+      preference_direction: config.preferenceDirection || null,
+    };
+  });
+
+  console.log('Transformed factors:', factors);
+
+  // Validate that all factors have names
+  const validFactors = factors.filter((f: any) => f.factor_name);
+  if (validFactors.length !== factors.length) {
+    console.error('Some factors are missing names!', factors);
+    alert('Error: Some factors are missing names. Please check all factors have names.');
+    return;
+  }
+
+  try {
+    setCreating(true);
+
+    // Build the complete IPS data INCLUDING the transformed factors
+    const completeIPSData = {
+      name: ipsData.name,
+      description: ipsData.description,
+      strategies: ipsData.strategies || state.selectedStrategies,
+      is_active: true,
+      factors: factors, // Now these are proper factor objects, not just strings
+      total_factors: factors.length,
+      active_factors: factors.filter((f: any) => f.enabled !== false).length,
+      created_at: new Date().toISOString(),
+    };
+
+    console.log('Complete IPS data being sent:', JSON.stringify(completeIPSData, null, 2));
+
+    let ipsConfig: IPSConfiguration;
+
+    if (state.currentIPSId) {
+      // Update existing IPS
+      ipsConfig = await ipsDataService.updateIPS(state.currentIPSId, completeIPSData);
+      setAllIPSs((prev) => prev.map((ips) => (ips.id === state.currentIPSId ? ipsConfig : ips)));
+    } else {
+      // Create new IPS
+      ipsConfig = await ipsDataService.createIPS(userId, completeIPSData);
+      setAllIPSs((prev) => [...prev, ipsConfig]);
+    }
+    
+      console.log('✅ Factors already saved by API, skipping duplicate save');
+
+    await fetchIPS();
+
+    setState({
+      step: "list",
+      selectedStrategies: [],
+      selectedFactors: new Set(),
+      factorConfigurations: {},
+      currentIPSId: null,
+      isLoading: false,
+    });
+    toast.success(`IPS "${ipsData.name}" saved`);
+  } catch (error: any) {
+    console.error("Error saving IPS:", error);
+    toast.error("Error saving IPS: " + error.message);
+  } finally {
+    setCreating(false);
+  }
+};
 
   const handleIPSAction = async (ipsId: string, action: string) => {
     try {

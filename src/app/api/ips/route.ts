@@ -10,7 +10,16 @@ const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-type NewFactor = { factor_id: string; weight: number; target_value?: number | null };
+type NewFactor = { 
+  factor_id: string; 
+  factor_name?: string;
+  name?: string;
+  weight: number; 
+  target_value?: number | string | null;
+  target_operator?: string | null;
+  preference_direction?: string | null;
+  enabled?: boolean;
+};
 
 export async function POST(req: NextRequest) {
   console.log('API Route: Received IPS creation request');
@@ -52,7 +61,16 @@ export async function POST(req: NextRequest) {
     const ips_id = ipsRows.id as string;
 
     // 2) link factors
-    const factorRows = factors.map(f => ({ ips_id, factor_id: f.factor_id, weight: f.weight, target_value: f.target_value ?? null }));
+    const factorRows = factors.map(f => ({ 
+      ips_id, 
+      factor_id: f.factor_id,
+      factor_name: f.factor_name || f.name || '', // Add factor_name field
+      weight: f.weight,
+      target_value: f.target_value ?? null,
+      target_operator: f.target_operator || null,
+      preference_direction: f.preference_direction || null,
+      enabled: f.enabled !== undefined ? f.enabled : true
+    }));
     const { error: facErr } = await supabase.from('ips_factors').insert(factorRows);
     if (facErr) {
       console.error('Insert ips_factors failed:', facErr);
