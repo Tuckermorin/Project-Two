@@ -324,10 +324,27 @@ export default function TradesPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {activeIPSs.map((ipsRaw) => {
               const ips = ipsRaw as IPSWithRules;
-              const rules = normalizeIPSRules(ips);
-              const total = rules.length;
-              const apiCount = rules.filter((r) => r.source === "api").length;
-              const manualCount = total - apiCount;
+
+              // Get factor counts from the IPS configuration (server-populated)
+              const totalFactors = ips.total_factors ?? 0;
+              const activeFactors = ips.active_factors ?? 0;
+
+              // API/Manual counts (prefer server counts; otherwise derive from rules)
+              let apiCount = 0;
+              let manualCount = 0;
+
+              if (typeof (ips as any).api_factors === "number" || typeof (ips as any).manual_factors === "number") {
+                apiCount = (ips as any).api_factors ?? 0;
+                manualCount = (ips as any).manual_factors ?? 0;
+              } else {
+                const rules = normalizeIPSRules(ips);
+                if (rules.length > 0) {
+                  const isActive = (r: any) => (r.enabled ?? r.isActive ?? true) === true;
+                  const method = (r: any) => (r.collection_method ?? r.source);
+                  apiCount = rules.filter((r) => method(r) === "api" && isActive(r)).length;
+                  manualCount = rules.filter((r) => method(r) === "manual" && isActive(r)).length;
+                }
+              }
 
               return (
                 <Card key={ips.id} className="hover:shadow-lg transition-shadow">
@@ -349,41 +366,22 @@ export default function TradesPage() {
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-gray-600">IPS Factors:</span>
-                        <span className="font-medium">{total}</span>
-                      </div>
-                      <Progress value={total ? (apiCount / total) * 100 : 0} className="h-2" />
-                      <div className="flex items-center justify-between mt-1 text-xs">
-                        <div className="flex items-center gap-1">
-                          <Database className="h-3 w-3 text-blue-600" />
-                          <span className="font-medium">{apiCount} API</span>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <Users className="h-3 w-3 text-orange-600" />
-                          <span className="font-medium">{manualCount} Manual</span>
-                        </div>
+                        <span className="font-medium">{totalFactors}</span>
                       </div>
                     </div>
 
-                    {ips.performance && (
-                      <div className="pt-3 border-t">
-                        <div className="grid grid-cols-3 gap-2 text-xs">
-                          <div className="text-center">
-                            <div className="font-medium text-green-600">{ips.performance.winRate}%</div>
-                            <div className="text-gray-500">Win Rate</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="font-medium text-blue-600">{ips.performance.avgROI}%</div>
-                            <div className="text-gray-500">Avg ROI</div>
-                          </div>
-                          <div className="text-center">
-                            <div className="font-medium text-gray-700">{ips.performance.totalTrades}</div>
-                            <div className="text-gray-500">Trades</div>
-                          </div>
-                        </div>
+                    {/* Show API/Manual breakdown if we have counts */}
+                    {totalFactors > 0 && (
+                      <div className="flex justify-between text-xs text-gray-500 pt-2 border-t">
+                        <span>📡 {apiCount} API</span>
+                        <span>✍️ {manualCount} Manual</span>
                       </div>
                     )}
 
-                    <Button onClick={() => handleIPSSelection(ipsRaw)} className="w-full mt-4">
+                    <Button
+                      onClick={() => handleIPSSelection(ips)}
+                      className="w-full bg-blue-600 hover:bg-blue-700"
+                    >
                       Make Trade
                     </Button>
                   </CardContent>
@@ -475,7 +473,7 @@ export default function TradesPage() {
                             d.creditReceived ??
                             d.premiumReceived ??
                             (d.debitPaid ? -Math.abs(d.debitPaid) : 0);
-                          const qty = d.numberOfContracts ?? (d.shares ? d.shares / 100 : 0) ?? 0;
+                          const qty = d.numberOfContracts ?? (d.shares ? d.shares / 100 : 0);
                           return acc + (credit || 0) * (qty || 0) * 100;
                         }, 0)
                         .toFixed(0)}
@@ -693,6 +691,7 @@ export default function TradesPage() {
 
   return null;
 }
+
 
 // -----------------------------
 // Enhanced Trade Entry Form

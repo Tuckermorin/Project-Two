@@ -19,6 +19,8 @@ interface IPSConfiguration {
   is_active: boolean;
   total_factors?: number;
   active_factors?: number;
+  api_factors?: number;
+  manual_factors?: number;
   total_weight?: number;
   avg_weight?: number;
   created_at: string;
@@ -300,77 +302,34 @@ class IPSDataService {
         throw new Error('Invalid IPS response');
       }
 
-      // Group rows by IPS id because the view returns one row per factor
-      const grouped: Record<string, any> = {};
-
-      for (const r of rows) {
-        const id = String(r?.ips_id ?? r?.id ?? '');
-        if (!id) continue;
-
-        if (!grouped[id]) {
-          grouped[id] = {
-            id,
-            user_id: String(r?.user_id ?? r?.owner_id ?? userId),
-            name: String(r?.ips_name ?? r?.name ?? 'Untitled IPS'),
-            description: String(r?.description ?? ''),
-            strategies: Array.isArray(r?.strategies)
-              ? r.strategies
-              : typeof r?.strategies === 'string'
-              ? (() => {
-                  try {
-                    const parsed = JSON.parse(r.strategies);
-                    return Array.isArray(parsed) ? parsed : [];
-                  } catch {
-                    return [];
-                  }
-                })()
-              : [],
-            // Merge all possible “active” flags into one property
-            is_active: toBoolean(
-              (r as any)?.is_active ?? (r as any)?.ips_is_active ?? (r as any)?.active
-            ),
-            created_at: String(r?.created_at ?? new Date().toISOString()),
-            total_factors: Number(r?.total_factors ?? 0),
-            active_factors: Number(r?.active_factors ?? 0),
-            total_weight: Number(r?.total_weight ?? 0),
-            avg_weight: Number(r?.avg_weight ?? 0),
-            factorRules: [],
-          } as IPSConfiguration & { factorRules: any[] };
-        }
-
-        // Attach factor information if present
-        const key = r?.factor_id || r?.factor_key || r?.key;
-        if (key) {
-          grouped[id].factorRules.push({
-            key: String(key),
-            label: r?.factor_name || r?.label || String(key),
-            source:
-              r?.source === 'api' || r?.factor_source === 'api'
-                ? 'api'
-                : 'manual',
-            dataType: r?.data_type || 'number',
-            operator: r?.operator || 'eq',
-            threshold:
-              r?.target_value !== undefined
-                ? Number(r.target_value)
-                : r?.threshold !== undefined
-                ? Number(r.threshold)
-                : undefined,
-            min: r?.min !== undefined ? Number(r.min) : undefined,
-            max: r?.max !== undefined ? Number(r.max) : undefined,
-            unit: r?.unit || 'raw',
-            weight: r?.weight !== undefined ? Number(r.weight) : 1,
-          });
-        }
-      }
-
-      const list = Object.values(grouped) as IPSConfiguration[];
-      const userOnly = list.filter((ips) => ips.user_id === userId);
+      // The API returns ips_configurations rows directly
+      // Just filter by user_id and map to IPSConfiguration type
+      const userIPSs = rows
+        .filter(r => r.user_id === userId)
+        .map(r => ({
+          id: r.id,
+          user_id: r.user_id,
+          name: r.name || 'Untitled IPS',
+          description: r.description || '',
+          strategies: Array.isArray(r.strategies) ? r.strategies : [],
+          is_active: r.is_active !== false, // default to true
+          total_factors: r.total_factors || 0,
+          active_factors: r.active_factors || 0,
+          api_factors: r.api_factors || 0,      // Add these if they exist
+          manual_factors: r.manual_factors || 0,  // Add these if they exist
+          total_weight: r.total_weight || 0,
+          avg_weight: r.avg_weight || 0,
+          win_rate: r.win_rate || 0,
+          avg_roi: r.avg_roi || 0,
+          total_trades: r.total_trades || 0,
+          created_at: r.created_at || new Date().toISOString(),
+          last_modified: r.last_modified || r.updated_at
+        } as IPSConfiguration));
 
       // Cache for potential future use
-      this.ipsConfigurations.set(userId, userOnly);
+      this.ipsConfigurations.set(userId, userIPSs);
 
-      return userOnly;
+      return userIPSs;
     } catch (error) {
       console.error('Error fetching IPS configurations:', error);
       // Fallback to any cached entries

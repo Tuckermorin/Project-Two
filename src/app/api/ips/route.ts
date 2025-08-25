@@ -71,10 +71,33 @@ export async function POST(req: NextRequest) {
       preference_direction: f.preference_direction || null,
       enabled: f.enabled !== undefined ? f.enabled : true
     }));
+    
+    // Insert the factors into the database
     const { error: facErr } = await supabase.from('ips_factors').insert(factorRows);
+    
     if (facErr) {
       console.error('Insert ips_factors failed:', facErr);
       return new Response(JSON.stringify({ error: facErr.message, ips_id }), { status: 500 });
+    }
+
+    // 2.5) Update the counts in ips_configurations
+    const enabledFactors = factorRows.filter(f => f.enabled);
+    const totalWeight = factorRows.reduce((sum, f) => sum + f.weight, 0);
+    const avgWeight = factorRows.length > 0 ? totalWeight / factorRows.length : 0;
+
+    const { error: updateErr } = await supabase
+      .from('ips_configurations')
+      .update({
+        total_factors: factorRows.length,
+        active_factors: enabledFactors.length,
+        total_weight: totalWeight,
+        avg_weight: avgWeight
+      })
+      .eq('id', ips_id);
+
+    if (updateErr) {
+      console.error('Failed to update factor counts:', updateErr);
+      // Continue anyway - counts can be fixed later
     }
 
     // 3) return hydrated IPS - Use same table as frontend for consistency
@@ -97,15 +120,39 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  // Use the same table as the frontend for consistency
-  const { data, error } = await supabase
-    .from('ips_configurations')
-    .select('*')
-    .order('created_at', { ascending: false });
+  // 1) Fetch IPS rows
+ const { data: ipsRows } = await supabase.from('ips_configurations').select('*').order('created_at', { ascending: false });
 
-  if (error) {
-    return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-  }
+const { data: facRows } = await supabase
+  .from('ips_factors')
+  .select('ips_id, enabled, collection_method');
 
-  return new Response(JSON.stringify(data), { status: 200 });
+type C = { total: number; active: number; api: number; manual: number };
+const counts = new Map<string, C>();
+
+for (const r of facRows ?? []) {
+  const id = (r as any).ips_id as string;
+  const enabled = (r as any).enabled;
+  const method = (r as any).collection_method as string | null;
+
+  const c = counts.get(id) ?? { total: 0, active: 0, api: 0, manual: 0 };
+  c.total += 1;
+  if (enabled !== false) c.active += 1;
+  if (method === 'api') c.api += 1; else c.manual += 1;
+  counts.set(id, c);
 }
+
+const out = (ipsRows ?? []).map((row: any) => {
+  const c = counts.get(row.id);
+  return {
+    ...row,
+    total_factors:  c ? c.total  : (row.total_factors  ?? 0),
+    active_factors: c ? c.active : (row.active_factors ?? 0),
+    api_factors:    c ? c.api    : (row.api_factors    ?? 0),
+    manual_factors: c ? c.manual : (row.manual_factors ?? 0),
+  };
+});
+
+return new Response(JSON.stringify(out), { status: 200 });
+}
+
