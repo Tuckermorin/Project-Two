@@ -714,12 +714,38 @@ function EnhancedTradeEntryForm({
   isLoading,
   calculatedScore,
 }: EnhancedTradeEntryFormProps) {
+  const ips = selectedIPS as IPSWithRules;
+
+  const strategyToContract: Record<string, ContractType> = {
+    "buy-hold-stocks": "buy-hold",
+    "put-credit-spreads": "put-credit-spread",
+    "call-credit-spreads": "call-credit-spread",
+    "iron-condors": "iron-condor",
+    "covered-calls": "covered-call",
+    "long-calls": "long-call",
+    "long-puts": "long-put",
+  };
+
+  const strategyNames: Record<string, string> = {
+    "buy-hold-stocks": "Buy & Hold",
+    "put-credit-spreads": "Put Credit Spread",
+    "call-credit-spreads": "Call Credit Spread",
+    "iron-condors": "Iron Condor",
+    "covered-calls": "Covered Call",
+    "long-calls": "Long Call",
+    "long-puts": "Long Put",
+  };
+
+  const selectedStrategy = ips.strategies?.[0];
+  const lockedContractType = strategyToContract[selectedStrategy] ?? "put-credit-spread";
+  const strategyLabel = strategyNames[selectedStrategy] ?? selectedStrategy ?? "";
+
   const [formData, setFormData] = useState<TradeFormData>({
     name: "",
     symbol: "",
     currentPrice: undefined,
     expirationDate: "",
-    contractType: "put-credit-spread",
+    contractType: lockedContractType,
     numberOfContracts: 1,
     // spreads
     shortPutStrike: undefined,
@@ -745,7 +771,6 @@ function EnhancedTradeEntryForm({
   const [apiStatus, setApiStatus] = useState<"connected" | "disconnected" | "loading">("connected");
   const [completionScore, setCompletionScore] = useState<number>(0);
 
-  const ips = selectedIPS as IPSWithRules;
   const factorRules = useMemo(() => normalizeIPSRules(ips), [ips]);
   const apiRules = useMemo(() => factorRules.filter((r) => r.source === "api"), [factorRules]);
   const manualRules = useMemo(() => factorRules.filter((r) => r.source === "manual"), [factorRules]);
@@ -1039,20 +1064,12 @@ function EnhancedTradeEntryForm({
 
             <div>
               <Label htmlFor="contractType">Strategy</Label>
-              <select
+              <div
                 id="contractType"
-                value={formData.contractType}
-                onChange={(e) => setFormData((p) => ({ ...p, contractType: e.target.value as ContractType }))}
-                className="w-full p-2 border border-gray-300 rounded-md"
+                className="w-full p-2 border border-gray-300 rounded-md bg-gray-50"
               >
-                <option value="buy-hold">Buy / Hold (Shares)</option>
-                <option value="put-credit-spread">Put Credit Spread</option>
-                <option value="call-credit-spread">Call Credit Spread</option>
-                <option value="iron-condor">Iron Condor</option>
-                <option value="covered-call">Covered Call</option>
-                <option value="long-call">Long Call</option>
-                <option value="long-put">Long Put</option>
-              </select>
+                {strategyLabel}
+              </div>
             </div>
 
             {/* Strategy-specific fields */}
@@ -1083,12 +1100,7 @@ function EnhancedTradeEntryForm({
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex gap-2">
-              <Input
-                value={formData.symbol}
-                onChange={(e) => setFormData((p) => ({ ...p, symbol: e.target.value.toUpperCase() }))}
-                placeholder="Symbol (e.g., AAPL)"
-              />
+            <div className="flex justify-end">
               <Button
                 variant="outline"
                 onClick={() => formData.symbol && loadAPIFactors(formData.symbol)}
