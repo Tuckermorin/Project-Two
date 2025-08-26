@@ -14,6 +14,7 @@ import {
   CheckCircle,
   Target,
   BarChart3,
+  Shield,
   PlusCircle,
   Eye,
   Edit,
@@ -447,7 +448,19 @@ export default function IPSPage() {
       return;
     }
 
-    setDetailsDialog({ isOpen: true, ips, factors: factors || [] });
+    const allFactorDefs = ipsDataService.getAllFactors();
+    const enriched = (factors || []).map((f: any) => {
+      const info = allFactorDefs.find(
+        (df: any) => df.id === f.factor_id || df.name === f.factor_name
+      );
+      return {
+        ...f,
+        type: info?.type || "quantitative",
+        category: info?.category || "Unknown",
+      };
+    });
+
+    setDetailsDialog({ isOpen: true, ips, factors: enriched });
   };
 
   const handleEditIPS = async (ipsId: string) => {
@@ -988,44 +1001,109 @@ const handleSaveIPS = async (ipsData: any) => {
       />
 
       {/* View Details Dialog */}
-      <Dialog open={detailsDialog.isOpen} onOpenChange={(open) => !open && setDetailsDialog({ isOpen: false, ips: null, factors: [] })}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle>{detailsDialog.ips?.name || 'IPS Details'}</DialogTitle>
-            {detailsDialog.ips?.description && (
-              <DialogDescription>{detailsDialog.ips.description}</DialogDescription>
-            )}
-          </DialogHeader>
+      {(() => {
+        const enabledFactors = detailsDialog.factors.filter((f: any) => f.enabled !== false);
+        const totalWeight = enabledFactors.reduce((s: number, f: any) => s + (f.weight || 0), 0);
+        const avgWeight = enabledFactors.length ? totalWeight / enabledFactors.length : 0;
+        const getByType = (type: string) => enabledFactors.filter((f: any) => f.type === type);
+        const weights = enabledFactors.map((f: any) => f.weight || 0);
+        const highestWeight = weights.length ? Math.max(...weights) : 0;
+        const lowestWeight = weights.length ? Math.min(...weights) : 0;
+        const balanced = totalWeight > 0 && totalWeight <= enabledFactors.length * 10 ? 'Yes' : 'Review';
 
-          <div className="space-y-4 py-2">
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="flex justify-between"><span>Total Factors:</span><span>{detailsDialog.factors.length}</span></div>
-              <div className="flex justify-between"><span>Enabled:</span><span>{detailsDialog.factors.filter(f => f.enabled !== false).length}</span></div>
-              <div className="flex justify-between"><span>Total Weight:</span><span>{detailsDialog.factors.reduce((s,f)=>s+(f.weight||0),0)}</span></div>
-              <div className="flex justify-between"><span>Avg Weight:</span><span>{detailsDialog.factors.length ? (detailsDialog.factors.reduce((s,f)=>s+(f.weight||0),0)/detailsDialog.factors.length).toFixed(1) : 0}</span></div>
-            </div>
+        return (
+          <Dialog open={detailsDialog.isOpen} onOpenChange={(open) => !open && setDetailsDialog({ isOpen: false, ips: null, factors: [] })}>
+            <DialogContent className="sm:max-w-[600px]">
+              <DialogHeader>
+                <DialogTitle>{detailsDialog.ips?.name || 'IPS Details'}</DialogTitle>
+                {detailsDialog.ips?.description && (
+                  <DialogDescription>{detailsDialog.ips.description}</DialogDescription>
+                )}
+              </DialogHeader>
 
-            <div className="max-h-60 overflow-y-auto border-t pt-2">
-              {detailsDialog.factors.map((f) => (
-                <div key={f.factor_id} className="flex justify-between py-1 text-sm">
-                  <span>{f.factor_name}</span>
-                  <Badge variant={f.enabled !== false ? 'default' : 'secondary'}>{f.weight}</Badge>
+              <div className="space-y-6 py-2">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-3 bg-blue-50 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Target className="h-4 w-4 text-blue-600" />
+                      <h4 className="font-medium text-blue-900">Factor Overview</h4>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between"><span className="text-blue-700">Total Selected:</span><span className="font-medium">{detailsDialog.factors.length}</span></div>
+                      <div className="flex justify-between"><span className="text-blue-700">Enabled:</span><span className="font-medium">{enabledFactors.length}</span></div>
+                      <div className="flex justify-between"><span className="text-blue-700">Total Weight:</span><span className="font-medium">{totalWeight}</span></div>
+                      <div className="flex justify-between"><span className="text-blue-700">Avg Weight:</span><span className="font-medium">{avgWeight.toFixed(1)}</span></div>
+                    </div>
+                  </div>
+                  <div className="p-3 bg-green-50 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <BarChart3 className="h-4 w-4 text-green-600" />
+                      <h4 className="font-medium text-green-900">Factor Breakdown</h4>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between"><span className="text-green-700">Quantitative:</span><span className="font-medium">{getByType('quantitative').length}</span></div>
+                      <div className="flex justify-between"><span className="text-green-700">Qualitative:</span><span className="font-medium">{getByType('qualitative').length}</span></div>
+                      <div className="flex justify-between"><span className="text-green-700">Options:</span><span className="font-medium">{getByType('options').length}</span></div>
+                    </div>
+                  </div>
+                  <div className="p-3 bg-purple-50 rounded-lg">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Shield className="h-4 w-4 text-purple-600" />
+                      <h4 className="font-medium text-purple-900">Weight Distribution</h4>
+                    </div>
+                    <div className="space-y-1 text-sm">
+                      <div className="flex justify-between"><span className="text-purple-700">Highest Weight:</span><span className="font-medium">{highestWeight}</span></div>
+                      <div className="flex justify-between"><span className="text-purple-700">Lowest Weight:</span><span className="font-medium">{lowestWeight}</span></div>
+                      <div className="flex justify-between"><span className="text-purple-700">Balanced:</span><span className="font-medium">{balanced}</span></div>
+                    </div>
+                  </div>
                 </div>
-              ))}
-            </div>
-          </div>
 
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button variant="outline" onClick={() => setDetailsDialog({ isOpen: false, ips: null, factors: [] })}>Close</Button>
-            {detailsDialog.ips && (
-              <>
-                <Button variant="destructive" onClick={() => { setDetailsDialog({ isOpen: false, ips: null, factors: [] }); showDeleteConfirmation(detailsDialog.ips.id); }}>Delete</Button>
-                <Button onClick={async () => { setDetailsDialog({ isOpen: false, ips: null, factors: [] }); await handleEditIPS(detailsDialog.ips.id); }}>Edit</Button>
-              </>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+                <div>
+                  <h4 className="font-medium text-gray-900 mb-2">Enabled Factors ({enabledFactors.length})</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-60 overflow-y-auto">
+                    {enabledFactors.map((f: any) => (
+                      <div key={f.factor_id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                        <div>
+                          <span className="text-sm font-medium">{f.factor_name}</span>
+                          <div className="flex items-center gap-2 mt-1">
+                            <Badge
+                              variant="outline"
+                              className={`text-xs ${
+                                f.type === 'quantitative'
+                                  ? 'border-blue-200 text-blue-700'
+                                  : f.type === 'qualitative'
+                                  ? 'border-green-200 text-green-700'
+                                  : 'border-purple-200 text-purple-700'
+                              }`}
+                            >
+                              {f.type}
+                            </Badge>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="text-sm font-medium">Weight: {f.weight}</div>
+                          <div className="text-xs text-gray-500">{f.target_operator} {f.target_value}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2 sm:gap-0">
+                <Button variant="outline" onClick={() => setDetailsDialog({ isOpen: false, ips: null, factors: [] })}>Close</Button>
+                {detailsDialog.ips && (
+                  <>
+                    <Button variant="destructive" onClick={() => { setDetailsDialog({ isOpen: false, ips: null, factors: [] }); showDeleteConfirmation(detailsDialog.ips.id); }}>Delete</Button>
+                    <Button onClick={async () => { setDetailsDialog({ isOpen: false, ips: null, factors: [] }); await handleEditIPS(detailsDialog.ips.id); }}>Edit</Button>
+                  </>
+                )}
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+        );
+      })()}
     </div>
   );
 }
