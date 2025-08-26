@@ -434,19 +434,68 @@ class IPSDataService {
   }
 
   async updateIPS(ipsId: string, updates: Partial<IPSConfiguration>): Promise<IPSConfiguration> {
-    // TODO: Replace with database update
-    for (const [userId, ipsList] of this.ipsConfigurations.entries()) {
-      const index = ipsList.findIndex(i => i.id === ipsId);
-      if (index !== -1) {
-        ipsList[index] = {
-          ...ipsList[index],
-          ...updates,
-          last_modified: new Date().toISOString()
-        };
-        return Promise.resolve(ipsList[index]);
+    console.log('=== IPSDataService.updateIPS ===');
+    console.log('IPS ID:', ipsId);
+    console.log('Updates:', updates);
+
+    try {
+      const response = await fetch('/api/ips', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: ipsId, ...updates })
+      });
+
+      const responseText = await response.text();
+      console.log('API Response status:', response.status);
+      console.log('API Response text:', responseText);
+
+      if (!response.ok) {
+        let errorMessage = 'Failed to update IPS';
+        try {
+          const errJson = JSON.parse(responseText);
+          errorMessage = errJson.error || errorMessage;
+        } catch {
+          errorMessage = responseText || errorMessage;
+        }
+        throw new Error(errorMessage);
       }
+
+      const { data } = JSON.parse(responseText);
+
+      // Update local cache if present
+      for (const [userId, ipsList] of this.ipsConfigurations.entries()) {
+        const index = ipsList.findIndex(i => i.id === ipsId);
+        if (index !== -1) {
+          ipsList[index] = {
+            ...ipsList[index],
+            ...updates,
+            ...data,
+            last_modified: new Date().toISOString()
+          } as IPSConfiguration;
+          return ipsList[index];
+        }
+      }
+
+      // If not found in cache, return normalized response
+      return {
+        id: ipsId,
+        user_id: data.user_id,
+        name: data.name,
+        description: data.description,
+        strategies: updates.strategies || [],
+        is_active: data.is_active,
+        total_factors: data.total_factors,
+        active_factors: data.active_factors,
+        total_weight: data.total_weight,
+        avg_weight: data.avg_weight,
+        created_at: data.created_at,
+        last_modified: new Date().toISOString()
+      } as IPSConfiguration;
+
+    } catch (error) {
+      console.error('❌ Error in updateIPS:', error);
+      throw error;
     }
-    throw new Error('IPS not found');
   }
 
   async deleteIPS(ipsId: string): Promise<boolean> {

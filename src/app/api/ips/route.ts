@@ -156,3 +156,88 @@ const out = (ipsRows ?? []).map((row: any) => {
 return new Response(JSON.stringify(out), { status: 200 });
 }
 
+export async function PUT(req: NextRequest) {
+  try {
+    const body = await req.json();
+    const {
+      id,
+      name,
+      description,
+      is_active = true,
+      factors = [] as NewFactor[],
+    } = body || {};
+
+    if (!id) {
+      return new Response(JSON.stringify({ error: 'id required' }), { status: 400 });
+    }
+
+    // Update IPS configuration
+    const { error: ipsErr } = await supabase
+      .from('ips_configurations')
+      .update({ name, description, is_active })
+      .eq('id', id);
+
+    if (ipsErr) {
+      console.error('Update ips_configurations failed:', ipsErr);
+      return new Response(JSON.stringify({ error: ipsErr.message }), { status: 500 });
+    }
+
+    // Replace factor rows
+    await supabase.from('ips_factors').delete().eq('ips_id', id);
+
+    const factorRows = factors.map(f => ({
+      ips_id: id,
+      factor_id: f.factor_id,
+      factor_name: f.factor_name || f.name || '',
+      weight: f.weight,
+      target_value: f.target_value ?? null,
+      target_operator: f.target_operator || null,
+      preference_direction: f.preference_direction || null,
+      enabled: f.enabled !== false
+    }));
+
+    if (factorRows.length > 0) {
+      const { error: facErr } = await supabase.from('ips_factors').insert(factorRows);
+      if (facErr) {
+        console.error('Insert ips_factors failed:', facErr);
+        return new Response(JSON.stringify({ error: facErr.message, ips_id: id }), { status: 500 });
+      }
+    }
+
+    // Update counts
+    const enabledFactors = factorRows.filter(f => f.enabled);
+    const totalWeight = factorRows.reduce((sum, f) => sum + f.weight, 0);
+    const avgWeight = factorRows.length > 0 ? totalWeight / factorRows.length : 0;
+
+    const { error: updateErr } = await supabase
+      .from('ips_configurations')
+      .update({
+        total_factors: factorRows.length,
+        active_factors: enabledFactors.length,
+        total_weight: totalWeight,
+        avg_weight: avgWeight
+      })
+      .eq('id', id);
+
+    if (updateErr) {
+      console.error('Failed to update factor counts:', updateErr);
+    }
+
+    const { data, error } = await supabase
+      .from('ips_configurations')
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (error) {
+      console.error('Select ips_configurations failed:', error);
+      return new Response(JSON.stringify({ error: error.message, ips_id: id }), { status: 500 });
+    }
+
+    return new Response(JSON.stringify({ ips_id: id, data }), { status: 200 });
+  } catch (e: any) {
+    console.error('API Route: Unexpected error in PUT:', e);
+    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+  }
+}
+
