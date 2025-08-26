@@ -471,6 +471,25 @@ export default function IPSPage() {
   };
 
   const handleEditIPS = async (ipsId: string) => {
+  const handleViewIPS = async (ipsId: string) => {
+
+    const ips = allIPSs.find((i) => i.id === ipsId);
+    if (!ips) return;
+
+    const { data: factors, error } = await supabase
+      .from("ips_factors")
+      .select("*")
+      .eq("ips_id", ipsId);
+
+    if (error) {
+      console.error("Error loading IPS factors:", error);
+      return;
+    }
+
+    setDetailsDialog({ isOpen: true, ips, factors: factors || [] });
+  };
+
+  const handleEditIPS = async (ipsId: string) => {
     const ips = allIPSs.find((i) => i.id === ipsId);
     if (!ips) return;
 
@@ -981,6 +1000,8 @@ const handleSaveIPS = async (ipsData: any) => {
                   <span className="text-xs text-gray-500">
                     {formatFactorTarget(f)}
                   </span>
+                <div key={f.factor_id} className="flex justify-between py-1 text-sm">
+                  <span>{f.factor_name}</span>
                   <Badge variant={f.enabled !== false ? 'default' : 'secondary'}>{f.weight}</Badge>
                 </div>
               ))}
