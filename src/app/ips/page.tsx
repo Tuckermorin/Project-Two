@@ -427,18 +427,97 @@ export default function IPSPage() {
     }));
   };
 
-  const handleEditIPS = (ipsId: string) => {
-    const ips = allIPSs.find((i) => i.id === ipsId);
-    if (ips) {
-      setState((prev) => ({
-        ...prev,
-        step: "strategies",
-        selectedStrategies: (ips as any).strategies || [],
-        selectedFactors: new Set(),
-        factorConfigurations: {},
-        currentIPSId: ipsId,
-      }));
+  const [detailsDialog, setDetailsDialog] = useState<{ isOpen: boolean; ips: any; factors: any[] }>({
+    isOpen: false,
+    ips: null,
+    factors: [],
+  });
+
+  const formatFactorTarget = (factor: any) => {
+    const op = factor?.target_operator;
+    if (!op) return "";
+    if (op === "range") {
+      const min = factor?.target_value ?? "";
+      const max = factor?.target_value_max ?? "";
+      return `${min} - ${max}`;
     }
+    const symbols: Record<string, string> = {
+      gte: "≥",
+      lte: "≤",
+      gt: ">",
+      lt: "<",
+      eq: "=",
+    };
+    const symbol = symbols[op] || op;
+    const value = factor?.target_value ?? "";
+    return `${symbol} ${value}`;
+  };
+
+  const handleViewIPS = async (ipsId: string) => {
+    const ips = allIPSs.find((i) => i.id === ipsId);
+    if (!ips) return;
+
+    const { data: factors, error } = await supabase
+      .from("ips_factors")
+      .select("*")
+      .eq("ips_id", ipsId);
+
+    if (error) {
+      console.error("Error loading IPS factors:", error);
+      return;
+    }
+
+    setDetailsDialog({ isOpen: true, ips, factors: factors || [] });
+  };
+
+  const handleEditIPS = async (ipsId: string) => {
+    const ips = allIPSs.find((i) => i.id === ipsId);
+    if (!ips) return;
+
+    const { data: factors, error } = await supabase
+      .from("ips_factors")
+      .select("*")
+      .eq("ips_id", ipsId);
+
+    if (error) {
+      console.error("Error loading IPS factors:", error);
+      return;
+    }
+
+    const selected = new Set<string>();
+    const configurations: Record<string, any> = {};
+    const allFactorDefs = ipsDataService.getAllFactors();
+
+    (factors || []).forEach((f: any) => {
+      const factorName = f.factor_name || f.name;
+      if (!factorName) return;
+      selected.add(factorName);
+      const factorInfo = allFactorDefs.find((df: any) => df.id === f.factor_id || df.name === factorName) || {
+        type: "quantitative",
+        category: "Unknown",
+      };
+      configurations[factorName] = {
+        weight: f.weight || 1,
+        enabled: f.enabled !== false,
+        targetType: factorInfo.type === "qualitative" ? "rating" : "numeric",
+        targetValue: f.target_value ?? "",
+        targetOperator: f.target_operator || "gte",
+        targetValueMax: "",
+        preferenceDirection: f.preference_direction || "higher",
+        factorId: f.factor_id,
+        type: factorInfo.type,
+        category: factorInfo.category,
+      };
+    });
+
+    setState((prev) => ({
+      ...prev,
+      step: "selection",
+      selectedStrategies: (ips as any).strategies || [],
+      selectedFactors: selected,
+      factorConfigurations: configurations,
+      currentIPSId: ipsId,
+    }));
   };
 
   const handleStepNavigation = (step: IPSFlowState["step"]) => {
@@ -569,8 +648,11 @@ const handleSaveIPS = async (ipsData: any) => {
   const handleIPSAction = async (ipsId: string, action: string) => {
     try {
       switch (action) {
+        case "view":
+          await handleViewIPS(ipsId);
+          break;
         case "edit":
-          handleEditIPS(ipsId);
+          await handleEditIPS(ipsId);
           break;
         case "copy":
           console.log("Copy IPS:", ipsId);
@@ -830,7 +912,7 @@ const handleSaveIPS = async (ipsData: any) => {
 
               {/* Action Buttons */}
               <div className="flex gap-2 mt-4">
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => handleIPSAction(ips.id, "edit")}>
+                <Button variant="outline" size="sm" className="flex-1" onClick={() => handleIPSAction(ips.id, "view")}>
                   <Eye className="w-4 h-4 mr-1" />
                   View Details
                 </Button>
@@ -870,6 +952,52 @@ const handleSaveIPS = async (ipsData: any) => {
         title="Delete IPS Configuration"
         description={`Are you sure you want to delete "${deleteDialog.ipsName}"? This action cannot be undone and will permanently remove all associated data including factor configurations, weights, and historical performance data.`}
       />
+
+      {/* View Details Dialog */}
+      <Dialog open={detailsDialog.isOpen} onOpenChange={(open) => !open && setDetailsDialog({ isOpen: false, ips: null, factors: [] })}>
+        <DialogContent className="sm:max-w-[500px]">
+          <DialogHeader>
+            <DialogTitle>{detailsDialog.ips?.name || 'IPS Details'}</DialogTitle>
+            {detailsDialog.ips?.description && (
+              <DialogDescription>{detailsDialog.ips.description}</DialogDescription>
+            )}
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div className="flex justify-between"><span>Total Factors:</span><span>{detailsDialog.factors.length}</span></div>
+              <div className="flex justify-between"><span>Enabled:</span><span>{detailsDialog.factors.filter(f => f.enabled !== false).length}</span></div>
+              <div className="flex justify-between"><span>Total Weight:</span><span>{detailsDialog.factors.reduce((s,f)=>s+(f.weight||0),0)}</span></div>
+              <div className="flex justify-between"><span>Avg Weight:</span><span>{detailsDialog.factors.length ? (detailsDialog.factors.reduce((s,f)=>s+(f.weight||0),0)/detailsDialog.factors.length).toFixed(1) : 0}</span></div>
+            </div>
+
+            <div className="max-h-60 overflow-y-auto border-t pt-2">
+              {detailsDialog.factors.map((f) => (
+                <div
+                  key={f.factor_id}
+                  className="grid grid-cols-[1fr_auto_auto] items-center gap-2 py-1 text-sm"
+                >
+                  <span>{f.factor_name}</span>
+                  <span className="text-xs text-gray-500">
+                    {formatFactorTarget(f)}
+                  </span>
+                  <Badge variant={f.enabled !== false ? 'default' : 'secondary'}>{f.weight}</Badge>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" onClick={() => setDetailsDialog({ isOpen: false, ips: null, factors: [] })}>Close</Button>
+            {detailsDialog.ips && (
+              <>
+                <Button variant="destructive" onClick={() => { setDetailsDialog({ isOpen: false, ips: null, factors: [] }); showDeleteConfirmation(detailsDialog.ips.id); }}>Delete</Button>
+                <Button onClick={async () => { setDetailsDialog({ isOpen: false, ips: null, factors: [] }); await handleEditIPS(detailsDialog.ips.id); }}>Edit</Button>
+              </>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
