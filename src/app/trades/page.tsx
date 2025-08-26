@@ -47,6 +47,24 @@ type ContractType =
 
 export type FactorOperator = "lt" | "lte" | "gt" | "gte" | "between" | "eq" | "neq";
 
+// Map an IPS strategy label to our internal ContractType and a human label
+function mapIPSToContractType(ips: IPSConfiguration): { type: ContractType; label: string } {
+  const raw = String((ips as any)?.strategies?.[0] ?? "").toLowerCase();
+  const norm = raw.replace(/\s+/g, " ").trim();
+
+  // Flexible matching to be resilient to minor label variations
+  if (/(put).*credit.*spread/.test(norm)) return { type: "put-credit-spread", label: "Put Credit Spread" };
+  if (/(call).*credit.*spread/.test(norm)) return { type: "call-credit-spread", label: "Call Credit Spread" };
+  if (/iron.*condor/.test(norm)) return { type: "iron-condor", label: "Iron Condor" };
+  if (/covered.*call/.test(norm)) return { type: "covered-call", label: "Covered Call" };
+  if (/long.*call/.test(norm)) return { type: "long-call", label: "Long Call" };
+  if (/long.*put/.test(norm)) return { type: "long-put", label: "Long Put" };
+  if (/buy|hold|shares/.test(norm)) return { type: "buy-hold", label: "Buy / Hold (Shares)" };
+
+  // Fallback
+  return { type: "put-credit-spread", label: "Put Credit Spread" };
+}
+
 export interface FactorRule {
   key: string; // e.g., 'delta' | 'market_cap' | 'price' | 'management_quality'
   label?: string;
@@ -411,14 +429,21 @@ export default function TradesPage() {
           </div>
         </div>
 
-        <EnhancedTradeEntryForm
-          selectedIPS={selectedIPS}
-          onSubmit={(fd, score) => handleTradeSubmit(fd, score)}
-          onCalculateScore={(fd) => handleCalculateScore(fd)}
-          onCancel={() => setCurrentView("selection")}
-          isLoading={isLoading}
-          calculatedScore={calculatedScore}
-        />
+        {(() => {
+          const { type: lockedType, label: strategyLabel } = mapIPSToContractType(selectedIPS);
+          return (
+            <EnhancedTradeEntryForm
+              selectedIPS={selectedIPS}
+              lockedContractType={lockedType}
+              strategyLabel={strategyLabel}
+              onSubmit={(fd, score) => handleTradeSubmit(fd, score)}
+              onCalculateScore={(fd) => handleCalculateScore(fd)}
+              onCancel={() => setCurrentView("selection")}
+              isLoading={isLoading}
+              calculatedScore={calculatedScore}
+            />
+          );
+        })()}
       </div>
     );
   }
@@ -699,6 +724,8 @@ export default function TradesPage() {
 
 interface EnhancedTradeEntryFormProps {
   selectedIPS: IPSConfiguration;
+  lockedContractType: ContractType;
+  strategyLabel: string;
   onSubmit: (formData: TradeFormData, score: number | null) => void;
   onCalculateScore: (formData: TradeFormData) => void;
   onCancel: () => void;
@@ -708,6 +735,8 @@ interface EnhancedTradeEntryFormProps {
 
 function EnhancedTradeEntryForm({
   selectedIPS,
+  lockedContractType,
+  strategyLabel,
   onSubmit,
   onCalculateScore,
   onCancel,
@@ -719,7 +748,7 @@ function EnhancedTradeEntryForm({
     symbol: "",
     currentPrice: undefined,
     expirationDate: "",
-    contractType: "put-credit-spread",
+    contractType: lockedContractType,
     numberOfContracts: 1,
     // spreads
     shortPutStrike: undefined,
@@ -741,6 +770,12 @@ function EnhancedTradeEntryForm({
     ipsFactors: {},
     apiFactors: {},
   });
+
+  // Enforce locked strategy if IPS changes
+  useEffect(() => {
+    setFormData((p) => ({ ...p, contractType: lockedContractType }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lockedContractType]);
 
   const [apiStatus, setApiStatus] = useState<"connected" | "disconnected" | "loading">("connected");
   const [completionScore, setCompletionScore] = useState<number>(0);
@@ -1038,21 +1073,10 @@ function EnhancedTradeEntryForm({
             </div>
 
             <div>
-              <Label htmlFor="contractType">Strategy</Label>
-              <select
-                id="contractType"
-                value={formData.contractType}
-                onChange={(e) => setFormData((p) => ({ ...p, contractType: e.target.value as ContractType }))}
-                className="w-full p-2 border border-gray-300 rounded-md"
-              >
-                <option value="buy-hold">Buy / Hold (Shares)</option>
-                <option value="put-credit-spread">Put Credit Spread</option>
-                <option value="call-credit-spread">Call Credit Spread</option>
-                <option value="iron-condor">Iron Condor</option>
-                <option value="covered-call">Covered Call</option>
-                <option value="long-call">Long Call</option>
-                <option value="long-put">Long Put</option>
-              </select>
+              <Label>Strategy</Label>
+              <div className="w-full p-2 border border-gray-200 rounded-md bg-gray-50">
+                <span className="text-sm font-medium">{strategyLabel}</span>
+              </div>
             </div>
 
             {/* Strategy-specific fields */}
@@ -1080,24 +1104,20 @@ function EnhancedTradeEntryForm({
               >
                 {apiStatus === "connected" ? "Connected" : apiStatus === "disconnected" ? "Disconnected" : "Loading…"}
               </Badge>
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-2"
+                onClick={() => formData.symbol && loadAPIFactors(formData.symbol)}
+                disabled={!formData.symbol || apiStatus === "loading"}
+                title="Refresh API factors"
+              >
+                <RefreshCw className={`h-4 w-4 ${apiStatus === "loading" ? "animate-spin" : ""}`} />
+              </Button>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="flex gap-2">
-              <Input
-                value={formData.symbol}
-                onChange={(e) => setFormData((p) => ({ ...p, symbol: e.target.value.toUpperCase() }))}
-                placeholder="Symbol (e.g., AAPL)"
-              />
-              <Button
-                variant="outline"
-                onClick={() => formData.symbol && loadAPIFactors(formData.symbol)}
-                disabled={!formData.symbol || apiStatus === "loading"}
-              >
-                <RefreshCw className={`h-4 w-4 mr-2 ${apiStatus === "loading" ? "animate-spin" : ""}`} />
-                Refresh
-              </Button>
-            </div>
+            {/* API factors auto-load from the Symbol entered in Trade Details. No duplicate ticker input here. */}
 
             {apiRules.length === 0 ? (
               <div className="text-sm text-gray-600">No API-driven factors for this IPS.</div>
