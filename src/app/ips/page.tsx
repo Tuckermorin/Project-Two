@@ -797,7 +797,6 @@ const handleSaveIPS = async (ipsData: any) => {
 
               <div className="flex items-center gap-2 mt-2">
                 <Badge variant={ips.is_active ? "default" : "secondary"}>{ips.is_active ? "Active" : "Inactive"}</Badge>
-                {ips.total_factors > 0 && <Badge variant="outline">{ips.active_factors}/{ips.total_factors} factors</Badge>}
               </div>
             </CardHeader>
 
@@ -816,6 +815,10 @@ const handleSaveIPS = async (ipsData: any) => {
               {/* Stats Grid */}
               <div className="grid grid-cols-2 gap-4 text-center py-3 border-t">
                 <div>
+                  <div className="text-lg font-semibold text-gray-900">{ips.total_factors ||  (ips.ips_factors?.length || 0)}</div>
+                  <div className="text-xs text-gray-600">Total Factors</div>
+                </div>
+                <div>
                   <div className="text-lg font-semibold text-gray-900">{ips.total_trades || 0}</div>
                   <div className="text-xs text-gray-600">Trades</div>
                 </div>
@@ -831,12 +834,6 @@ const handleSaveIPS = async (ipsData: any) => {
                   <Eye className="w-4 h-4 mr-1" />
                   View Details
                 </Button>
-                {ips.active_factors > 0 && (
-                  <Button size="sm" className="flex-1 bg-blue-600 hover:bg-blue-700">
-                    <Target className="w-4 h-4 mr-1" />
-                    Score Trade
-                  </Button>
-                )}
               </div>
             </CardContent>
 
