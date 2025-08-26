@@ -433,7 +433,46 @@ export default function IPSPage() {
     factors: [],
   });
 
+  const formatFactorTarget = (factor: any) => {
+    const op = factor?.target_operator;
+    if (!op) return "";
+    if (op === "range") {
+      const min = factor?.target_value ?? "";
+      const max = factor?.target_value_max ?? "";
+      return `${min} - ${max}`;
+    }
+    const symbols: Record<string, string> = {
+      gte: "≥",
+      lte: "≤",
+      gt: ">",
+      lt: "<",
+      eq: "=",
+    };
+    const symbol = symbols[op] || op;
+    const value = factor?.target_value ?? "";
+    return `${symbol} ${value}`;
+  };
+
   const handleViewIPS = async (ipsId: string) => {
+    const ips = allIPSs.find((i) => i.id === ipsId);
+    if (!ips) return;
+
+    const { data: factors, error } = await supabase
+      .from("ips_factors")
+      .select("*")
+      .eq("ips_id", ipsId);
+
+    if (error) {
+      console.error("Error loading IPS factors:", error);
+      return;
+    }
+
+    setDetailsDialog({ isOpen: true, ips, factors: factors || [] });
+  };
+
+  const handleEditIPS = async (ipsId: string) => {
+  const handleViewIPS = async (ipsId: string) => {
+
     const ips = allIPSs.find((i) => i.id === ipsId);
     if (!ips) return;
 
@@ -953,6 +992,14 @@ const handleSaveIPS = async (ipsData: any) => {
 
             <div className="max-h-60 overflow-y-auto border-t pt-2">
               {detailsDialog.factors.map((f) => (
+                <div
+                  key={f.factor_id}
+                  className="grid grid-cols-[1fr_auto_auto] items-center gap-2 py-1 text-sm"
+                >
+                  <span>{f.factor_name}</span>
+                  <span className="text-xs text-gray-500">
+                    {formatFactorTarget(f)}
+                  </span>
                 <div key={f.factor_id} className="flex justify-between py-1 text-sm">
                   <span>{f.factor_name}</span>
                   <Badge variant={f.enabled !== false ? 'default' : 'secondary'}>{f.weight}</Badge>
