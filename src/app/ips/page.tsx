@@ -472,10 +472,13 @@ export default function IPSPage() {
       const factorName = f.factor_name || f.name;
       if (!factorName) return;
       selected.add(factorName);
-      const factorInfo = allFactorDefs.find((df: any) => df.id === f.factor_id || df.name === factorName) || {
-        type: "quantitative",
-        category: "Unknown",
-      };
+      const factorInfo =
+        allFactorDefs.find(
+          (df: any) => df.id === f.factor_id || df.name === factorName
+        ) || {
+          type: "quantitative",
+          category: "Unknown",
+        };
       configurations[factorName] = {
         weight: f.weight || 1,
         enabled: f.enabled !== false,
@@ -489,6 +492,17 @@ export default function IPSPage() {
         category: factorInfo.category,
       };
     });
+
+    // Ensure factors for the existing strategies are loaded so the selector isn't blank
+    try {
+      const defs = ipsDataService.getFactorsForStrategies(
+        ((ips as any).strategies || []) as string[]
+      );
+      setFactorDefinitions(defs);
+    } catch (e) {
+      console.warn("Could not load factors for strategies:", e);
+      setFactorDefinitions({});
+    }
 
     setState((prev) => ({
       ...prev,
@@ -514,7 +528,47 @@ export default function IPSPage() {
   };
 
   const handleFactorSelection = (selectedFactors: Set<string>) => {
-    setState((prev) => ({ ...prev, selectedFactors }));
+    setState((prev) => {
+      const allFactorDefs = ipsDataService.getAllFactors();
+      const newConfigs: Record<string, any> = { ...prev.factorConfigurations };
+
+      // Add defaults for newly selected factors
+      selectedFactors.forEach((name) => {
+        if (!newConfigs[name]) {
+          const info =
+            allFactorDefs.find((df: any) => df.name === name) || {
+              type: "quantitative",
+              category: "Unknown",
+              id: name,
+            };
+          newConfigs[name] = {
+            weight: 5,
+            enabled: true,
+            targetType: info.type === "qualitative" ? "rating" : "numeric",
+            targetValue: info.type === "qualitative" ? 4 : "",
+            targetOperator: "gte",
+            targetValueMax: "",
+            preferenceDirection: "higher",
+            factorId: info.id,
+            type: info.type,
+            category: info.category,
+          };
+        }
+      });
+
+      // Remove configurations for deselected factors
+      Object.keys(newConfigs).forEach((name) => {
+        if (!selectedFactors.has(name)) {
+          delete newConfigs[name];
+        }
+      });
+
+      return {
+        ...prev,
+        selectedFactors,
+        factorConfigurations: newConfigs,
+      };
+    });
   };
 
   const handleFactorConfiguration = (configurations: Record<string, any>) => {
