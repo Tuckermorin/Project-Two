@@ -1,7 +1,7 @@
 import type { LoadedIPSFactors, IPSFactor, FactorValueMap } from "@/lib/types";
 import { ipsDataService } from "@/lib/services/ips-data-service";
-import { factorDataService } from "@/lib/services/factor-data-service";
-import { marketDataService } from "@/lib/services/market-data-service";
+import { getFactorDataService } from "@/lib/services/factor-data-service";
+import { getMarketDataService } from "@/lib/services/market-data-service";
 
 /**
  * Get the IPS's selected factors already split into API vs Manual.
@@ -24,20 +24,41 @@ export async function fetchApiFactorValues(
   apiFactors: IPSFactor[]
 ): Promise<FactorValueMap> {
   const out: FactorValueMap = {};
+  const factorService = getFactorDataService();
+  const marketService = getMarketDataService();
   for (const f of apiFactors) {
     try {
-      // try factorDataService first if you map keys -> provider
-      const v = await factorDataService.getValue({ symbol, key: f.key });
-      out[f.key] = v ?? null;
+      // Use FactorDataService to fetch API-driven factors
+      const response = await factorService.fetchAPIFactors(symbol, 'default-ips');
+      out[f.key] = response.factors[f.key]?.value ?? null;
     } catch {
       try {
-        // optional fallback to marketDataService
-        const v2 = await marketDataService.getFactor({ symbol, key: f.key });
-        out[f.key] = v2 ?? null;
+        // Fallback to market data service
+        const stockData = await marketService.getUnifiedStockData(symbol, true);
+        out[f.key] = mapFactorToStockData(f.key, stockData) ?? null;
       } catch {
         out[f.key] = null;
       }
     }
   }
   return out;
+}
+
+// Helper function to map factor keys to stock data properties
+function mapFactorToStockData(factorKey: string, stockData: any): number | string | null {
+  switch (factorKey.toLowerCase()) {
+    case 'pe_ratio':
+    case 'p_e_ratio':
+      return stockData.fundamentals?.eps && stockData.currentPrice
+        ? stockData.currentPrice / stockData.fundamentals.eps
+        : null;
+    case 'beta':
+      return stockData.beta || null;
+    case 'market_cap':
+      return stockData.marketCap || null;
+    case 'revenue_growth':
+      return stockData.fundamentals?.revenueGrowth || null;
+    default:
+      return null;
+  }
 }

@@ -1,5 +1,7 @@
 // src/lib/services/ips-data-service.ts
 
+import type { IPSFactor } from "@/lib/types";
+
 // Trading Strategy Definition
 interface TradingStrategy {
   id: string;
@@ -344,6 +346,44 @@ class IPSDataService {
       if (ips) return Promise.resolve(ips);
     }
     return Promise.resolve(null);
+  }
+
+  async getIPSFactors(ipsId: string): Promise<IPSFactor[]> {
+    try {
+      const response = await fetch(`/api/ips/${ipsId}/factors`);
+      if (!response.ok) {
+        throw new Error('Failed to fetch IPS factors');
+      }
+
+      const data = await response.json();
+
+      return data.map((factor: any) => ({
+        id: factor.factor_id || factor.id,
+        key: factor.factor_key || factor.factor_id,
+        name: factor.factor_name || factor.name,
+        source: this.isAPIFactor(factor.factor_name) ? 'api' : 'manual',
+        weight: factor.weight || 1,
+        target: {
+          operator: factor.target_operator,
+          min: factor.target_min,
+          max: factor.target_max,
+          value: factor.target_value
+        },
+        inputType: factor.input_type || 'number'
+      }));
+    } catch (error) {
+      console.error('Error fetching IPS factors:', error);
+      return [];
+    }
+  }
+
+  private isAPIFactor(factorName: string): boolean {
+    const apiFactorNames = [
+      'P/E Ratio', 'Beta', 'Revenue Growth YoY', 'Return on Equity',
+      'Debt to Equity', 'Dividend Yield', 'Market Cap', 'Volume',
+      'Implied Volatility', 'Delta', 'Theta', 'Vega', 'Gamma'
+    ];
+    return apiFactorNames.includes(factorName);
   }
 
   async createIPS(userId: string, ipsData: any): Promise<IPSConfiguration> {
