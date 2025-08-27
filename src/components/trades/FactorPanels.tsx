@@ -55,7 +55,7 @@ export function ApiFactorsPanel({ factors, values, isConnected = true, onRefresh
                 )}
               </div>
               <div className="col-span-7">
-                <Input value={v ?? ""} readOnly className="bg-muted/40" />
+                <Input value={v === undefined || v === null ? "" : String(v)} readOnly className="bg-muted/40" />
               </div>
             </div>
           );

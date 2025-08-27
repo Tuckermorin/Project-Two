@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-import type { IPSConfiguration, LoadedIPSFactors, FactorValueMap } from "@/lib/types";
+import type { LoadedIPSFactors, FactorValueMap } from "@/lib/types";
+import type { IPSConfiguration } from "@/lib/services/ips-data-service";
 import { loadIPSFactors, fetchApiFactorValues } from "@/lib/factor-loader";
 import { ApiFactorsPanel, ManualFactorsPanel } from "@/components/trades/FactorPanels";
 import { Card, CardHeader, CardContent, CardTitle } from "@/components/ui/card";
@@ -85,7 +86,8 @@ export function NewTradeEntryForm({
     if (!sym || factors.api.length === 0) return;
     try {
       setApiBusy(true);
-      const values = await fetchApiFactorValues(sym, factors.api);
+      const ipsId = (selectedIPS as any).ips_id || (selectedIPS as any).id;
+      const values = await fetchApiFactorValues(sym, factors.api, ipsId);
       setApiValues(values);
     } catch (e) {
       console.error("API factor fetch error", e);
@@ -143,6 +145,100 @@ export function NewTradeEntryForm({
                 onChange={(e) => setFormData((p) => ({ ...p, expirationDate: e.target.value }))}
               />
             </div>
+            {/* Strategy-specific fields */}
+            {(() => {
+              const N = (props: { id: keyof TradeFormData; label: string; step?: string; placeholder?: string }) => (
+                <div>
+                  <Label htmlFor={String(props.id)}>{props.label}</Label>
+                  <Input
+                    id={String(props.id)}
+                    type="number"
+                    step={props.step ?? "0.01"}
+                    value={(formData[props.id] as any) ?? ""}
+                    onChange={(e) =>
+                      setFormData((p) => ({
+                        ...p,
+                        [props.id]: e.target.value === "" ? undefined : parseFloat(e.target.value),
+                      }))
+                    }
+                    placeholder={props.placeholder}
+                  />
+                </div>
+              );
+              const C = (props: { id: keyof TradeFormData; label: string; min?: number; placeholder?: string }) => (
+                <div>
+                  <Label htmlFor={String(props.id)}>{props.label}</Label>
+                  <Input
+                    id={String(props.id)}
+                    type="number"
+                    min={props.min ?? 1}
+                    value={(formData[props.id] as any) ?? ""}
+                    onChange={(e) =>
+                      setFormData((p) => ({
+                        ...p,
+                        [props.id]: e.target.value === "" ? undefined : parseInt(e.target.value),
+                      }))
+                    }
+                    placeholder={props.placeholder}
+                  />
+                </div>
+              );
+              switch (formData.contractType) {
+                case "put-credit-spread":
+                  return (
+                    <>
+                      <C id="numberOfContracts" label="Contracts" placeholder="1" />
+                      <N id="shortPutStrike" label="Short Put Strike" placeholder="145.00" />
+                      <N id="longPutStrike" label="Long Put Strike" placeholder="140.00" />
+                      <N id="creditReceived" label="Net Credit (per spread)" placeholder="1.25" />
+                    </>
+                  );
+                case "call-credit-spread":
+                  return (
+                    <>
+                      <C id="numberOfContracts" label="Contracts" placeholder="1" />
+                      <N id="shortCallStrike" label="Short Call Strike" placeholder="155.00" />
+                      <N id="longCallStrike" label="Long Call Strike" placeholder="160.00" />
+                      <N id="creditReceived" label="Net Credit (per spread)" placeholder="1.10" />
+                    </>
+                  );
+                case "long-call":
+                case "long-put":
+                  return (
+                    <>
+                      <C id="numberOfContracts" label="Contracts" placeholder="1" />
+                      <N id="optionStrike" label="Option Strike" placeholder="150.00" />
+                      <N id="debitPaid" label="Debit Paid (per contract)" placeholder="2.35" />
+                    </>
+                  );
+                case "covered-call":
+                  return (
+                    <>
+                      <N id="sharesOwned" label="Shares Owned" step="1" placeholder="100" />
+                      <N id="callStrike" label="Call Strike" placeholder="160.00" />
+                      <N id="premiumReceived" label="Premium Received (per contract)" placeholder="1.35" />
+                    </>
+                  );
+                case "iron-condor":
+                  return (
+                    <>
+                      <C id="numberOfContracts" label="Contracts" placeholder="1" />
+                      <N id="shortPutStrike" label="Short Put Strike" placeholder="145.00" />
+                      <N id="longPutStrike" label="Long Put Strike" placeholder="140.00" />
+                      <N id="shortCallStrike" label="Short Call Strike" placeholder="160.00" />
+                      <N id="longCallStrike" label="Long Call Strike" placeholder="165.00" />
+                      <N id="creditReceived" label="Net Credit (per condor)" placeholder="2.10" />
+                    </>
+                  );
+                case "buy-hold":
+                  return (
+                    <>
+                      <N id="shares" label="Shares" step="1" placeholder="100" />
+                      <N id="entryPrice" label="Entry Price" placeholder="153.10" />
+                    </>
+                  );
+              }
+            })()}
           </div>
         </CardContent>
       </Card>

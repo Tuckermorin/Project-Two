@@ -21,19 +21,42 @@ export async function loadIPSFactors(ipsId: string): Promise<LoadedIPSFactors> {
  */
 export async function fetchApiFactorValues(
   symbol: string,
-  apiFactors: IPSFactor[]
+  apiFactors: IPSFactor[],
+  ipsId: string
 ): Promise<FactorValueMap> {
   const out: FactorValueMap = {};
   const factorService = getFactorDataService();
   const marketService = getMarketDataService();
-  for (const f of apiFactors) {
-    try {
-      // Use FactorDataService to fetch API-driven factors
-      const response = await factorService.fetchAPIFactors(symbol, 'default-ips');
-      out[f.key] = response.factors[f.key]?.value ?? null;
-    } catch {
+
+  try {
+    // Fetch in one call using the real ipsId (drives which API factors are relevant)
+    const response = await factorService.fetchAPIFactors(symbol, ipsId);
+
+    // The API returns an object keyed by human factor name (e.g., 'P/E Ratio').
+    // Map each configured factor to our internal key.
+    for (const f of apiFactors) {
+      const byName = (response.factors as any)[f.name]?.value;
+      const byKey = (response.factors as any)[f.key]?.value;
+      if (byName !== undefined) {
+        out[f.key] = byName as number;
+        continue;
+      }
+      if (byKey !== undefined) {
+        out[f.key] = byKey as number;
+        continue;
+      }
+      // Fallback to local mapping from market data
       try {
-        // Fallback to market data service
+        const stockData = await marketService.getUnifiedStockData(symbol, true);
+        out[f.key] = mapFactorToStockData(f.key, stockData) ?? null;
+      } catch {
+        out[f.key] = null;
+      }
+    }
+  } catch {
+    // Total failure: best-effort fallback per factor
+    for (const f of apiFactors) {
+      try {
         const stockData = await marketService.getUnifiedStockData(symbol, true);
         out[f.key] = mapFactorToStockData(f.key, stockData) ?? null;
       } catch {
@@ -41,6 +64,7 @@ export async function fetchApiFactorValues(
       }
     }
   }
+
   return out;
 }
 

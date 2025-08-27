@@ -30,9 +30,9 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Get IPS configuration from database
+    // Get IPS configuration from database (correct table)
     const { data: ips, error: ipsError } = await supabase
-      .from('investment_performance_systems')
+      .from('ips_configurations')
       .select('*')
       .eq('id', ipsId)
       .single();
@@ -43,16 +43,18 @@ export async function GET(request: NextRequest) {
       }, { status: 404 });
     }
 
-    // Get IPS factors from database - fix the query structure
+    // Get IPS factors from database (only enabled)
     const { data: ipsFactors, error: factorsError } = await supabase
       .from('ips_factors')
       .select(`
+        factor_id,
         factor_name,
         weight,
         target_value,
         target_operator,
+        target_value_max,
         preference_direction,
-        factors(name, source, data_type, category, unit)
+        collection_method
       `)
       .eq('ips_id', ipsId)
       .eq('enabled', true);
@@ -61,12 +63,8 @@ export async function GET(request: NextRequest) {
       throw new Error(`Failed to fetch IPS factors: ${factorsError.message}`);
     }
 
-    // Filter for API factors only - fix the source access
-    const apiFactors = ipsFactors?.filter(f => {
-      // Handle the case where factors might be an array or single object
-      const factorInfo = Array.isArray(f.factors) ? f.factors[0] : f.factors;
-      return factorInfo?.source === 'alpha_vantage';
-    }) || [];
+    // Filter for API factors only using collection_method
+    const apiFactors = (ipsFactors || []).filter((f: any) => (f.collection_method || 'manual') === 'api');
 
     if (apiFactors.length === 0) {
       return NextResponse.json({

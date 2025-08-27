@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     const ips_id = ipsRows.id as string;
 
     // 2) link factors
-    const factorRows = factors.map(f => ({ 
+    const factorRows = factors.map((f: any) => ({ 
       ips_id, 
       factor_id: f.factor_id,
       factor_name: f.factor_name || f.name || '', // Add factor_name field
@@ -81,8 +81,8 @@ export async function POST(req: NextRequest) {
     }
 
     // 2.5) Update the counts in ips_configurations
-    const enabledFactors = factorRows.filter(f => f.enabled);
-    const totalWeight = factorRows.reduce((sum, f) => sum + f.weight, 0);
+    const enabledFactors = factorRows.filter((f: any) => f.enabled);
+    const totalWeight = factorRows.reduce((sum: number, f: any) => sum + f.weight, 0);
     const avgWeight = factorRows.length > 0 ? totalWeight / factorRows.length : 0;
 
     const { error: updateErr } = await supabase
@@ -185,7 +185,7 @@ export async function PUT(req: NextRequest) {
     // Replace factor rows
     await supabase.from('ips_factors').delete().eq('ips_id', id);
 
-    const factorRows = factors.map(f => ({
+    const factorRows = factors.map((f: any) => ({ 
       ips_id: id,
       factor_id: f.factor_id,
       factor_name: f.factor_name || f.name || '',
@@ -205,8 +205,8 @@ export async function PUT(req: NextRequest) {
     }
 
     // Update counts
-    const enabledFactors = factorRows.filter(f => f.enabled);
-    const totalWeight = factorRows.reduce((sum, f) => sum + f.weight, 0);
+    const enabledFactors = factorRows.filter((f: any) => f.enabled);
+    const totalWeight = factorRows.reduce((sum: number, f: any) => sum + f.weight, 0);
     const avgWeight = factorRows.length > 0 ? totalWeight / factorRows.length : 0;
 
     const { error: updateErr } = await supabase

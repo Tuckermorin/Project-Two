@@ -90,24 +90,7 @@ class FactorDataService {
   /**
    * Fetch a single factor from the appropriate API
    */
-  private async fetchSingleAPIFactor(
-    symbol: string, 
-    factorName: string
-  ): Promise<FactorValue | null> {
-    try {
-      // Route to appropriate API based on factor name
-      if (this.isAlphaVantageFactor(factorName)) {
-        return await this.fetchAlphaVantageFactor(symbol, factorName);
-      } else if (this.isTradierFactor(factorName)) {
-        return await this.fetchTradierFactor(symbol, factorName);
-      }
-      
-      return null;
-    } catch (error) {
-      console.error(`Failed to fetch ${factorName} for ${symbol}:`, error);
-      return null;
-    }
-  }
+  // Removed per project scope; use fetchAPIFactors() batching instead
 
   /**
    * Fetch factor from Alpha Vantage (fundamental data)
@@ -175,56 +158,7 @@ class FactorDataService {
   /**
    * Fetch factor from Tradier (options/market data)
    */
-  private async fetchTradierFactor(
-    symbol: string, 
-    factorName: string
-  ): Promise<FactorValue | null> {
-    try {
-      // For options factors, we'd need strike, expiration, and option type
-      // This is a simplified example - in practice you'd need these parameters
-      const response = await fetch(`/api/market-data/options?symbol=${symbol}`);
-      const data = await response.json();
-      
-      if (!data.success) {
-        throw new Error(`Tradier API error: ${data.message}`);
-      }
-
-      // Map factor names to options data
-      let value: number | undefined;
-      switch (factorName) {
-        case 'Implied Volatility':
-          value = data.impliedVolatility;
-          break;
-        case 'Delta':
-          value = data.delta;
-          break;
-        case 'Theta':
-          value = data.theta;
-          break;
-        // Add more mappings
-        default:
-          console.warn(`Unknown Tradier factor: ${factorName}`);
-          return null;
-      }
-
-      if (value === undefined || value === null) {
-        return null;
-      }
-
-      return {
-        factorId: this.getFactorId(factorName),
-        factorName,
-        value,
-        source: 'api',
-        lastUpdated: new Date(),
-        confidence: 0.90 // Good confidence for Tradier data
-      };
-
-    } catch (error) {
-      console.error(`Tradier factor fetch failed for ${factorName}:`, error);
-      return null;
-    }
-  }
+  // Removed per project scope; options API not integrated
 
   /**
    * Save manual factor data
@@ -412,13 +346,7 @@ class FactorDataService {
     return alphaVantageFactors.includes(factorName);
   }
 
-  private isTradierFactor(factorName: string): boolean {
-    const tradierFactors = [
-      'Implied Volatility', 'Delta', 'Theta', 'Vega', 'Gamma',
-      'Open Interest', 'Option Volume'
-    ];
-    return tradierFactors.includes(factorName);
-  }
+  // Removed
 
   private getFactorId(factorName: string): string {
     // Convert factor name to ID format

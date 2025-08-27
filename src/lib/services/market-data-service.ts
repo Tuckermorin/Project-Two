@@ -1,7 +1,6 @@
 // src/lib/services/market-data-service.ts
 
 import { getAlphaVantageClient, type FundamentalData } from '@/lib/api/alpha-vantage';
-import { getTradierClient, type StockQuote } from '@/lib/api/tradier';
 import { createClient } from '@supabase/supabase-js';
 
 // Unified data types for our application
@@ -95,7 +94,6 @@ interface TradeSnapshot {
 
 class MarketDataService {
   private alphaVantage = getAlphaVantageClient();
-  private tradier = getTradierClient();
   private supabase = createClient(
     process.env.SUPABASE_URL!,
     process.env.SUPABASE_ANON_KEY!
@@ -125,24 +123,24 @@ class MarketDataService {
     console.log(`Getting unified stock data for ${symbol}`);
     
     try {
-        // Try to get real-time quote from Tradier first
-        let quote;
-        try {
-        quote = await this.tradier.getQuote(symbol);
-        } catch (quoteError) {
-        console.warn(`Failed to fetch quote for ${symbol} from Tradier:`, quoteError);
-        
-        // Fallback to basic data structure
-        quote = {
-            symbol,
-            last: 0,
-            prevclose: 0,
-            change: 0,
-            change_percentage: 0,
-            volume: 0,
-            average_volume: 0
+        // Use Alpha Vantage quote for current price data
+        const gq = await this.alphaVantage.getQuote(symbol);
+        const last = parseFloat(gq['05. price'] ?? '0');
+        const prev = parseFloat(gq['08. previous close'] ?? '0');
+        const vol = parseFloat(gq['06. volume'] ?? '0');
+        const chg = parseFloat(gq['09. change'] ?? '0');
+        const chgPctStr = String(gq['10. change percent'] ?? '0%');
+        const chgPct = parseFloat(chgPctStr.replace('%',''));
+
+        const quote = {
+          symbol: gq['01. symbol'] || symbol,
+          last: isFinite(last) ? last : 0,
+          prevclose: isFinite(prev) ? prev : 0,
+          change: isFinite(chg) ? chg : 0,
+          change_percentage: isFinite(chgPct) ? chgPct : 0,
+          volume: isFinite(vol) ? vol : 0,
+          average_volume: 0,
         };
-        }
 
         let fundamentals;
         if (includeFundamentals) {
@@ -277,42 +275,9 @@ class MarketDataService {
     }
 
     try {
-      const optionsChain = await this.tradier.getOptionsChain(symbol, expiration, true);
-
-      const option = optionsChain.find(opt =>
-        opt.strike === strike &&
-        opt.option_type === optionType
-      );
-
-      if (!option) {
-        console.warn(`Option not found: ${symbol} ${strike}${optionType.charAt(0)} ${expiration}`);
-        return null;
-      }
-
-      const data: UnifiedOptionsData = {
-        symbol: option.symbol,
-        underlying: option.underlying,
-        strike: option.strike,
-        expiration: option.expiration_date,
-        optionType: option.option_type,
-        bid: option.bid,
-        ask: option.ask,
-        last: option.last || undefined,
-        volume: option.volume,
-        openInterest: option.open_interest,
-        greeks: option.greeks ? {
-          delta: option.greeks.delta,
-          gamma: option.greeks.gamma,
-          theta: option.greeks.theta,
-          vega: option.greeks.vega,
-          rho: option.greeks.rho,
-          impliedVolatility: option.greeks.mid_iv
-        } : undefined,
-        lastUpdated: new Date()
-      };
-
-      this.setCache(cacheKey, data, this.getDailyTTL());
-      return data;
+      // Options API not integrated (Tradier removed)
+      console.warn('Options data is not integrated; returning null');
+      return null;
     } catch (error) {
       console.error(`Error fetching options data:`, error);
       return null;
@@ -343,34 +308,46 @@ class MarketDataService {
       const symbols = watchlistStocks.map(stock => stock.symbol);
       
       // Get quotes for all symbols at once
-      const quotes = await this.tradier.getQuotes(symbols);
-      
+      // Fetch quotes sequentially via Alpha Vantage to avoid rate limit blowups
+      const updates: Array<{ symbol: string; data: any }> = [];
+      for (const symbol of symbols) {
+        try {
+          const gq = await this.alphaVantage.getQuote(symbol);
+          const update = {
+            currentPrice: parseFloat(gq['05. price'] ?? '0') || 0,
+            previousClose: parseFloat(gq['08. previous close'] ?? '0') || 0,
+            priceChange: parseFloat(gq['09. change'] ?? '0') || 0,
+            priceChangePercent: parseFloat(String(gq['10. change percent'] ?? '0%').replace('%','')) || 0,
+            volume: parseFloat(gq['06. volume'] ?? '0') || 0,
+            avgVolume: 0,
+            lastUpdated: new Date().toISOString()
+          };
+          updates.push({ symbol, data: update });
+        } catch (e) {
+          console.warn(`Failed to fetch quote for ${symbol} via Alpha Vantage`, e);
+        }
+      }
+
       // Update each stock in the database
-      for (const quote of quotes) {
+      for (const { symbol, data } of updates) {
         const updateData = {
-          currentPrice: quote.last,
-          previousClose: quote.prevclose,
-          priceChange: quote.change,
-          priceChangePercent: quote.change_percentage,
-          volume: quote.volume,
-          avgVolume: quote.average_volume,
-          lastUpdated: new Date().toISOString()
+          ...data
         };
 
         const { error: updateError } = await this.supabase
           .from('watchlist_stocks')
           .update(updateData)
-          .eq('symbol', quote.symbol);
+          .eq('symbol', symbol);
 
         if (updateError) {
-          console.error(`Failed to update ${quote.symbol}:`, updateError);
+          console.error(`Failed to update ${symbol}:`, updateError);
         } else {
           // Store latest quote in cache so UI refreshes don't trigger new calls
-          this.setCache(`quote_${quote.symbol}`, quote, this.getDailyTTL());
+          this.setCache(`quote_${symbol}`, updateData, this.getDailyTTL());
         }
       }
 
-      console.log(`Updated ${quotes.length} watchlist stocks`);
+      console.log(`Updated ${updates.length} watchlist stocks`);
     } catch (error) {
       console.error('Error updating watchlist:', error);
       throw error;

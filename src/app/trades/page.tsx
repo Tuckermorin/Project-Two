@@ -29,6 +29,7 @@ import {
 
 // Service imports (unchanged)
 import { ipsDataService, type IPSConfiguration } from "@/lib/services/ips-data-service";
+import type { FactorValueMap } from "@/lib/types";
 import { NewTradeEntryForm } from "@/components/trades/NewTradeEntryForm";
 
 // -----------------------------
@@ -230,8 +231,8 @@ interface TradeFormData {
   entryPrice?: number;
 
   // IPS factors (values only)
-  ipsFactors: Record<string, number | "">;
-  apiFactors: Record<string, number | "">;
+  ipsFactors: FactorValueMap;
+  apiFactors: FactorValueMap;
 }
 
 interface ProspectiveTrade {
@@ -255,6 +256,20 @@ export default function TradesPage() {
   const [prospectiveTrades, setProspectiveTrades] = useState<ProspectiveTrade[]>([]);
 
   const userId = "user-123"; // TODO: replace with auth
+
+  // Map of strategy id to human-readable name for display
+  const strategyMap = useMemo(() => {
+    const map = new Map<string, string>();
+    try {
+      ipsDataService
+        .getAvailableStrategies()
+        .forEach((s: any) => map.set(s.id, s.name));
+    } catch (e) {
+      // If service call fails, fallback map remains empty
+      console.warn("Could not load strategy names", e);
+    }
+    return map;
+  }, []);
 
   useEffect(() => {
     const loadIPSData = async () => {
@@ -365,6 +380,13 @@ export default function TradesPage() {
                 }
               }
 
+              // Convert strategy ids into human-readable names
+              const strategyLabel = (Array.isArray(ips.strategies)
+                ? ips.strategies
+                : [])
+                .map((id: string) => strategyMap.get(id) || id)
+                .join(", ");
+
               return (
                 <Card key={ips.id} className="hover:shadow-lg transition-shadow">
                   <CardHeader>
@@ -381,7 +403,7 @@ export default function TradesPage() {
                     <div className="space-y-2 text-sm">
                       <div className="flex items-center justify-between">
                         <span className="text-gray-600">Strategies:</span>
-                        <span className="font-medium">{ips.strategies?.length ?? 0}</span>
+                        <span className="font-medium">{strategyLabel || "None"}</span>
                       </div>
                       <div className="flex items-center justify-between">
                         <span className="text-gray-600">IPS Factors:</span>

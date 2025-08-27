@@ -350,27 +350,11 @@ class IPSDataService {
 
   async getIPSFactors(ipsId: string): Promise<IPSFactor[]> {
     try {
-      const response = await fetch(`/api/ips/${ipsId}/factors`);
-      if (!response.ok) {
-        throw new Error('Failed to fetch IPS factors');
-      }
-
-      const data = await response.json();
-
-      return data.map((factor: any) => ({
-        id: factor.factor_id || factor.id,
-        key: factor.factor_key || factor.factor_id,
-        name: factor.factor_name || factor.name,
-        source: this.isAPIFactor(factor.factor_name) ? 'api' : 'manual',
-        weight: factor.weight || 1,
-        target: {
-          operator: factor.target_operator,
-          min: factor.target_min,
-          max: factor.target_max,
-          value: factor.target_value
-        },
-        inputType: factor.input_type || 'number'
-      }));
+      // Dedicated route returning already-shaped factors
+      const response = await fetch(`/api/ips/${ipsId}/factors`, { cache: 'no-store' });
+      if (!response.ok) throw new Error('Failed to fetch IPS factors');
+      const shaped = await response.json();
+      return Array.isArray(shaped) ? (shaped as IPSFactor[]) : [];
     } catch (error) {
       console.error('Error fetching IPS factors:', error);
       return [];
