@@ -230,6 +230,34 @@ class MarketDataService {
     }
     }
 
+  async getFactor(params: { symbol: string; key: string }): Promise<number | string | null> {
+    try {
+      const stockData = await this.getUnifiedStockData(params.symbol, true);
+      return this.mapFactorToStockData(params.key, stockData);
+    } catch (error) {
+      console.error(`Error fetching factor ${params.key} for ${params.symbol}:`, error);
+      return null;
+    }
+  }
+
+  private mapFactorToStockData(factorKey: string, stockData: UnifiedStockData): number | string | null {
+    switch (factorKey.toLowerCase()) {
+      case 'pe_ratio':
+      case 'p_e_ratio':
+        return stockData.fundamentals?.eps && stockData.currentPrice
+          ? stockData.currentPrice / stockData.fundamentals.eps
+          : null;
+      case 'beta':
+        return stockData.beta || null;
+      case 'market_cap':
+        return stockData.marketCap || null;
+      case 'revenue_growth':
+        return stockData.fundamentals?.revenueGrowth || null;
+      default:
+        return null;
+    }
+  }
+
   /**
    * Get options data for a specific trade
    */
