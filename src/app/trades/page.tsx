@@ -29,6 +29,7 @@ import {
 
 // Service imports (unchanged)
 import { ipsDataService, type IPSConfiguration } from "@/lib/services/ips-data-service";
+import { NewTradeEntryForm } from "@/components/trades/NewTradeEntryForm";
 
 // -----------------------------
 // Local types + normalizer (builder-driven IPS)
@@ -432,15 +433,13 @@ export default function TradesPage() {
         {(() => {
           const { type: lockedType, label: strategyLabel } = mapIPSToContractType(selectedIPS);
           return (
-            <EnhancedTradeEntryForm
+            <NewTradeEntryForm
               selectedIPS={selectedIPS}
               lockedContractType={lockedType}
               strategyLabel={strategyLabel}
               onSubmit={(fd, score) => handleTradeSubmit(fd, score)}
-              onCalculateScore={(fd) => handleCalculateScore(fd)}
               onCancel={() => setCurrentView("selection")}
               isLoading={isLoading}
-              calculatedScore={calculatedScore}
             />
           );
         })()}
