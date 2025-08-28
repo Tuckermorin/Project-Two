@@ -17,9 +17,9 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Get IPS configuration and factors from database
+    // Get IPS configuration and factors from database (current schema)
     const { data: ips, error: ipsError } = await supabase
-      .from('investment_performance_systems')
+      .from('ips_configurations')
       .select('*')
       .eq('id', ipsId)
       .single();
@@ -41,7 +41,7 @@ export async function POST(request: NextRequest) {
         target_value_max,
         preference_direction,
         enabled,
-        factors!inner(data_type, unit, category)
+        factor_definitions:factor_definitions(data_type, unit, category)
       `)
       .eq('ips_id', ipsId)
       .eq('enabled', true);
@@ -75,7 +75,9 @@ export async function POST(request: NextRequest) {
     const weight = ipsFactor.weight;
     
     // Fix the factors access - handle array or single object
-    const factorInfo = Array.isArray(ipsFactor.factors) ? ipsFactor.factors[0] : ipsFactor.factors;
+    const factorInfo = Array.isArray((ipsFactor as any).factor_definitions)
+      ? (ipsFactor as any).factor_definitions[0]
+      : (ipsFactor as any).factor_definitions;
     
     // Calculate individual factor score based on type and targets
     let individualScore = 0;

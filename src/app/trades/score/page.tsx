@@ -12,6 +12,8 @@ import type { IPSFactor } from "@/lib/types";
 
 type DraftPayload = {
   ipsId: string;
+  ipsName?: string;
+  strategyId?: string;
   strategyLabel?: string;
   trade: any;
 };
@@ -48,6 +50,7 @@ export default function ScoreTradePage() {
   const [score, setScore] = useState<ScoreAPIResponse["data"] | null>(null);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [ipsDisplayName, setIpsDisplayName] = useState<string | null>(null);
 
   useEffect(() => {
     async function run() {
@@ -61,6 +64,19 @@ export default function ScoreTradePage() {
         }
         const payload: DraftPayload = JSON.parse(raw);
         setDraft(payload);
+        // Derive IPS display name
+        if (payload.ipsName && payload.ipsName.trim()) {
+          setIpsDisplayName(payload.ipsName);
+        } else if (payload.ipsId) {
+          try {
+            const r = await fetch('/api/ips', { cache: 'no-store' });
+            const rows = await r.json();
+            if (Array.isArray(rows)) {
+              const row = rows.find((x: any) => x?.id === payload.ipsId);
+              if (row?.name) setIpsDisplayName(String(row.name));
+            }
+          } catch {}
+        }
 
         // Load IPS factors to map keys -> names expected by scoring API
         const factors = await loadIPSFactors(payload.ipsId);
@@ -122,6 +138,26 @@ export default function ScoreTradePage() {
       const creditReceived =
         t.creditReceived ?? t.premiumReceived ?? (t.debitPaid ? -Math.abs(t.debitPaid) : undefined);
 
+      // Determine strategy_type to satisfy DB NOT NULL
+      const strategyType = draft.strategyId || ((): string | undefined => {
+        switch (t.contractType) {
+          case "put-credit-spread":
+            return "put-credit-spreads";
+          case "call-credit-spread":
+            return "call-credit-spreads";
+          case "iron-condor":
+            return "iron-condors";
+          case "covered-call":
+            return "covered-calls";
+          case "long-call":
+            return "long-calls";
+          case "long-put":
+            return "long-puts";
+          default:
+            return undefined;
+        }
+      })();
+
       // Rebuild factor values by human factor name for persistence
       const factorsByName: Record<string, any> = {};
       Object.assign(factorsByName, t.apiFactors || {}); // keys are internal; API will save factor names we pass below
@@ -139,6 +175,7 @@ export default function ScoreTradePage() {
         body: JSON.stringify({
           userId: "user-123",
           ipsId: draft.ipsId,
+          strategyType,
           tradeData: {
             name: t.name,
             symbol: t.symbol,
@@ -202,7 +239,7 @@ export default function ScoreTradePage() {
               <CardTitle className="text-2xl font-bold text-gray-900">
                 {draft.trade?.symbol || "Symbol"} — Trade Score
               </CardTitle>
-              <p className="text-gray-600 mt-1">IPS: {draft.ipsId}</p>
+              <p className="text-gray-600 mt-1">IPS: {ipsDisplayName ?? draft.ipsName ?? draft.ipsId}</p>
             </div>
             <div className="text-right">
               <div className="text-4xl font-bold text-blue-600 mb-1">{score?.score?.toFixed(1) ?? "0.0"}</div>
@@ -284,13 +321,13 @@ export default function ScoreTradePage() {
         <div className="text-sm text-gray-600">{saveMsg}</div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => router.push("/trades")}>Cancel</Button>
+          <Button variant="outline" onClick={() => router.push("/trades")}>Enter New Trade</Button>
           <Button variant="outline" onClick={() => router.push("/journal")}>Run A.I. Analysis</Button>
           <Button onClick={handleAddProspective} disabled={saving} className="bg-blue-600 hover:bg-blue-700 text-white">
-            {saving ? "Adding…" : "Add to Prospective Trades"}
+            {saving ? "Placing…" : "Place on Prospective List"}
           </Button>
         </div>
       </div>
     </div>
   );
 }
-

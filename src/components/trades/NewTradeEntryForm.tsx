@@ -109,6 +109,10 @@ export function NewTradeEntryForm({
     try {
       const payload = {
         ipsId: (selectedIPS as any).ips_id || (selectedIPS as any).id,
+        ipsName: (selectedIPS as any).name || (selectedIPS as any).ips_name,
+        strategyId: Array.isArray((selectedIPS as any).strategies)
+          ? (selectedIPS as any).strategies[0]
+          : undefined,
         strategyLabel,
         trade: {
           ...formData,
@@ -160,108 +164,120 @@ export function NewTradeEntryForm({
             </div>
             {/* Strategy-specific fields */}
             {(() => {
-              const N = (props: { id: keyof TradeFormData; label: string; step?: string; placeholder?: string }) => (
-                <div>
-                  <Label htmlFor={String(props.id)}>{props.label}</Label>
-                  <Input
-                    id={String(props.id)}
-                    type="text"
-                    inputMode="decimal"
-                    value={
-                      textValues[String(props.id)] ??
-                      (formData[props.id] !== undefined && formData[props.id] !== null
-                        ? String(formData[props.id] as any)
-                        : "")
-                    }
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
-                      setFormData((p) => ({
-                        ...p,
-                        [props.id]: raw === "" || raw === "." || raw === "-" ? undefined : parseFloat(raw),
-                      }));
-                    }}
-                    placeholder={props.placeholder}
-                  />
-                </div>
-              );
-              const C = (props: { id: keyof TradeFormData; label: string; min?: number; placeholder?: string }) => (
-                <div>
-                  <Label htmlFor={String(props.id)}>{props.label}</Label>
-                  <Input
-                    id={String(props.id)}
-                    type="text"
-                    inputMode="numeric"
-                    value={
-                      textValues[String(props.id)] ??
-                      (formData[props.id] !== undefined && formData[props.id] !== null
-                        ? String(formData[props.id] as any)
-                        : "")
-                    }
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
-                      setFormData((p) => ({
-                        ...p,
-                        [props.id]: raw === "" || raw === "-" ? undefined : parseInt(raw || "0", 10),
-                      }));
-                    }}
-                    placeholder={props.placeholder}
-                  />
-                </div>
-              );
+              const renderN = (props: { id: keyof TradeFormData; label: string; step?: string; placeholder?: string }) => {
+                const textValue =
+                  textValues[String(props.id)] ??
+                  (formData[props.id] !== undefined && formData[props.id] !== null
+                    ? String(formData[props.id] as any)
+                    : "");
+                return (
+                  <div>
+                    <Label htmlFor={String(props.id)}>{props.label}</Label>
+                    <Input
+                      id={String(props.id)}
+                      type="text"
+                      inputMode="decimal"
+                      value={textValue}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
+                        if (raw === "" || raw === "." || raw === "-") {
+                          setFormData((p) => ({ ...p, [props.id]: undefined }));
+                        } else {
+                          const parsed = parseFloat(raw);
+                          if (!isNaN(parsed)) {
+                            setFormData((p) => ({ ...p, [props.id]: parsed }));
+                          }
+                        }
+                      }}
+                      placeholder={props.placeholder}
+                    />
+                  </div>
+                );
+              };
+              const renderC = (props: { id: keyof TradeFormData; label: string; min?: number; placeholder?: string }) => {
+                const textValue =
+                  textValues[String(props.id)] ??
+                  (formData[props.id] !== undefined && formData[props.id] !== null
+                    ? String(formData[props.id] as any)
+                    : "");
+                return (
+                  <div>
+                    <Label htmlFor={String(props.id)}>{props.label}</Label>
+                    <Input
+                      id={String(props.id)}
+                      type="text"
+                      inputMode="numeric"
+                      value={textValue}
+                      onChange={(e) => {
+                        const raw = e.target.value;
+                        setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
+                        if (raw === "" || raw === "-") {
+                          setFormData((p) => ({ ...p, [props.id]: undefined }));
+                        } else {
+                          const parsed = parseInt(raw, 10);
+                          if (!isNaN(parsed)) {
+                            setFormData((p) => ({ ...p, [props.id]: parsed }));
+                          }
+                        }
+                      }}
+                      placeholder={props.placeholder}
+                    />
+                  </div>
+                );
+              };
               switch (formData.contractType) {
                 case "put-credit-spread":
                   return (
                     <>
-                      <C id="numberOfContracts" label="Contracts" placeholder="1" />
-                      <N id="shortPutStrike" label="Short Put Strike" placeholder="145.00" />
-                      <N id="longPutStrike" label="Long Put Strike" placeholder="140.00" />
-                      <N id="creditReceived" label="Net Credit (per spread)" placeholder="1.25" />
+                      {renderC({ id: "numberOfContracts", label: "Contracts", placeholder: "1" })}
+                      {renderN({ id: "shortPutStrike", label: "Short Put Strike", placeholder: "145.00" })}
+                      {renderN({ id: "longPutStrike", label: "Long Put Strike", placeholder: "140.00" })}
+                      {renderN({ id: "creditReceived", label: "Net Credit (per spread)", placeholder: "1.25" })}
                     </>
                   );
                 case "call-credit-spread":
                   return (
                     <>
-                      <C id="numberOfContracts" label="Contracts" placeholder="1" />
-                      <N id="shortCallStrike" label="Short Call Strike" placeholder="155.00" />
-                      <N id="longCallStrike" label="Long Call Strike" placeholder="160.00" />
-                      <N id="creditReceived" label="Net Credit (per spread)" placeholder="1.10" />
+                      {renderC({ id: "numberOfContracts", label: "Contracts", placeholder: "1" })}
+                      {renderN({ id: "shortCallStrike", label: "Short Call Strike", placeholder: "155.00" })}
+                      {renderN({ id: "longCallStrike", label: "Long Call Strike", placeholder: "160.00" })}
+                      {renderN({ id: "creditReceived", label: "Net Credit (per spread)", placeholder: "1.10" })}
                     </>
                   );
                 case "long-call":
                 case "long-put":
                   return (
                     <>
-                      <C id="numberOfContracts" label="Contracts" placeholder="1" />
-                      <N id="optionStrike" label="Option Strike" placeholder="150.00" />
-                      <N id="debitPaid" label="Debit Paid (per contract)" placeholder="2.35" />
+                      {renderC({ id: "numberOfContracts", label: "Contracts", placeholder: "1" })}
+                      {renderN({ id: "optionStrike", label: "Option Strike", placeholder: "150.00" })}
+                      {renderN({ id: "debitPaid", label: "Debit Paid (per contract)", placeholder: "2.35" })}
                     </>
                   );
                 case "covered-call":
                   return (
                     <>
-                      <N id="sharesOwned" label="Shares Owned" step="1" placeholder="100" />
-                      <N id="callStrike" label="Call Strike" placeholder="160.00" />
-                      <N id="premiumReceived" label="Premium Received (per contract)" placeholder="1.35" />
+                      {renderN({ id: "sharesOwned", label: "Shares Owned", step: "1", placeholder: "100" })}
+                      {renderN({ id: "callStrike", label: "Call Strike", placeholder: "160.00" })}
+                      {renderN({ id: "premiumReceived", label: "Premium Received (per contract)", placeholder: "1.35" })}
                     </>
                   );
                 case "iron-condor":
                   return (
                     <>
-                      <C id="numberOfContracts" label="Contracts" placeholder="1" />
-                      <N id="shortPutStrike" label="Short Put Strike" placeholder="145.00" />
-                      <N id="longPutStrike" label="Long Put Strike" placeholder="140.00" />
-                      <N id="shortCallStrike" label="Short Call Strike" placeholder="160.00" />
-                      <N id="longCallStrike" label="Long Call Strike" placeholder="165.00" />
-                      <N id="creditReceived" label="Net Credit (per condor)" placeholder="2.10" />
+                      {renderC({ id: "numberOfContracts", label: "Contracts", placeholder: "1" })}
+                      {renderN({ id: "shortPutStrike", label: "Short Put Strike", placeholder: "145.00" })}
+                      {renderN({ id: "longPutStrike", label: "Long Put Strike", placeholder: "140.00" })}
+                      {renderN({ id: "shortCallStrike", label: "Short Call Strike", placeholder: "160.00" })}
+                      {renderN({ id: "longCallStrike", label: "Long Call Strike", placeholder: "165.00" })}
+                      {renderN({ id: "creditReceived", label: "Net Credit (per condor)", placeholder: "2.10" })}
                     </>
                   );
                 case "buy-hold":
                   return (
                     <>
-                      <N id="shares" label="Shares" step="1" placeholder="100" />
-                      <N id="entryPrice" label="Entry Price" placeholder="153.10" />
+                      {renderN({ id: "shares", label: "Shares", step: "1", placeholder: "100" })}
+                      {renderN({ id: "entryPrice", label: "Entry Price", placeholder: "153.10" })}
                     </>
                   );
               }

@@ -12,6 +12,7 @@ export async function POST(request: NextRequest) {
     const { 
       userId, 
       ipsId, 
+      strategyType,
       tradeData, 
       factorValues, 
       ipsScore,
@@ -24,6 +25,15 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
+    // Pre-compute safe numeric fields (avoid NaN inserts)
+    const credit = typeof tradeData?.creditReceived === 'number' ? tradeData.creditReceived : null;
+    const numC = typeof tradeData?.numberOfContracts === 'number' ? tradeData.numberOfContracts : null;
+    const shortStrike = typeof tradeData?.shortStrike === 'number' ? tradeData.shortStrike : null;
+    const longStrike = typeof tradeData?.longStrike === 'number' ? tradeData.longStrike : null;
+    const spreadWidth = shortStrike != null && longStrike != null ? Math.abs(shortStrike - longStrike) : null;
+    const maxGain = credit != null && numC != null ? credit * numC * 100 : null;
+    const maxLoss = spreadWidth != null && credit != null && numC != null ? (spreadWidth - credit) * numC * 100 : null;
+
     // Start transaction
     const { data: trade, error: tradeError } = await supabase
       .from('trades')
@@ -32,19 +42,21 @@ export async function POST(request: NextRequest) {
         ips_id: ipsId,
         ips_score_calculation_id: scoreId,
         status: 'prospective',
+        strategy_type: strategyType || tradeData?.contractType || 'unknown',
         name: tradeData.name,
         symbol: tradeData.symbol,
         contract_type: tradeData.contractType,
         current_price: tradeData.currentPrice,
         expiration_date: tradeData.expirationDate,
         number_of_contracts: tradeData.numberOfContracts,
-        short_strike: tradeData.shortStrike,
-        long_strike: tradeData.longStrike,
-        credit_received: tradeData.creditReceived,
+        short_strike: shortStrike,
+        long_strike: longStrike,
+        credit_received: credit,
         ips_score: ipsScore,
-        max_gain: (tradeData.creditReceived * tradeData.numberOfContracts * 100),
-        max_loss: ((Math.abs(tradeData.shortStrike - tradeData.longStrike) - tradeData.creditReceived) * tradeData.numberOfContracts * 100),
-        spread_width: Math.abs(tradeData.shortStrike - tradeData.longStrike),
+        max_gain: maxGain,
+        max_loss: maxLoss,
+        spread_width: spreadWidth,
+        entry_date: null, // not yet active
         created_at: new Date().toISOString()
       })
       .select()
@@ -132,7 +144,7 @@ async function updateTradeAnalytics(userId: string, ipsId: string) {
         });
     }
 
-    // Update IPS performance statistics
+    // Update IPS performance statistics (write back to ips_configurations)
     const { data: ipsStats } = await supabase
       .from('trades')
       .select('status, ips_score')
@@ -140,14 +152,15 @@ async function updateTradeAnalytics(userId: string, ipsId: string) {
 
     if (ipsStats) {
       const totalTrades = ipsStats.length;
-      const avgScore = ipsStats.reduce((sum, trade) => sum + (trade.ips_score || 0), 0) / totalTrades;
-      
+      const avgScore = totalTrades > 0
+        ? ipsStats.reduce((sum, trade) => sum + (trade.ips_score || 0), 0) / totalTrades
+        : 0;
+
       await supabase
-        .from('investment_performance_systems')
+        .from('ips_configurations')
         .update({
           total_trades: totalTrades,
-          avg_score: avgScore,
-          last_used: new Date().toISOString()
+          last_modified: new Date().toISOString()
         })
         .eq('id', ipsId);
     }
@@ -172,7 +185,7 @@ export async function GET(request: NextRequest) {
       .from('trades')
       .select(`
         *,
-        investment_performance_systems(name, description),
+        ips_configurations(name, description),
         trade_factors(
           factor_name,
           factor_value,
@@ -209,5 +222,49 @@ export async function GET(request: NextRequest) {
       },
       { status: 500 }
     );
+  }
+}
+
+export async function PATCH(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { ids, status, userId } = body as { ids: string[]; status: 'prospective'|'active'|'closed'|'expired'|'cancelled'; userId?: string };
+    if (!Array.isArray(ids) || ids.length === 0 || !status) {
+      return NextResponse.json({ error: 'ids[] and status required' }, { status: 400 });
+    }
+
+    // When moving to active, stamp entry_date
+    const updatePayload: any = { status };
+    if (status === 'active') updatePayload.entry_date = new Date().toISOString();
+
+    const { error } = await supabase
+      .from('trades')
+      .update(updatePayload)
+      .in('id', ids);
+
+    if (error) throw new Error(error.message);
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('Error PATCH /api/trades:', err);
+    return NextResponse.json({ error: 'Failed to update trades' }, { status: 500 });
+  }
+}
+
+export async function DELETE(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { ids } = body as { ids: string[] };
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json({ error: 'ids[] required' }, { status: 400 });
+    }
+
+    const { error } = await supabase.from('trades').delete().in('id', ids);
+    if (error) throw new Error(error.message);
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error('Error DELETE /api/trades:', err);
+    return NextResponse.json({ error: 'Failed to delete trades' }, { status: 500 });
   }
 }

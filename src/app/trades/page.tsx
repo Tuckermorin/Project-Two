@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import {
   TrendingUp,
@@ -254,6 +255,9 @@ export default function TradesPage() {
   const [calculatedScore, setCalculatedScore] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [prospectiveTrades, setProspectiveTrades] = useState<ProspectiveTrade[]>([]);
+  const [activeTrades, setActiveTrades] = useState<any[]>([]);
+  const [selectedProspective, setSelectedProspective] = useState<Set<string>>(new Set());
+  const [selectedActive, setSelectedActive] = useState<Set<string>>(new Set());
   const [loadingProspective, setLoadingProspective] = useState<boolean>(false);
 
   const userId = "user-123"; // TODO: replace with auth
@@ -364,6 +368,7 @@ export default function TradesPage() {
         } as ProspectiveTrade;
       });
       setProspectiveTrades(mapped);
+      setSelectedProspective(new Set());
     } catch (e) {
       console.error(e);
     } finally {
@@ -378,6 +383,44 @@ export default function TradesPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentView]);
+
+  // Fetch active trades
+  async function fetchActiveTrades() {
+    try {
+      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=active`, { cache: 'no-store' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Failed to load active trades');
+      setActiveTrades(json?.data || []);
+      setSelectedActive(new Set());
+    } catch (e) {
+      console.error(e);
+      setActiveTrades([]);
+    }
+  }
+
+  useEffect(() => {
+    if (currentView === 'active') fetchActiveTrades();
+  }, [currentView]);
+
+  async function bulkProspectiveToActive() {
+    if (selectedProspective.size === 0) return;
+    await fetch('/api/trades', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: Array.from(selectedProspective), status: 'active' })
+    });
+    await fetchProspectiveTrades();
+  }
+
+  async function bulkDeleteProspective() {
+    if (selectedProspective.size === 0) return;
+    await fetch('/api/trades', {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: Array.from(selectedProspective) })
+    });
+    await fetchProspectiveTrades();
+  }
 
   if (isLoading && currentView === "selection") {
     return (
@@ -396,9 +439,15 @@ export default function TradesPage() {
   if (currentView === "selection") {
     return (
       <div className="max-w-6xl mx-auto p-6">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Choose an IPS to Make a Trade</h1>
-          <p className="text-gray-600">Only active IPS configurations are shown</p>
+        <div className="mb-8 flex items-start justify-between">
+          <div>
+            <h1 className="text-3xl font-bold mb-2">Choose an IPS to Make a Trade</h1>
+            <p className="text-gray-600">Only active IPS configurations are shown</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setCurrentView('prospective')}>View Prospective Trades</Button>
+            <Button variant="outline" onClick={() => setCurrentView('active')}>View Active Trades</Button>
+          </div>
         </div>
 
         {activeIPSs.length === 0 ? (
@@ -639,10 +688,30 @@ export default function TradesPage() {
                   </Button>
                 </div>
               ) : (
+                <>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="text-sm text-gray-600">Selected: {selectedProspective.size}</div>
+                  <div className="flex gap-2">
+                    <Button variant="outline" onClick={bulkDeleteProspective} disabled={selectedProspective.size === 0}>Remove</Button>
+                    <Button onClick={bulkProspectiveToActive} disabled={selectedProspective.size === 0} className="bg-blue-600 text-white">Add to Active</Button>
+                    <Button variant="outline" onClick={() => (window.location.href = '/journal')}>A.I. Analysis</Button>
+                    <Button variant="outline" onClick={() => setCurrentView('selection')}>Place New Trade</Button>
+                    <Button variant="outline" onClick={() => setCurrentView('selection')}>Trade Dashboard</Button>
+                  </div>
+                </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="text-left text-gray-600">
                       <tr>
+                        <th className="py-2 pr-2">
+                          <Checkbox
+                            checked={selectedProspective.size > 0 && selectedProspective.size === prospectiveTrades.length}
+                            onCheckedChange={(checked) => {
+                              if (checked) setSelectedProspective(new Set(prospectiveTrades.map((x)=>x.id)));
+                              else setSelectedProspective(new Set());
+                            }}
+                          />
+                        </th>
                         <th className="py-2 pr-4">Created</th>
                         <th className="py-2 pr-4">IPS</th>
                         <th className="py-2 pr-4">Symbol</th>
@@ -651,6 +720,7 @@ export default function TradesPage() {
                         <th className="py-2 pr-4">Key Terms</th>
                         <th className="py-2 pr-4">Credit/Debit</th>
                         <th className="py-2 pr-4">Score</th>
+                        <th className="py-2 pr-4">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -683,8 +753,21 @@ export default function TradesPage() {
                             terms = `${fmt(d.shares)} sh @ ${fmt(d.entryPrice)}`;
                             break;
                         }
+                        const isSel = selectedProspective.has(t.id);
                         return (
                           <tr key={t.id} className="border-t">
+                            <td className="py-2 pr-2">
+                              <Checkbox
+                                checked={isSel}
+                                onCheckedChange={(checked)=>{
+                                  setSelectedProspective(prev=>{
+                                    const next = new Set(prev);
+                                    if (checked) next.add(t.id); else next.delete(t.id);
+                                    return next;
+                                  })
+                                }}
+                              />
+                            </td>
                             <td className="py-2 pr-4">{new Date(t.createdAt).toLocaleString()}</td>
                             <td className="py-2 pr-4">{t.ips.name}</td>
                             <td className="py-2 pr-4">{d.symbol}</td>
@@ -693,12 +776,33 @@ export default function TradesPage() {
                             <td className="py-2 pr-4">{terms}</td>
                             <td className="py-2 pr-4">{credit === undefined ? "—" : `$${fmt(credit)}`}</td>
                             <td className="py-2 pr-4">{t.score ? t.score.toFixed(1) : "—"}</td>
+                            <td className="py-2 pr-4">
+                              <div className="flex gap-2">
+                                <Button size="sm" variant="outline" onClick={() => (window.location.href = '/journal')}>AI</Button>
+                                <Button
+                                  size="sm"
+                                  onClick={async ()=>{
+                                    await fetch('/api/trades', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [t.id], status: 'active' }) });
+                                    await fetchProspectiveTrades();
+                                  }}
+                                >Activate</Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={async ()=>{
+                                    await fetch('/api/trades', { method:'DELETE', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [t.id] }) });
+                                    await fetchProspectiveTrades();
+                                  }}
+                                >Remove</Button>
+                              </div>
+                            </td>
                           </tr>
                         );
                       })}
                     </tbody>
                   </table>
                 </div>
+                </>
               )}
             </CardContent>
           </Card>
@@ -708,9 +812,10 @@ export default function TradesPage() {
   }
 
   // -----------------------------
-  // Active Trades view (stub)
+  // Active Trades view
   // -----------------------------
   if (currentView === "active") {
+    const fmtMoney = (v?: number | null) => (v == null ? '—' : `$${v.toFixed(2)}`);
     return (
       <div className="max-w-6xl mx-auto p-6">
         <div className="mb-6 flex items-center justify-between">
@@ -718,80 +823,78 @@ export default function TradesPage() {
             <h1 className="text-3xl font-bold">Active Trades</h1>
             <p className="text-gray-600">Monitor your current positions</p>
           </div>
-        <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setCurrentView("selection")}>
-              <Plus className="h-4 w-4 mr-2" /> New Trade
-            </Button>
-            <Button variant="outline" onClick={() => setCurrentView("prospective")}>View Prospective</Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setCurrentView('selection')}><Plus className="h-4 w-4 mr-2"/> New Trade</Button>
+            <Button variant="outline" onClick={() => setCurrentView('prospective')}>View Prospective</Button>
           </div>
         </div>
 
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2">
-                  <List className="h-5 w-5 text-blue-600" />
-                  <div>
-                    <div className="text-2xl font-bold">0</div>
-                    <div className="text-sm text-gray-600">Active Positions</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2">
-                  <DollarSign className="h-5 w-5 text-green-600" />
-                  <div>
-                    <div className="text-2xl font-bold">$0</div>
-                    <div className="text-sm text-gray-600">Total P&L</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2">
-                  <Target className="h-5 w-5 text-purple-600" />
-                  <div>
-                    <div className="text-2xl font-bold">$0</div>
-                    <div className="text-sm text-gray-600">Buying Power Used</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="p-4">
-                <div className="flex items-center gap-2">
-                  <BarChart3 className="h-5 w-5 text-orange-600" />
-                  <div>
-                    <div className="text-2xl font-bold">0</div>
-                    <div className="text-sm text-gray-600">Portfolio Delta</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <List className="h-5 w-5" /> Current Positions
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-center py-12">
-                <BarChart3 className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-gray-900 mb-2">No active trades</h3>
-                <p className="text-gray-600 mb-6">Executed trades will appear here with real-time P&L</p>
-                <Button onClick={() => setCurrentView("selection")}>
-                  <Plus className="h-4 w-4 mr-2" /> Create New Trade
-                </Button>
+        <Card>
+          <CardHeader>
+            <CardTitle>Current Positions</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {activeTrades.length === 0 ? (
+              <div className="text-center py-12 text-gray-600">No active trades.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-left text-gray-600">
+                    <tr>
+                      <th className="py-2 pr-2">
+                        <Checkbox
+                          checked={selectedActive.size>0 && selectedActive.size===activeTrades.length}
+                          onCheckedChange={(checked)=>{
+                            if (checked) setSelectedActive(new Set(activeTrades.map((r:any)=>r.id)));
+                            else setSelectedActive(new Set());
+                          }}
+                        />
+                      </th>
+                      <th className="py-2 pr-4">Name</th>
+                      <th className="py-2 pr-4">Exp. Date</th>
+                      <th className="py-2 pr-4">Contract</th>
+                      <th className="py-2 pr-4">Max Gain</th>
+                      <th className="py-2 pr-4">Max Loss</th>
+                      <th className="py-2 pr-4">IPS Score</th>
+                      <th className="py-2 pr-4">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeTrades.map((r:any)=>{
+                      const isSel = selectedActive.has(r.id);
+                      return (
+                        <tr key={r.id} className="border-t">
+                          <td className="py-2 pr-2"><Checkbox checked={isSel} onCheckedChange={(ch)=>{
+                            setSelectedActive(prev=>{ const next=new Set(prev); if (ch) next.add(r.id); else next.delete(r.id); return next;});
+                          }}/></td>
+                          <td className="py-2 pr-4">
+                            <div className="font-medium">{r.name || r.symbol}</div>
+                            <div className="text-xs text-gray-500">{r.symbol}</div>
+                          </td>
+                          <td className="py-2 pr-4">{r.expiration_date ? new Date(r.expiration_date).toLocaleDateString() : '—'}</td>
+                          <td className="py-2 pr-4">{r.contract_type?.replace(/-/g,' ')}</td>
+                          <td className="py-2 pr-4">{fmtMoney(r.max_gain)}</td>
+                          <td className="py-2 pr-4">{fmtMoney(r.max_loss)}</td>
+                          <td className="py-2 pr-4">{r.ips_score != null ? `${Math.round(r.ips_score)}/100` : '—'}</td>
+                          <td className="py-2 pr-4">
+                            <div className="flex gap-2">
+                              <Button size="sm" variant="outline" onClick={() => (window.location.href = '/journal')}>AI</Button>
+                              <Button size="sm" variant="outline" onClick={() => alert('View not implemented')}>View</Button>
+                              <Button size="sm" variant="destructive" onClick={async ()=>{
+                                await fetch('/api/trades', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [r.id], status: 'closed' }) });
+                                await fetchActiveTrades();
+                              }}>Close</Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            )}
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -958,33 +1061,40 @@ function EnhancedTradeEntryForm({
 
   // Strategy-specific field renderer
   function StrategyFields() {
-    const N = (props: { id: keyof TradeFormData; label: string; step?: string; placeholder?: string }) => (
-      <div>
-        <Label htmlFor={String(props.id)}>{props.label}</Label>
-        <Input
-          id={String(props.id)}
-          type="text"
-          inputMode="decimal"
-          value={
-            textValues[String(props.id)] ??
-            (formData[props.id] !== undefined && formData[props.id] !== null
-              ? String(formData[props.id] as any)
-              : "")
-          }
-          onChange={(e) => {
-            const raw = e.target.value;
-            setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
-            setFormData((p) => ({
-              ...p,
-              [props.id]: raw === "" || raw === "." || raw === "-" ? undefined : parseFloat(raw),
-            }));
-          }}
-          placeholder={props.placeholder}
-        />
-      </div>
-    );
+    const renderN = (props: { id: keyof TradeFormData; label: string; step?: string; placeholder?: string }) => {
+      const textValue =
+        textValues[String(props.id)] ??
+        (formData[props.id] !== undefined && formData[props.id] !== null
+          ? String(formData[props.id] as any)
+          : "");
 
-    const D = (props: { id: keyof TradeFormData; label: string }) => (
+      return (
+        <div>
+          <Label htmlFor={String(props.id)}>{props.label}</Label>
+          <Input
+            id={String(props.id)}
+            type="text"
+            inputMode="decimal"
+            value={textValue}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
+              if (raw === "" || raw === "." || raw === "-") {
+                setFormData((p) => ({ ...p, [props.id]: undefined }));
+              } else {
+                const parsed = parseFloat(raw);
+                if (!isNaN(parsed)) {
+                  setFormData((p) => ({ ...p, [props.id]: parsed }));
+                }
+              }
+            }}
+            placeholder={props.placeholder}
+          />
+        </div>
+      );
+    };
+
+    const renderD = (props: { id: keyof TradeFormData; label: string }) => (
       <div>
         <Label htmlFor={String(props.id)}>{props.label}</Label>
         <Input
@@ -997,89 +1107,96 @@ function EnhancedTradeEntryForm({
       </div>
     );
 
-    const C = (props: { id: keyof TradeFormData; label: string; min?: number; placeholder?: string }) => (
-      <div>
-        <Label htmlFor={String(props.id)}>{props.label}</Label>
-        <Input
-          id={String(props.id)}
-          type="text"
-          inputMode="numeric"
-          value={
-            textValues[String(props.id)] ??
-            (formData[props.id] !== undefined && formData[props.id] !== null
-              ? String(formData[props.id] as any)
-              : "")
-          }
-          onChange={(e) => {
-            const raw = e.target.value;
-            setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
-            setFormData((p) => ({
-              ...p,
-              [props.id]: raw === "" || raw === "-" ? undefined : parseInt(raw || "0", 10),
-            }));
-          }}
-          placeholder={props.placeholder}
-        />
-      </div>
-    );
+    const renderC = (props: { id: keyof TradeFormData; label: string; min?: number; placeholder?: string }) => {
+      const textValue =
+        textValues[String(props.id)] ??
+        (formData[props.id] !== undefined && formData[props.id] !== null
+          ? String(formData[props.id] as any)
+          : "");
+
+      return (
+        <div>
+          <Label htmlFor={String(props.id)}>{props.label}</Label>
+          <Input
+            id={String(props.id)}
+            type="text"
+            inputMode="numeric"
+            value={textValue}
+            onChange={(e) => {
+              const raw = e.target.value;
+              setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
+              if (raw === "" || raw === "-") {
+                setFormData((p) => ({ ...p, [props.id]: undefined }));
+              } else {
+                const parsed = parseInt(raw, 10);
+                if (!isNaN(parsed)) {
+                  setFormData((p) => ({ ...p, [props.id]: parsed }));
+                }
+              }
+            }}
+            placeholder={props.placeholder}
+          />
+        </div>
+      );
+    };
 
     switch (formData.contractType) {
       case "put-credit-spread":
         return (
           <>
-            <D id="expirationDate" label="Expiration Date" />
-            <C id="numberOfContracts" label="Contracts" placeholder="1" />
-            <N id="shortPutStrike" label="Short Put Strike" placeholder="145.00" />
-            <N id="longPutStrike" label="Long Put Strike" placeholder="140.00" />
-            <N id="creditReceived" label="Net Credit (per spread)" placeholder="1.25" />
+            {renderD({ id: "expirationDate", label: "Expiration Date" })}
+            {renderC({ id: "numberOfContracts", label: "Contracts", placeholder: "1" })}
+            {renderN({ id: "shortPutStrike", label: "Short Put Strike", placeholder: "145.00" })}
+            {renderN({ id: "longPutStrike", label: "Long Put Strike", placeholder: "140.00" })}
+            {renderN({ id: "creditReceived", label: "Net Credit (per spread)", placeholder: "1.25" })}
           </>
         );
       case "call-credit-spread":
         return (
           <>
-            <D id="expirationDate" label="Expiration Date" />
-            <C id="numberOfContracts" label="Contracts" placeholder="1" />
-            <N id="shortCallStrike" label="Short Call Strike" placeholder="155.00" />
-            <N id="longCallStrike" label="Long Call Strike" placeholder="160.00" />
-            <N id="creditReceived" label="Net Credit (per spread)" placeholder="1.10" />
+            {renderD({ id: "expirationDate", label: "Expiration Date" })}
+            {renderC({ id: "numberOfContracts", label: "Contracts", placeholder: "1" })}
+            {renderN({ id: "shortCallStrike", label: "Short Call Strike", placeholder: "155.00" })}
+            {renderN({ id: "longCallStrike", label: "Long Call Strike", placeholder: "160.00" })}
+            {renderN({ id: "creditReceived", label: "Net Credit (per spread)", placeholder: "1.10" })}
           </>
         );
       case "long-call":
       case "long-put":
         return (
           <>
-            <D id="expirationDate" label="Expiration Date" />
-            <C id="numberOfContracts" label="Contracts" placeholder="1" />
-            <N id="optionStrike" label="Option Strike" placeholder="150.00" />
-            <N id="debitPaid" label="Debit Paid (per contract)" placeholder="2.35" />
+            {renderD({ id: "expirationDate", label: "Expiration Date" })}
+            {renderC({ id: "numberOfContracts", label: "Contracts", placeholder: "1" })}
+            {renderN({ id: "optionStrike", label: "Option Strike", placeholder: "150.00" })}
+            {renderN({ id: "debitPaid", label: "Debit Paid (per contract)", placeholder: "2.35" })}
           </>
         );
       case "covered-call":
         return (
           <>
-            <D id="expirationDate" label="Expiration Date" />
-            <N id="sharesOwned" label="Shares Owned" step="1" placeholder="100" />
-            <N id="callStrike" label="Call Strike" placeholder="160.00" />
-            <N id="premiumReceived" label="Premium Received (per contract)" placeholder="1.35" />
+            {renderD({ id: "expirationDate", label: "Expiration Date" })}
+            {renderN({ id: "sharesOwned", label: "Shares Owned", step: "1", placeholder: "100" })}
+            {renderN({ id: "callStrike", label: "Call Strike", placeholder: "160.00" })}
+            {renderN({ id: "premiumReceived", label: "Premium Received (per contract)", placeholder: "1.35" })}
           </>
         );
       case "iron-condor":
         return (
           <>
-            <D id="expirationDate" label="Expiration Date" />
-            <C id="numberOfContracts" label="Contracts" placeholder="1" />
-            <N id="shortPutStrike" label="Short Put Strike" placeholder="145.00" />
-            <N id="longPutStrike" label="Long Put Strike" placeholder="140.00" />
-            <N id="shortCallStrike" label="Short Call Strike" placeholder="160.00" />
-            <N id="longCallStrike" label="Long Call Strike" placeholder="165.00" />
-            <N id="creditReceived" label="Net Credit (per condor)" placeholder="2.10" />
+            {renderD({ id: "expirationDate", label: "Expiration Date" })}
+            {renderC({ id: "numberOfContracts", label: "Contracts", placeholder: "1" })}
+            {renderN({ id: "shortPutStrike", label: "Short Put Strike", placeholder: "145.00" })}
+            {renderN({ id: "longPutStrike", label: "Long Put Strike", placeholder: "140.00" })}
+            {renderN({ id: "shortCallStrike", label: "Short Call Strike", placeholder: "160.00" })}
+            {renderN({ id: "longCallStrike", label: "Long Call Strike", placeholder: "165.00" })}
+            {renderN({ id: "creditReceived", label: "Net Credit (per condor)", placeholder: "2.10" })}
           </>
         );
       case "buy-hold":
         return (
           <>
-            <N id="shares" label="Shares" step="1" placeholder="100" />
-            <N id="entryPrice" label="Entry Price" placeholder="153.10" />
+            {renderN({ id: "shares", label: "Shares", step: "1", placeholder: "100" })}
+            {renderN({ id: "entryPrice", label: "Entry Price", placeholder: "153.10" })}
           </>
         );
     }

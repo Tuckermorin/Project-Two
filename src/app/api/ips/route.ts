@@ -31,6 +31,7 @@ export async function POST(req: NextRequest) {
       name,
       description,
       is_active = true,
+      strategies = [] as string[],
       factors = [] as NewFactor[],
     } = body || {};
 
@@ -49,7 +50,7 @@ export async function POST(req: NextRequest) {
     // 1) create IPS config - Use the same table as the frontend
     const { data: ipsRows, error: ipsErr } = await supabase
       .from('ips_configurations')
-      .insert([{ user_id, name, description, is_active }])
+      .insert([{ user_id, name, description, is_active, strategies }])
       .select('id')
       .single();
 
@@ -164,6 +165,7 @@ export async function PUT(req: NextRequest) {
       name,
       description,
       is_active = true,
+      strategies = [] as string[],
       factors = [] as NewFactor[],
     } = body || {};
 
@@ -174,7 +176,7 @@ export async function PUT(req: NextRequest) {
     // Update IPS configuration
     const { error: ipsErr } = await supabase
       .from('ips_configurations')
-      .update({ name, description, is_active })
+      .update({ name, description, is_active, strategies })
       .eq('id', id);
 
     if (ipsErr) {

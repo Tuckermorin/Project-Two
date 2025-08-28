@@ -293,6 +293,7 @@ export default function IPSPage() {
             name: name.trim(),
             description: description.trim(),
             is_active: true,
+            strategies: [],
             total_factors: 0,
             active_factors: 0,
             total_weight: 0,

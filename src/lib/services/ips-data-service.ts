@@ -387,6 +387,7 @@ class IPSDataService {
       name: ipsData.name || 'Untitled Strategy',
       description: ipsData.description || '',
       is_active: ipsData.is_active ?? true,
+      strategies: ipsData.strategies || [],
       factors: factors
     };
 
