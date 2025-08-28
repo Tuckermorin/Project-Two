@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import type { LoadedIPSFactors, FactorValueMap } from "@/lib/types";
 import type { IPSConfiguration } from "@/lib/services/ips-data-service";
 import { loadIPSFactors, fetchApiFactorValues } from "@/lib/factor-loader";
@@ -58,6 +59,7 @@ export function NewTradeEntryForm({
   onCancel,
   isLoading,
 }: TradeEntryFormProps) {
+  const router = useRouter();
   const [formData, setFormData] = useState<TradeFormData>({
     symbol: "",
     expirationDate: "",
@@ -66,6 +68,9 @@ export function NewTradeEntryForm({
     ipsFactors: {},
     apiFactors: {},
   });
+
+  // Keep raw text for numeric inputs so users can type freely (e.g. 145.5)
+  const [textValues, setTextValues] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setFormData((p) => ({ ...p, contractType: lockedContractType }));
@@ -100,15 +105,23 @@ export function NewTradeEntryForm({
     refreshApiValues(formData.symbol);
   }, [formData.symbol, factors.api.length]);
 
-  const handleSubmit = () => {
-    onSubmit(
-      {
-        ...formData,
-        ipsFactors: manualValues,
-        apiFactors: apiValues,
-      },
-      null
-    );
+  const handleScore = () => {
+    try {
+      const payload = {
+        ipsId: (selectedIPS as any).ips_id || (selectedIPS as any).id,
+        strategyLabel,
+        trade: {
+          ...formData,
+          ipsFactors: manualValues,
+          apiFactors: apiValues,
+        },
+      };
+      // Persist draft to sessionStorage for the scoring page
+      sessionStorage.setItem("tenxiv:trade-to-score", JSON.stringify(payload));
+      router.push("/trades/score");
+    } catch (e) {
+      console.error("Failed to queue trade for scoring", e);
+    }
   };
 
   return (
@@ -152,15 +165,22 @@ export function NewTradeEntryForm({
                   <Label htmlFor={String(props.id)}>{props.label}</Label>
                   <Input
                     id={String(props.id)}
-                    type="number"
-                    step={props.step ?? "0.01"}
-                    value={(formData[props.id] as any) ?? ""}
-                    onChange={(e) =>
+                    type="text"
+                    inputMode="decimal"
+                    value={
+                      textValues[String(props.id)] ??
+                      (formData[props.id] !== undefined && formData[props.id] !== null
+                        ? String(formData[props.id] as any)
+                        : "")
+                    }
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
                       setFormData((p) => ({
                         ...p,
-                        [props.id]: e.target.value === "" ? undefined : parseFloat(e.target.value),
-                      }))
-                    }
+                        [props.id]: raw === "" || raw === "." || raw === "-" ? undefined : parseFloat(raw),
+                      }));
+                    }}
                     placeholder={props.placeholder}
                   />
                 </div>
@@ -170,15 +190,22 @@ export function NewTradeEntryForm({
                   <Label htmlFor={String(props.id)}>{props.label}</Label>
                   <Input
                     id={String(props.id)}
-                    type="number"
-                    min={props.min ?? 1}
-                    value={(formData[props.id] as any) ?? ""}
-                    onChange={(e) =>
+                    type="text"
+                    inputMode="numeric"
+                    value={
+                      textValues[String(props.id)] ??
+                      (formData[props.id] !== undefined && formData[props.id] !== null
+                        ? String(formData[props.id] as any)
+                        : "")
+                    }
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
                       setFormData((p) => ({
                         ...p,
-                        [props.id]: e.target.value === "" ? undefined : parseInt(e.target.value),
-                      }))
-                    }
+                        [props.id]: raw === "" || raw === "-" ? undefined : parseInt(raw || "0", 10),
+                      }));
+                    }}
                     placeholder={props.placeholder}
                   />
                 </div>
@@ -262,14 +289,13 @@ export function NewTradeEntryForm({
           Cancel
         </Button>
         <Button
-          onClick={handleSubmit}
+          onClick={handleScore}
           disabled={isLoading}
           className="bg-blue-600 hover:bg-blue-700 text-white"
         >
-          Submit Prospective Trade
+          Score trade
         </Button>
       </div>
     </div>
   );
 }
-

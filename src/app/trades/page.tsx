@@ -254,6 +254,7 @@ export default function TradesPage() {
   const [calculatedScore, setCalculatedScore] = useState<number | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [prospectiveTrades, setProspectiveTrades] = useState<ProspectiveTrade[]>([]);
+  const [loadingProspective, setLoadingProspective] = useState<boolean>(false);
 
   const userId = "user-123"; // TODO: replace with auth
 
@@ -319,6 +320,64 @@ export default function TradesPage() {
     const score = (achieved / totalWeight) * 100;
     setCalculatedScore(score);
   }
+
+  // Fetch prospective trades from API (DB-backed)
+  async function fetchProspectiveTrades() {
+    try {
+      setLoadingProspective(true);
+      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=prospective`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || "Failed to load prospective trades");
+      const rows = (json?.data || []) as any[];
+      const mapped: ProspectiveTrade[] = rows.map((row) => {
+        const ct = String(row.contract_type || "");
+        const base: TradeFormData = {
+          symbol: row.symbol,
+          contractType: ct as any,
+          expirationDate: row.expiration_date || undefined,
+          numberOfContracts: row.number_of_contracts || undefined,
+          currentPrice: row.current_price || undefined,
+          // strikes/credit
+          shortPutStrike: row.short_strike || undefined,
+          longPutStrike: row.long_strike || undefined,
+          shortCallStrike: row.short_strike || undefined,
+          longCallStrike: row.long_strike || undefined,
+          creditReceived: row.credit_received || undefined,
+          // alt fields
+          premiumReceived: row.credit_received || undefined,
+          // not provided by API for now
+          optionStrike: undefined,
+          debitPaid: undefined,
+          sharesOwned: undefined,
+          callStrike: undefined,
+          shares: undefined,
+          entryPrice: undefined,
+          ipsFactors: {},
+          apiFactors: {},
+        };
+        return {
+          id: row.id,
+          ips: { id: row.ips_id, name: row.investment_performance_systems?.name || "IPS" },
+          data: base,
+          createdAt: row.created_at,
+          score: row.ips_score || undefined,
+        } as ProspectiveTrade;
+      });
+      setProspectiveTrades(mapped);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingProspective(false);
+    }
+  }
+
+  // Load prospective trades when entering that view
+  useEffect(() => {
+    if (currentView === "prospective") {
+      fetchProspectiveTrades();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentView]);
 
   if (isLoading && currentView === "selection") {
     return (
@@ -568,7 +627,9 @@ export default function TradesPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {prospectiveTrades.length === 0 ? (
+              {loadingProspective ? (
+                <div className="text-center py-12 text-gray-600">Loading prospective trades…</div>
+              ) : prospectiveTrades.length === 0 ? (
                 <div className="text-center py-12">
                   <TrendingUp className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                   <h3 className="text-lg font-medium text-gray-900 mb-2">No prospective trades</h3>
@@ -800,6 +861,7 @@ function EnhancedTradeEntryForm({
 
   const [apiStatus, setApiStatus] = useState<"connected" | "disconnected" | "loading">("connected");
   const [completionScore, setCompletionScore] = useState<number>(0);
+  const [textValues, setTextValues] = useState<Record<string, string>>({});
 
   const ips = selectedIPS as IPSWithRules;
   const factorRules = useMemo(() => normalizeIPSRules(ips), [ips]);
@@ -901,15 +963,22 @@ function EnhancedTradeEntryForm({
         <Label htmlFor={String(props.id)}>{props.label}</Label>
         <Input
           id={String(props.id)}
-          type="number"
-          step={props.step ?? "0.01"}
-          value={(formData[props.id] as any) ?? ""}
-          onChange={(e) =>
+          type="text"
+          inputMode="decimal"
+          value={
+            textValues[String(props.id)] ??
+            (formData[props.id] !== undefined && formData[props.id] !== null
+              ? String(formData[props.id] as any)
+              : "")
+          }
+          onChange={(e) => {
+            const raw = e.target.value;
+            setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
             setFormData((p) => ({
               ...p,
-              [props.id]: e.target.value === "" ? undefined : parseFloat(e.target.value),
-            }))
-          }
+              [props.id]: raw === "" || raw === "." || raw === "-" ? undefined : parseFloat(raw),
+            }));
+          }}
           placeholder={props.placeholder}
         />
       </div>
@@ -933,15 +1002,22 @@ function EnhancedTradeEntryForm({
         <Label htmlFor={String(props.id)}>{props.label}</Label>
         <Input
           id={String(props.id)}
-          type="number"
-          min={props.min ?? 1}
-          value={(formData[props.id] as any) ?? ""}
-          onChange={(e) =>
+          type="text"
+          inputMode="numeric"
+          value={
+            textValues[String(props.id)] ??
+            (formData[props.id] !== undefined && formData[props.id] !== null
+              ? String(formData[props.id] as any)
+              : "")
+          }
+          onChange={(e) => {
+            const raw = e.target.value;
+            setTextValues((prev) => ({ ...prev, [String(props.id)]: raw }));
             setFormData((p) => ({
               ...p,
-              [props.id]: e.target.value === "" ? undefined : parseInt(e.target.value),
-            }))
-          }
+              [props.id]: raw === "" || raw === "-" ? undefined : parseInt(raw || "0", 10),
+            }));
+          }}
           placeholder={props.placeholder}
         />
       </div>
@@ -1080,15 +1156,22 @@ function EnhancedTradeEntryForm({
               <Label htmlFor="currentPrice">Current Price (optional)</Label>
               <Input
                 id="currentPrice"
-                type="number"
-                step="0.01"
-                value={formData.currentPrice ?? ""}
-                onChange={(e) =>
+                type="text"
+                inputMode="decimal"
+                value={
+                  textValues.currentPrice ??
+                  (formData.currentPrice !== undefined && formData.currentPrice !== null
+                    ? String(formData.currentPrice)
+                    : "")
+                }
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  setTextValues((prev) => ({ ...prev, currentPrice: raw }));
                   setFormData((p) => ({
                     ...p,
-                    currentPrice: e.target.value === "" ? undefined : parseFloat(e.target.value),
-                  }))
-                }
+                    currentPrice: raw === "" || raw === "." || raw === "-" ? undefined : parseFloat(raw),
+                  }));
+                }}
                 placeholder="192.34"
               />
             </div>
