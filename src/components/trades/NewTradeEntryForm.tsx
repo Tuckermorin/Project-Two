@@ -49,6 +49,7 @@ interface TradeEntryFormProps {
   onSubmit: (formData: TradeFormData, score: number | null) => void;
   onCancel: () => void;
   isLoading: boolean;
+  initialData?: Partial<TradeFormData>;
 }
 
 export function NewTradeEntryForm({
@@ -58,13 +59,26 @@ export function NewTradeEntryForm({
   onSubmit,
   onCancel,
   isLoading,
+  initialData,
 }: TradeEntryFormProps) {
   const router = useRouter();
   const [formData, setFormData] = useState<TradeFormData>({
-    symbol: "",
-    expirationDate: "",
-    contractType: lockedContractType,
-    numberOfContracts: 1,
+    symbol: initialData?.symbol || "",
+    expirationDate: (initialData?.expirationDate as any) || "",
+    contractType: (initialData?.contractType as any) || lockedContractType,
+    numberOfContracts: initialData?.numberOfContracts ?? 1,
+    shortPutStrike: initialData?.shortPutStrike,
+    longPutStrike: initialData?.longPutStrike,
+    creditReceived: initialData?.creditReceived,
+    shortCallStrike: initialData?.shortCallStrike,
+    longCallStrike: initialData?.longCallStrike,
+    optionStrike: initialData?.optionStrike,
+    debitPaid: initialData?.debitPaid,
+    sharesOwned: initialData?.sharesOwned,
+    callStrike: initialData?.callStrike,
+    premiumReceived: initialData?.premiumReceived,
+    shares: initialData?.shares,
+    entryPrice: initialData?.entryPrice,
     ipsFactors: {},
     apiFactors: {},
   });
@@ -75,6 +89,11 @@ export function NewTradeEntryForm({
   useEffect(() => {
     setFormData((p) => ({ ...p, contractType: lockedContractType }));
   }, [lockedContractType]);
+
+  useEffect(() => {
+    if (!initialData) return;
+    setFormData((p) => ({ ...p, ...initialData } as any));
+  }, [initialData]);
 
   const [factors, setFactors] = useState<LoadedIPSFactors>({ api: [], manual: [] });
   const [manualValues, setManualValues] = useState<FactorValueMap>({});

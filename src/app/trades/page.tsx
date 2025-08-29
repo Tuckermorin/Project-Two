@@ -258,6 +258,8 @@ export default function TradesPage() {
   const [activeTrades, setActiveTrades] = useState<any[]>([]);
   const [selectedProspective, setSelectedProspective] = useState<Set<string>>(new Set());
   const [selectedActive, setSelectedActive] = useState<Set<string>>(new Set());
+  const [quotes, setQuotes] = useState<Record<string, number>>({});
+  const [editInitialData, setEditInitialData] = useState<any | null>(null);
   const [loadingProspective, setLoadingProspective] = useState<boolean>(false);
 
   const userId = "user-123"; // TODO: replace with auth
@@ -401,6 +403,52 @@ export default function TradesPage() {
   useEffect(() => {
     if (currentView === 'active') fetchActiveTrades();
   }, [currentView]);
+
+  // When active trades change, fetch quotes for percent-to-short calc
+  useEffect(() => {
+    if (currentView !== 'active' || activeTrades.length === 0) return;
+    const symbols = Array.from(new Set(activeTrades.map((r:any)=>r.symbol))).join(',');
+    fetch(`/api/market-data/quotes?symbols=${encodeURIComponent(symbols)}`)
+      .then(r=>r.json())
+      .then(json=>{
+        const map: Record<string, number> = {};
+        (json?.data || []).forEach((q:any)=>{ map[q.symbol] = q.currentPrice || q.last || 0; });
+        setQuotes(map);
+      }).catch(()=>setQuotes({}));
+  }, [activeTrades, currentView]);
+
+  // Detect ?edit=<tradeId> and prefill entry form
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    const editId = params.get('edit');
+    if (!editId) return;
+    (async () => {
+      try {
+        const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&id=${encodeURIComponent(editId)}`);
+        const json = await res.json();
+        const row = (json?.data || [])[0];
+        if (!row) return;
+        const ips = activeIPSs.find((i)=> (i as any).id === row.ips_id);
+        if (ips) setSelectedIPS(ips as any);
+        setCurrentView('entry');
+        setEditInitialData({
+          symbol: row.symbol,
+          expirationDate: row.expiration_date || '',
+          contractType: row.contract_type,
+          numberOfContracts: row.number_of_contracts || undefined,
+          shortPutStrike: row.contract_type === 'put-credit-spread' ? row.short_strike : undefined,
+          longPutStrike: row.contract_type === 'put-credit-spread' ? row.long_strike : undefined,
+          shortCallStrike: row.contract_type === 'call-credit-spread' ? row.short_strike : undefined,
+          longCallStrike: row.contract_type === 'call-credit-spread' ? row.long_strike : undefined,
+          creditReceived: row.credit_received || undefined,
+        });
+        params.delete('edit');
+        const url = `${window.location.pathname}?${params.toString()}`.replace(/[?]$/, '');
+        window.history.replaceState({}, '', url);
+      } catch (e) { console.error('Prefill edit failed', e); }
+    })();
+  }, [activeIPSs]);
 
   async function bulkProspectiveToActive() {
     if (selectedProspective.size === 0) return;
@@ -856,12 +904,26 @@ export default function TradesPage() {
                       <th className="py-2 pr-4">Max Gain</th>
                       <th className="py-2 pr-4">Max Loss</th>
                       <th className="py-2 pr-4">IPS Score</th>
+                      <th className="py-2 pr-4">% Current to Short</th>
+                      <th className="py-2 pr-4">Status</th>
                       <th className="py-2 pr-4">Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {activeTrades.map((r:any)=>{
                       const isSel = selectedActive.has(r.id);
+                      const price = quotes[r.symbol] ?? r.current_price ?? 0;
+                      let cushion: number | null = null;
+                      if (r.contract_type === 'put-credit-spread' && r.short_strike) {
+                        cushion = ((price - r.short_strike) / r.short_strike) * 100;
+                      } else if (r.contract_type === 'call-credit-spread' && r.short_strike) {
+                        cushion = ((r.short_strike - price) / r.short_strike) * 100;
+                      }
+                      let statusTxt = 'GOOD'; let statusClass = 'bg-green-50 text-green-700';
+                      if (cushion != null) {
+                        if (cushion < 0) { statusTxt = 'EXIT (LOSS)'; statusClass = 'bg-red-50 text-red-700'; }
+                        else if (cushion < 2) { statusTxt = 'WATCH'; statusClass = 'bg-yellow-50 text-yellow-700'; }
+                      }
                       return (
                         <tr key={r.id} className="border-t">
                           <td className="py-2 pr-2"><Checkbox checked={isSel} onCheckedChange={(ch)=>{
@@ -876,10 +938,13 @@ export default function TradesPage() {
                           <td className="py-2 pr-4">{fmtMoney(r.max_gain)}</td>
                           <td className="py-2 pr-4">{fmtMoney(r.max_loss)}</td>
                           <td className="py-2 pr-4">{r.ips_score != null ? `${Math.round(r.ips_score)}/100` : '—'}</td>
+                          <td className={`py-2 pr-4 ${cushion!=null && cushion<0 ? 'text-red-600' : 'text-green-600'}`}>{cushion!=null ? `${cushion.toFixed(2)}%` : '—'}</td>
+                          <td className="py-2 pr-4"><Badge className={statusClass}>{statusTxt}</Badge></td>
                           <td className="py-2 pr-4">
                             <div className="flex gap-2">
                               <Button size="sm" variant="outline" onClick={() => (window.location.href = '/journal')}>AI</Button>
-                              <Button size="sm" variant="outline" onClick={() => alert('View not implemented')}>View</Button>
+                              <Button size="sm" variant="outline" onClick={() => setCurrentView('active')}>View</Button>
+                              <Button size="sm" variant="outline" onClick={() => (window.location.href = `/trades?edit=${r.id}`)}>Edit</Button>
                               <Button size="sm" variant="destructive" onClick={async ()=>{
                                 await fetch('/api/trades', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [r.id], status: 'closed' }) });
                                 await fetchActiveTrades();

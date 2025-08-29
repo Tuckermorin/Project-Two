@@ -174,6 +174,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const userId = searchParams.get('userId');
     const status = searchParams.get('status') || 'prospective';
+    const id = searchParams.get('id');
     
     if (!userId) {
       return NextResponse.json({ 
@@ -181,7 +182,7 @@ export async function GET(request: NextRequest) {
       }, { status: 400 });
     }
 
-    const { data: trades, error } = await supabase
+    let query = supabase
       .from('trades')
       .select(`
         *,
@@ -200,8 +201,15 @@ export async function GET(request: NextRequest) {
         )
       `)
       .eq('user_id', userId)
-      .eq('status', status)
       .order('created_at', { ascending: false });
+
+    if (id) {
+      query = query.eq('id', id);
+    } else if (status) {
+      query = query.eq('status', status);
+    }
+
+    const { data: trades, error } = await query;
 
     if (error) {
       throw new Error(`Failed to fetch trades: ${error.message}`);
