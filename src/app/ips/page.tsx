@@ -520,7 +520,7 @@ export default function IPSPage() {
 
     setState((prev) => ({
       ...prev,
-      step: "selection",
+      step: "configuration",
       selectedStrategies: (ips as any).strategies || [],
       selectedFactors: selected,
       factorConfigurations: configurations,
@@ -815,15 +815,21 @@ const handleSaveIPS = async (ipsData: any) => {
           />
         )}
 
-        {state.step === "summary" && factorDefinitions && (
-          <IPSSummary
-            selectedFactors={state.selectedFactors}
-            factorConfigurations={state.factorConfigurations}
-            onSave={handleSaveIPS}
-            onBack={() => handleStepNavigation("configuration")}
-            factorDefinitions={factorDefinitions}
-          />
-        )}
+        {state.step === "summary" && factorDefinitions && (() => {
+          const current = allIPSs.find(i => i.id === state.currentIPSId) || null;
+          return (
+            <IPSSummary
+              selectedFactors={state.selectedFactors}
+              factorConfigurations={state.factorConfigurations}
+              onSave={handleSaveIPS}
+              onBack={() => handleStepNavigation("configuration")}
+              factorDefinitions={factorDefinitions}
+              isEditing={!!state.currentIPSId}
+              initialName={current?.name}
+              initialDescription={current?.description}
+            />
+          );
+        })()}
 
         {state.step === "scoring" && <TradeScoreDisplay onBack={() => handleStepNavigation("summary")} />}
       </div>

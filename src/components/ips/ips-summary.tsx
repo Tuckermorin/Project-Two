@@ -30,6 +30,8 @@ interface IPSSummaryProps {
   onSave: (ipsData: any) => void;
   factorDefinitions: any;
   isEditing?: boolean;
+  initialName?: string;
+  initialDescription?: string;
 }
 
 export function IPSSummary({ 
@@ -38,11 +40,21 @@ export function IPSSummary({
   onBack, 
   onSave, 
   factorDefinitions,
-  isEditing = false 
+  isEditing = false,
+  initialName,
+  initialDescription
 }: IPSSummaryProps) {
-  const [ipsName, setIPSName] = useState(isEditing ? 'Updated Strategy' : 'My Trading Strategy');
-  const [ipsDescription, setIPSDescription] = useState('');
+  const [ipsName, setIPSName] = useState<string>(initialName ?? (isEditing ? 'Updated Strategy' : 'My Trading Strategy'));
+  const [ipsDescription, setIPSDescription] = useState<string>(initialDescription ?? '');
   const [isSaving, setIsSaving] = useState(false);
+
+  // Sync defaults when editing an existing IPS
+  React.useEffect(() => {
+    if (isEditing) {
+      if (initialName !== undefined) setIPSName(initialName);
+      if (initialDescription !== undefined) setIPSDescription(initialDescription);
+    }
+  }, [isEditing, initialName, initialDescription]);
 
   const enabledFactors = Array.from(selectedFactors).filter(
     factorName => factorConfigurations[factorName]?.enabled
@@ -75,13 +87,6 @@ export function IPSSummary({
         description: ipsDescription.trim(),
         factors: enabledFactors,
         configurations: factorConfigurations,
-        criteria: {
-          // Extract some key criteria from configurations for quick access
-          minIV: 40, // You could derive this from factor configurations
-          maxDelta: 0.25,
-          targetROI: 6,
-          maxPositions: 3
-        }
       };
 
       await onSave(ipsData);

@@ -311,6 +311,8 @@ export function NewTradeEntryForm({
           values={apiValues}
           isConnected={!apiBusy}
           onRefresh={() => refreshApiValues(formData.symbol)}
+          editable
+          onChange={(key, value) => setApiValues((prev)=> ({ ...prev, [key]: value }))}
         />
         <ManualFactorsPanel
           factors={factors.manual}

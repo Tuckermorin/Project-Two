@@ -53,7 +53,7 @@ class DailyCounter {
   }
 }
 
-export const marketCache = new MemoryCache<any>(30 * 60 * 1000); // 30 min TTL
+export const marketCache = new MemoryCache<any>(3 * 60 * 60 * 1000); // 3 hour TTL
 export const dailyCounter = new DailyCounter();
 
 // configuration

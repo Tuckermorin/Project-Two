@@ -111,10 +111,72 @@ export default function HistoricTradesDashboard() {
   const [filterText, setFilterText] = useState('')
   const [reasonFilter, setReasonFilter] = useState<string>('')
   
-  // TODO: Replace with actual data from your state management or API
-  const trades: HistoricTrade[] = []
+  const [trades, setTrades] = useState<HistoricTrade[]>([])
+  const [loading, setLoading] = useState<boolean>(false)
+  const userId = 'user-123'
   const hasActiveIPS = false
   const activeIPSFactors: string[] = []
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true)
+        const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=closed`, { cache: 'no-store' })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json?.error || 'Failed to load closed trades')
+        const rows = (json?.data || []) as any[]
+        let closeMap: Record<string, any> = {}
+        try { const raw = localStorage.getItem('tenxiv:trade-closures'); closeMap = raw ? JSON.parse(raw) : {} } catch {}
+
+        const toTitle = (s:string)=> s.replace(/-/g,' ').replace(/\b\w/g,m=>m.toUpperCase())
+        const mapped: HistoricTrade[] = rows.map((r:any)=>{
+          const details = closeMap[r.id] || {}
+          const closedDate = details.date || r.updated_at || r.closed_at || r.created_at
+          const credit = Number(r.credit_received ?? 0) || 0
+          const closeCost = typeof details.costToClose === 'number' ? details.costToClose : undefined
+          const contracts = Number(r.number_of_contracts ?? 0) || 0
+          const actualPL = typeof details.plDollar === 'number' ? details.plDollar : (closeCost!=null ? (credit - closeCost) * contracts * 100 : 0)
+          const actualPLPercent = typeof details.plPercent === 'number' ? details.plPercent : (credit ? ((credit - (closeCost ?? 0))/credit)*100 : 0)
+          return {
+            id: r.id,
+            name: r.name || r.symbol,
+            placed: r.entry_date || r.created_at || '',
+            closedDate,
+            closedPrice: closeCost ?? 0,
+            contractType: toTitle(String(r.contract_type || '')),
+            contracts,
+            shortStrike: Number(r.short_strike ?? 0) || 0,
+            longStrike: Number(r.long_strike ?? 0) || 0,
+            creditReceived: credit,
+            premiumAtClose: closeCost ?? 0,
+            actualPL,
+            actualPLPercent,
+            maxGain: Number(r.max_gain ?? 0) || 0,
+            maxLoss: Number(r.max_loss ?? 0) || 0,
+            deltaShortLeg: Number(r.delta_short_leg ?? 0) || 0,
+            deltaAtClose: 0,
+            theta: Number(r.theta ?? 0) || 0,
+            thetaAtClose: 0,
+            vega: Number(r.vega ?? 0) || 0,
+            vegaAtClose: 0,
+            gamma: 0,
+            gammaAtClose: 0,
+            rho: 0,
+            rhoAtClose: 0,
+            ivAtEntry: Number(r.iv_at_entry ?? 0) || 0,
+            ivAtClose: 0,
+            sector: r.sector || '-',
+            closingReason: details.reason || 'Closed',
+            ipsScore: typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined,
+          } as HistoricTrade
+        })
+        setTrades(mapped)
+      } catch (e) {
+        console.error('Failed to load history', e)
+        setTrades([])
+      } finally { setLoading(false) }
+    }
+    load()
+  }, [])
 
   // Calculate summary statistics
   const stats = React.useMemo(() => {
@@ -353,12 +415,12 @@ export default function HistoricTradesDashboard() {
             onChange={(e) => setFilterText(e.target.value)}
             className="max-w-sm"
           />
-          <Select value={reasonFilter} onValueChange={setReasonFilter}>
+          <Select value={reasonFilter || 'all'} onValueChange={(v)=> setReasonFilter(v === 'all' ? '' : v)}>
             <SelectTrigger className="w-48">
               <SelectValue placeholder="All closing reasons" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All closing reasons</SelectItem>
+              <SelectItem value="all">All closing reasons</SelectItem>
               {closingReasons.map(reason => (
                 <SelectItem key={reason} value={reason}>{reason}</SelectItem>
               ))}

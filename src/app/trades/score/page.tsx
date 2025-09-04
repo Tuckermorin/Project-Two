@@ -305,10 +305,11 @@ export default function ScoreTradePage() {
 
   return (
     <div className="max-w-6xl mx-auto p-6 space-y-6">
-      <div>
+      <div className="flex items-center gap-2">
         <Button variant="outline" onClick={() => router.push("/trades")}> 
           <ArrowLeft className="h-4 w-4 mr-2" /> Back to Trades
         </Button>
+        <Button variant="outline" onClick={() => router.push('/trades?resume=scoring')}>Edit Inputs</Button>
       </div>
 
       <Card className="bg-gradient-to-r from-blue-50 to-purple-50 border-blue-200">

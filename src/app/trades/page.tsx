@@ -404,6 +404,56 @@ export default function TradesPage() {
     if (currentView === 'active') fetchActiveTrades();
   }, [currentView]);
 
+  // Resume from scoring page with prior draft
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('resume') !== 'scoring') return;
+    (async () => {
+      try {
+        const raw = sessionStorage.getItem('tenxiv:trade-to-score');
+        if (!raw) return;
+        const payload = JSON.parse(raw);
+        // Ensure IPS is selected
+        let ips = activeIPSs.find((i)=> (i as any).id === payload.ipsId) as any;
+        if (!ips) {
+          try {
+            const r = await fetch('/api/ips', { cache: 'no-store' });
+            const rows = await r.json();
+            ips = Array.isArray(rows) ? rows.find((x:any)=> x?.id === payload.ipsId) : null;
+          } catch {}
+        }
+        if (ips) setSelectedIPS(ips as any);
+        if (ips) setCurrentView('entry');
+        const t = payload.trade || {};
+        setEditInitialData({
+          name: t.name,
+          symbol: t.symbol,
+          expirationDate: t.expirationDate || '',
+          contractType: t.contractType,
+          numberOfContracts: t.numberOfContracts,
+          shortPutStrike: t.shortPutStrike,
+          longPutStrike: t.longPutStrike,
+          shortCallStrike: t.shortCallStrike,
+          longCallStrike: t.longCallStrike,
+          creditReceived: t.creditReceived,
+          optionStrike: t.optionStrike,
+          debitPaid: t.debitPaid,
+          sharesOwned: t.sharesOwned,
+          callStrike: t.callStrike,
+          premiumReceived: t.premiumReceived,
+          shares: t.shares,
+          entryPrice: t.entryPrice,
+        });
+        params.delete('resume');
+        const url = `${window.location.pathname}?${params.toString()}`.replace(/[?]$/, '');
+        window.history.replaceState({}, '', url);
+      } catch (e) {
+        console.warn('Failed to resume draft', e);
+      }
+    })();
+  }, [activeIPSs]);
+
   // When active trades change, fetch quotes for percent-to-short calc
   useEffect(() => {
     if (currentView !== 'active' || activeTrades.length === 0) return;

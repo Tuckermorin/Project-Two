@@ -104,8 +104,8 @@ export function MarketOverview() {
 
   useEffect(() => {
     fetchMarketData()
-    // 30 minutes to protect daily budget
-    const interval = setInterval(fetchMarketData, 30 * 60 * 1000)
+    // Refresh every 3 hours to reduce API usage
+    const interval = setInterval(fetchMarketData, 3 * 60 * 60 * 1000)
     return () => clearInterval(interval)
   }, [])
 

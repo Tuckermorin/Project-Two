@@ -79,107 +79,59 @@ export async function POST(request: NextRequest) {
       ? (ipsFactor as any).factor_definitions[0]
       : (ipsFactor as any).factor_definitions;
     
-    // Calculate individual factor score based on type and targets
+    // Operator-based target check with partial credit for closeness
     let individualScore = 0;
     let targetMet = false;
 
-    if (factorInfo?.data_type === 'rating') {
-        // Qualitative factors (1-5 scale)
-        individualScore = ((value - 1) / 4) * 100; // Convert 1-5 to 0-100
-        
-        if (ipsFactor.target_value) {
-        switch (ipsFactor.target_operator) {
-            case 'gte':
-            targetMet = value >= ipsFactor.target_value;
-            break;
-            case 'lte':
-            targetMet = value <= ipsFactor.target_value;
-            break;
-            case 'eq':
-            targetMet = value === ipsFactor.target_value;
-            break;
-            case 'range':
-            targetMet = value >= ipsFactor.target_value && 
-                        value <= (ipsFactor.target_value_max || ipsFactor.target_value);
-            break;
-        }
-        }
-    } else {
-        // Rest of your quantitative factors logic stays the same...
-        switch (factorName) {
-        case 'P/E Ratio':
-            // Optimal range around 15-25
-            if (value <= 15) individualScore = 100;
-            else if (value <= 25) individualScore = 100 - ((value - 15) * 3);
-            else individualScore = Math.max(0, 70 - ((value - 25) * 2));
-            break;
-            
-        case 'Beta':
-            // Depends on strategy preference
-            if (ipsFactor.preference_direction === 'lower') {
-            individualScore = Math.max(0, 100 - (value * 50)); // Prefer lower beta
-            } else if (ipsFactor.preference_direction === 'higher') {
-            individualScore = Math.min(100, value * 50); // Prefer higher beta
-            } else {
-            individualScore = Math.max(0, 100 - Math.abs(value - 1.0) * 50); // Prefer beta around 1.0
-            }
-            break;
-            
-        case 'Return on Equity TTM':
-            // Higher is better, but cap at reasonable levels
-            individualScore = Math.min(100, Math.max(0, (value / 25) * 100));
-            break;
-            
-        case 'Quarterly Revenue Growth YoY':
-            // Positive growth is good, but excessive growth might be unsustainable
-            if (value < 0) individualScore = Math.max(0, 50 + (value * 2));
-            else if (value <= 20) individualScore = 50 + (value * 2.5);
-            else individualScore = Math.max(70, 100 - ((value - 20) * 1.5));
-            break;
-            
-        case 'Dividend Yield':
-            // Moderate dividend yields are often preferred
-            if (value <= 0) individualScore = 20;
-            else if (value <= 3) individualScore = 50 + (value * 16.7);
-            else if (value <= 6) individualScore = 100 - ((value - 3) * 10);
-            else individualScore = Math.max(0, 70 - ((value - 6) * 5));
-            break;
-            
-        default:
-            // Generic scoring based on preference direction
-            if (ipsFactor.preference_direction === 'higher') {
-            individualScore = Math.min(100, Math.max(0, value * 2 + 30));
-            } else if (ipsFactor.preference_direction === 'lower') {
-            individualScore = Math.min(100, Math.max(0, 100 - (value * 2)));
-            } else {
-            // Target-based scoring
-            if (ipsFactor.target_value) {
-                const distance = Math.abs(value - ipsFactor.target_value);
-                individualScore = Math.max(0, 100 - (distance * 10));
-            } else {
-                individualScore = 50; // Neutral score if no clear preference
-            }
-            }
-        }
+    const tv = Number(ipsFactor.target_value);
+    const tvMax = Number(ipsFactor.target_value_max);
+    const val = Number(value);
 
-        // Check if target is met for quantitative factors
-        if (ipsFactor.target_value) {
-        switch (ipsFactor.target_operator) {
-            case 'gte':
-            targetMet = value >= ipsFactor.target_value;
-            break;
-            case 'lte':
-            targetMet = value <= ipsFactor.target_value;
-            break;
-            case 'eq':
-            targetMet = Math.abs(value - ipsFactor.target_value) < 0.01;
-            break;
-            case 'range':
-            targetMet = value >= ipsFactor.target_value && 
-                        value <= (ipsFactor.target_value_max || ipsFactor.target_value);
-            break;
+    switch (ipsFactor.target_operator) {
+      case 'gte':
+        targetMet = !Number.isNaN(tv) ? val >= tv : false;
+        break;
+      case 'lte':
+        targetMet = !Number.isNaN(tv) ? val <= tv : false;
+        break;
+      case 'eq':
+        targetMet = !Number.isNaN(tv) ? Math.abs(val - tv) < 1e-6 : false;
+        break;
+      case 'range':
+        targetMet = !Number.isNaN(tv) && !Number.isNaN(tvMax) ? val >= tv && val <= tvMax : false;
+        break;
+      default:
+        targetMet = true; // informational-only factor
+        break;
+    }
+
+    const clamp = (n:number)=> Math.max(0, Math.min(100, n));
+    if (targetMet) {
+      individualScore = 100;
+    } else {
+      switch (ipsFactor.target_operator) {
+        case 'gte':
+          individualScore = Number.isFinite(tv) && tv !== 0 ? clamp((val / tv) * 100) : 0;
+          break;
+        case 'lte':
+          individualScore = val !== 0 ? clamp((tv / val) * 100) : 0;
+          break;
+        case 'eq': {
+          const denom = Math.abs(tv) > 0 ? Math.abs(tv) : (Math.abs(val) || 1);
+          const relErr = Math.abs(val - tv) / denom;
+          individualScore = clamp((1 - relErr) * 100);
+          break;
         }
-        }
+        case 'range':
+          if (Number.isFinite(tv) && Number.isFinite(tvMax)) {
+            if (val < tv) individualScore = tv !== 0 ? clamp((val / tv) * 100) : 0;
+            else if (val > tvMax) individualScore = val !== 0 ? clamp((tvMax / val) * 100) : 0;
+            else individualScore = 100;
+          } else individualScore = 0;
+          break;
+        default:
+          individualScore = 0;
+      }
     }
 
     const weightedScore = (individualScore * weight) / 100;

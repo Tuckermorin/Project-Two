@@ -16,9 +16,11 @@ type ApiProps = {
   values: FactorValueMap;
   isConnected?: boolean;
   onRefresh?: () => void;
+  editable?: boolean;
+  onChange?: (key: string, value: number | string | boolean | null) => void;
 };
 
-export function ApiFactorsPanel({ factors, values, isConnected = true, onRefresh }: ApiProps) {
+export function ApiFactorsPanel({ factors, values, isConnected = true, onRefresh, editable = true, onChange }: ApiProps) {
   return (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
@@ -42,6 +44,7 @@ export function ApiFactorsPanel({ factors, values, isConnected = true, onRefresh
         {factors.length === 0 && <p className="text-sm text-muted-foreground">No API-driven factors for this IPS.</p>}
         {factors.map((f) => {
           const v = values[f.key];
+          const canEdit = editable && typeof onChange === 'function';
           return (
             <div key={f.key} className="grid grid-cols-12 gap-3 items-center">
               <div className="col-span-5">
@@ -55,7 +58,23 @@ export function ApiFactorsPanel({ factors, values, isConnected = true, onRefresh
                 )}
               </div>
               <div className="col-span-7">
-                <Input value={v === undefined || v === null ? "" : String(v)} readOnly className="bg-muted/40" />
+                {canEdit ? (
+                  <Input
+                    type={f.inputType === 'number' ? 'number' : 'text'}
+                    value={v === undefined || v === null ? '' : String(v)}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      if (f.inputType === 'number') {
+                        const num = raw === '' ? '' : Number(raw);
+                        onChange!(f.key, raw === '' || Number.isNaN(num) ? null : (num as any));
+                      } else {
+                        onChange!(f.key, raw);
+                      }
+                    }}
+                  />
+                ) : (
+                  <Input value={v === undefined || v === null ? '' : String(v)} readOnly className="bg-muted/40" />
+                )}
               </div>
             </div>
           );

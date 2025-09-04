@@ -4,6 +4,8 @@
 
 import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
@@ -34,6 +36,7 @@ interface Trade {
   ivAtEntry: number
   sector: string
   status: string
+  ipsScore?: number
   dateClosed?: string
   costToClose?: number
   percentOfCredit?: number
@@ -72,6 +75,7 @@ const allColumns: Column[] = [
   { key: 'ivAtEntry', label: 'IV at Entry' },
   { key: 'sector', label: 'Sector' },
   { key: 'status', label: 'Status' },
+  { key: 'ipsScore', label: 'IPS Score' },
   { key: 'dateClosed', label: 'Date Closed' },
   { key: 'costToClose', label: 'Cost to close' },
   { key: 'percentOfCredit', label: '% of credit' },
@@ -90,7 +94,7 @@ const defaultColumns = [
 ]
 
 // Simple view columns
-const simpleColumns = ['name', 'contractType', 'expDate', 'dte', 'maxGain', 'maxLoss', 'percentCurrentToShort', 'status']
+const simpleColumns = ['name', 'contractType', 'expDate', 'dte', 'maxGain', 'maxLoss', 'percentCurrentToShort', 'ipsScore', 'status']
 
 export default function ExcelStyleTradesDashboard() {
   // State
@@ -100,9 +104,97 @@ export default function ExcelStyleTradesDashboard() {
   const [sortConfig, setSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null)
   const [filterText, setFilterText] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
-  
-  // TODO: Replace with actual data from your state management or API
-  const trades: Trade[] = []
+  const [trades, setTrades] = useState<Trade[]>([])
+  const [loading, setLoading] = useState<boolean>(false)
+  const userId = 'user-123'
+
+  const toTitle = (s: string) => s.replace(/-/g, ' ').replace(/\b\w/g, m => m.toUpperCase())
+  const daysToExpiry = (exp: string): number => {
+    const d = new Date(exp)
+    if (isNaN(d.getTime())) return 0
+    const ms = d.setHours(0,0,0,0) - new Date().setHours(0,0,0,0)
+    return Math.ceil(ms / (1000*60*60*24))
+  }
+
+  useEffect(() => {
+    const load = async () => {
+      try {
+        setLoading(true)
+        const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=active`, { cache: 'no-store' })
+        const json = await res.json()
+        if (!res.ok) throw new Error(json?.error || 'Failed to load active trades')
+        const rows = (json?.data || []) as any[]
+        let quoteMap: Record<string, number> = {}
+        if (rows.length) {
+          const symbols = Array.from(new Set(rows.map((r:any)=>r.symbol))).join(',')
+          try {
+            const qRes = await fetch(`/api/market-data/quotes?symbols=${encodeURIComponent(symbols)}`)
+            const qJson = await qRes.json()
+            ;(qJson?.data || []).forEach((q:any)=>{
+              const price = Number(q.currentPrice ?? q.last ?? q.close ?? q.price)
+              if (!isNaN(price)) quoteMap[q.symbol] = price
+            })
+          } catch {}
+        }
+        const normalized: Trade[] = rows.map((r:any) => {
+          const current = quoteMap[r.symbol] ?? Number(r.current_price ?? 0) || 0
+          const short = Number(r.short_strike ?? 0) || 0
+          const percentToShort = short > 0 ? ((current - short) / short) * 100 : 0
+          const exp = r.expiration_date || ''
+          // crude growth proxy: prefer pl_percent if present, otherwise use % to short
+          const growthProxy = (typeof r.pl_percent === 'number' ? Number(r.pl_percent) : percentToShort) as number
+          let status = 'WATCH'
+          if (growthProxy >= 50) status = 'GOOD'
+          if (growthProxy <= -50 || (typeof r.pl_percent === 'number' && Number(r.pl_percent) <= -250)) status = 'EXIT'
+
+          const obj: Trade = {
+            id: r.id,
+            name: r.name || r.symbol,
+            placed: r.entry_date || r.created_at || '',
+            currentPrice: current,
+            expDate: exp,
+            dte: exp ? daysToExpiry(exp) : 0,
+            contractType: toTitle(String(r.contract_type || '')),
+            contracts: Number(r.number_of_contracts ?? 0) || 0,
+            shortStrike: Number(r.short_strike ?? 0) || 0,
+            longStrike: Number(r.long_strike ?? 0) || 0,
+            creditReceived: Number(r.credit_received ?? 0) || 0,
+            spreadWidth: Number(r.spread_width ?? 0) || 0,
+            maxGain: Number(r.max_gain ?? 0) || 0,
+            maxLoss: Number(r.max_loss ?? 0) || 0,
+            percentCurrentToShort: percentToShort,
+            deltaShortLeg: Number(r.delta_short_leg ?? 0) || 0,
+            theta: Number(r.theta ?? 0) || 0,
+            vega: Number(r.vega ?? 0) || 0,
+            ivAtEntry: Number(r.iv_at_entry ?? 0) || 0,
+            sector: r.sector || '-',
+            status,
+            ipsScore: typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined,
+            plPercent: typeof r.pl_percent === 'number' ? Number(r.pl_percent) : undefined,
+          }
+          return obj
+        })
+        // Auto-move expired (DTE < 0) to history (PATCH -> closed)
+        const expired = normalized.filter(t => t.dte < 0)
+        if (expired.length) {
+          try {
+            await fetch('/api/trades', {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ids: expired.map(e=>e.id), status: 'closed' })
+            })
+          } catch {}
+        }
+        setTrades(normalized.filter(t => t.dte >= 0))
+      } catch (e) {
+        console.error('Failed to load dashboard trades', e)
+        setTrades([])
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [])
   const hasActiveIPS = false
   const activeIPSFactors: string[] = []
 
@@ -172,6 +264,13 @@ export default function ExcelStyleTradesDashboard() {
       case 'percentCurrentToShort':
       case 'ivAtEntry':
         return `${value.toFixed(1)}%`
+      case 'ipsScore':
+        return typeof value === 'number' ? `${Math.round(value)}/100` : '-'
+      case 'status': {
+        const tag = String(value).toUpperCase()
+        const cls = tag === 'GOOD' ? 'bg-green-100 text-green-800 border-green-200' : tag === 'EXIT' ? 'bg-red-100 text-red-800 border-red-200' : 'bg-yellow-100 text-yellow-800 border-yellow-200'
+        return <Badge className={`${cls} border`}>{tag}</Badge>
+      }
       case 'deltaShortLeg':
       case 'theta':
       case 'vega':
@@ -195,6 +294,19 @@ export default function ExcelStyleTradesDashboard() {
     return allColumns.filter(col => baseColumns.includes(col.key))
   }, [viewMode, showIPS, hasActiveIPS, activeIPSFactors, visibleColumns])
 
+  if (loading && trades.length === 0) {
+    return (
+      <Card className="w-full">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Current Trades</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-12 text-gray-600">Loading active trades…</div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   // Empty state
   if (trades.length === 0) {
     return (
@@ -202,7 +314,7 @@ export default function ExcelStyleTradesDashboard() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Current Trades</CardTitle>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => (window.location.href = '/trades')}>
               <Calendar className="h-4 w-4 mr-2" />
               Add Trade
             </Button>
@@ -213,7 +325,7 @@ export default function ExcelStyleTradesDashboard() {
             <AlertCircle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
             <h3 className="text-lg font-semibold mb-2">No Active Trades</h3>
             <p className="text-gray-600 mb-4">Start by adding your first paper trade to track.</p>
-            <Button>
+            <Button onClick={() => (window.location.href = '/trades')}>
               Add Your First Trade
             </Button>
           </div>
@@ -223,6 +335,7 @@ export default function ExcelStyleTradesDashboard() {
   }
 
   return (
+    <>
     <Card className="w-full">
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
@@ -263,7 +376,7 @@ export default function ExcelStyleTradesDashboard() {
           )}
           
           {/* Add trade button */}
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" onClick={() => (window.location.href = '/trades')}>
             <Calendar className="h-4 w-4 mr-2" />
             Add Trade
           </Button>
@@ -279,12 +392,12 @@ export default function ExcelStyleTradesDashboard() {
             onChange={(e) => setFilterText(e.target.value)}
             className="max-w-sm"
           />
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
+          <Select value={statusFilter || 'all'} onValueChange={(v) => setStatusFilter(v === 'all' ? '' : v)}>
             <SelectTrigger className="w-40">
               <SelectValue placeholder="All statuses" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All statuses</SelectItem>
+              <SelectItem value="all">All statuses</SelectItem>
               <SelectItem value="active">Active</SelectItem>
               <SelectItem value="pending">Pending</SelectItem>
               <SelectItem value="closed">Closed</SelectItem>
@@ -336,12 +449,20 @@ export default function ExcelStyleTradesDashboard() {
                   {!showIPS && (
                     <td className="border border-gray-200 px-3 py-2">
                       <div className="flex gap-1">
-                        <Button variant="outline" size="sm" className="h-6 px-2 text-xs">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => (window.location.href = `/trades?edit=${trade.id}`)}
+                        >
                           Edit
                         </Button>
-                        <Button variant="outline" size="sm" className="h-6 px-2 text-xs">
-                          Close
-                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-6 px-2 text-xs"
+                          onClick={() => setClosing({ open: true, trade, costToClose: '', reason: 'Manual Close', date: new Date().toISOString().slice(0,10) })}
+                        >Close</Button>
                       </div>
                     </td>
                   )}
@@ -352,5 +473,50 @@ export default function ExcelStyleTradesDashboard() {
         </div>
       </CardContent>
     </Card>
+    {/* Close Trade Dialog */}
+    <Dialog open={closing.open} onOpenChange={(o)=> setClosing(prev => ({ ...prev, open: o }))}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Close Trade</DialogTitle>
+        </DialogHeader>
+        {closing.trade && (
+          <div className="space-y-3">
+            <div className="text-sm text-gray-600">{closing.trade.name}</div>
+            <div>
+              <Label className="text-sm">Close Date</Label>
+              <Input type="date" value={closing.date} onChange={(e)=> setClosing(prev => ({ ...prev, date: e.target.value }))} />
+            </div>
+            <div>
+              <Label className="text-sm">Closing Reason</Label>
+              <Input value={closing.reason} onChange={(e)=> setClosing(prev => ({ ...prev, reason: e.target.value }))} placeholder="e.g., Manual Close, Expired Profit" />
+            </div>
+            <div>
+              <Label className="text-sm">Cost to Close (per spread)</Label>
+              <Input inputMode="decimal" value={closing.costToClose} onChange={(e)=> setClosing(prev => ({ ...prev, costToClose: e.target.value }))} placeholder="e.g., 0.35" />
+              <div className="text-xs text-gray-500 mt-1">Initial credit: ${closing.trade.creditReceived.toFixed(2)} • Contracts: {closing.trade.contracts}</div>
+            </div>
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={()=> setClosing(prev => ({ ...prev, open: false }))}>Cancel</Button>
+          <Button onClick={async ()=>{
+            if (!closing.trade) return
+            const cc = parseFloat(closing.costToClose)
+            const valid = !isNaN(cc)
+            const contracts = closing.trade.contracts || 0
+            const credit = closing.trade.creditReceived || 0
+            const plDollar = valid ? (credit - cc) * contracts * 100 : undefined
+            const plPercent = valid && credit !== 0 ? ((credit - cc) / credit) * 100 : undefined
+            try { const raw = localStorage.getItem('tenxiv:trade-closures'); const obj = raw ? JSON.parse(raw) : {}; obj[closing.trade.id] = { date: closing.date, reason: closing.reason, costToClose: valid ? cc : null, plDollar, plPercent }; localStorage.setItem('tenxiv:trade-closures', JSON.stringify(obj)); } catch {}
+            try {
+              await fetch('/api/trades', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [closing.trade.id], status: 'closed' }) })
+              setTrades(prev => prev.filter(t => t.id !== closing.trade!.id))
+            } catch (e) { console.error('Close failed', e) }
+            setClosing(prev => ({ ...prev, open: false }))
+          }}>Confirm Close</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }
