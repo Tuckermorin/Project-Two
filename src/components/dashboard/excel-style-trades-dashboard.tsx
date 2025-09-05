@@ -286,7 +286,7 @@ export default function ExcelStyleTradesDashboard() {
       case 'dateClosed':
         return formatDate(value)
       case 'ipsScore':
-        return typeof value === 'number' ? `${Math.round(value)}/100` : '-'
+        return typeof value === 'number' ? `${value.toFixed(1)}/100` : '-'
       case 'status': {
         const tag = String(value).toUpperCase()
         const cls = tag === 'GOOD' ? 'bg-green-100 text-green-800 border-green-200' : tag === 'EXIT' ? 'bg-red-100 text-red-800 border-red-200' : 'bg-yellow-100 text-yellow-800 border-yellow-200'
