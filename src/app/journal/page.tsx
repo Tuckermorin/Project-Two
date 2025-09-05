@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { BookOpen, Plus, Calendar, Edit, Trash2 } from 'lucide-react'
+import { formatDate } from '@/lib/utils'
 
 interface JournalEntry {
   id: string
@@ -74,7 +75,7 @@ export default function JournalPage() {
     const endDate = new Date(date)
     endDate.setDate(date.getDate() + 6)
     
-    return `${date.toLocaleDateString()} - ${endDate.toLocaleDateString()}`
+    return `${formatDate(date)} - ${formatDate(endDate)}`
   }
 
   return (
@@ -193,7 +194,7 @@ export default function JournalPage() {
                         {getWeekDateRange(entry.weekOf)}
                       </span>
                       <Badge variant="outline">
-                        {new Date(entry.createdAt).toLocaleDateString()}
+                        {formatDate(entry.createdAt)}
                       </Badge>
                     </div>
                   </div>
