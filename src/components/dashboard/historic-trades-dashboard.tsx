@@ -261,10 +261,27 @@ export default function HistoricTradesDashboard() {
     return <ArrowDown className="h-3 w-3 ml-1" />
   }
 
+  const currencyFormatter = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  })
+
+  const percentFormatter = new Intl.NumberFormat('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
+
+  const formatDate = (value: string) => {
+    const d = new Date(value)
+    if (isNaN(d.getTime())) return value
+    return d.toLocaleDateString()
+  }
+
   // Format value for display
   const formatValue = (value: any, column: Column) => {
     if (value === null || value === undefined) return '-'
-    
+
     switch(column.key) {
       case 'creditReceived':
       case 'premiumAtClose':
@@ -272,11 +289,14 @@ export default function HistoricTradesDashboard() {
       case 'maxGain':
       case 'maxLoss':
       case 'closedPrice':
-        return `$${Math.abs(value).toFixed(2)}`
+        return currencyFormatter.format(value)
       case 'actualPLPercent':
       case 'ivAtEntry':
       case 'ivAtClose':
-        return `${value.toFixed(1)}%`
+        return `${percentFormatter.format(value)}%`
+      case 'placed':
+      case 'closedDate':
+        return formatDate(value)
       case 'deltaShortLeg':
       case 'deltaAtClose':
       case 'theta':
@@ -386,16 +406,16 @@ export default function HistoricTradesDashboard() {
           <div className="bg-gray-50 p-3 rounded">
             <p className="text-xs text-gray-600">Total P/L</p>
             <p className={`text-lg font-semibold ${stats.totalPL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
-              ${Math.abs(stats.totalPL).toFixed(2)}
+              {currencyFormatter.format(stats.totalPL)}
             </p>
           </div>
           <div className="bg-gray-50 p-3 rounded">
             <p className="text-xs text-gray-600">Avg Win</p>
-            <p className="text-lg font-semibold text-green-600">${stats.avgWin.toFixed(2)}</p>
+            <p className="text-lg font-semibold text-green-600">{currencyFormatter.format(stats.avgWin)}</p>
           </div>
           <div className="bg-gray-50 p-3 rounded">
             <p className="text-xs text-gray-600">Avg Loss</p>
-            <p className="text-lg font-semibold text-red-600">${stats.avgLoss.toFixed(2)}</p>
+            <p className="text-lg font-semibold text-red-600">{currencyFormatter.format(stats.avgLoss)}</p>
           </div>
           <div className="bg-gray-50 p-3 rounded">
             <p className="text-xs text-gray-600">Profit Factor</p>
