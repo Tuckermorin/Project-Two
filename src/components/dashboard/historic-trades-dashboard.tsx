@@ -310,7 +310,7 @@ export default function HistoricTradesDashboard() {
         return value.toFixed(3)
       case 'ipsScore':
       case 'ipsAtClose':
-        return value ? `${value}/100` : '-'
+        return typeof value === 'number' ? `${value.toFixed(1)}/100` : '-'
       default:
         return value
     }
