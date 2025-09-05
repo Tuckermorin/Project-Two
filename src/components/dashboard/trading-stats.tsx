@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Activity, DollarSign, TrendingUp } from 'lucide-react'
+import { formatNumber } from '@/lib/utils'
 
 interface TradingStatsProps {
   activeTrades: number
@@ -67,7 +68,7 @@ export function TradingStats({
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">
-            {winRate !== null ? `${winRate.toFixed(1)}%` : '--'}
+            {winRate !== null ? `${formatNumber(winRate)}%` : '--'}
           </div>
           <p className="text-xs text-muted-foreground">
             {winRate === null ? 'No completed trades' : 'Historical performance'}

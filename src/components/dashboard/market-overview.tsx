@@ -6,6 +6,7 @@ import React, { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { AlertCircle, TrendingUp, TrendingDown, RefreshCw, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { formatNumber } from '@/lib/utils'
 
 interface MarketIndex {
   symbol: string
@@ -75,9 +76,9 @@ export function MarketOverview() {
         return {
           symbol: d.symbol,
           name: getIndexName(d.symbol),
-          price: `$${Number(d.currentPrice).toFixed(2)}`,
-          change: `${isPositive ? '+' : ''}$${Math.abs(Number(d.priceChange)).toFixed(2)}`,
-          changePercent: `${isPositive ? '+' : ''}${Number(d.priceChangePercent).toFixed(2)}%`,
+          price: `$${formatNumber(Number(d.currentPrice))}`,
+          change: `${isPositive ? '+' : ''}$${formatNumber(Math.abs(Number(d.priceChange)))}`,
+          changePercent: `${isPositive ? '+' : ''}${formatNumber(Number(d.priceChangePercent))}%`,
           isPositive,
           lastUpdated: new Date(d.lastUpdated).toISOString(),
         }
