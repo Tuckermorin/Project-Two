@@ -483,7 +483,7 @@ export default function ExcelStyleTradesDashboard() {
                           size="sm"
                           className="h-6 px-2 text-xs"
                           onClick={() => setClosing({ open: true, trade, costToClose: '', reason: 'Manual Close', date: new Date().toISOString().slice(0,10) })}
-                        >Close</Button>
+                        >Action Needed</Button>
                       </div>
                     </td>
                   )}
@@ -498,7 +498,7 @@ export default function ExcelStyleTradesDashboard() {
     <Dialog open={closing.open} onOpenChange={(o)=> setClosing(prev => ({ ...prev, open: o }))}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Close Trade</DialogTitle>
+          <DialogTitle>Mark Trade as Action Needed</DialogTitle>
         </DialogHeader>
         {closing.trade && (
           <div className="space-y-3">
@@ -530,11 +530,11 @@ export default function ExcelStyleTradesDashboard() {
             const plPercent = valid && credit !== 0 ? ((credit - cc) / credit) * 100 : undefined
             try { const raw = localStorage.getItem('tenxiv:trade-closures'); const obj = raw ? JSON.parse(raw) : {}; obj[closing.trade.id] = { date: closing.date, reason: closing.reason, costToClose: valid ? cc : null, plDollar, plPercent }; localStorage.setItem('tenxiv:trade-closures', JSON.stringify(obj)); } catch {}
             try {
-              await fetch('/api/trades', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [closing.trade.id], status: 'closed' }) })
+              await fetch('/api/trades', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [closing.trade.id], status: 'action_needed' }) })
               setTrades(prev => prev.filter(t => t.id !== closing.trade!.id))
             } catch (e) { console.error('Close failed', e) }
             setClosing(prev => ({ ...prev, open: false }))
-          }}>Confirm Close</Button>
+          }}>Send to Action Needed</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -3,6 +3,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -37,7 +38,7 @@ import { NewTradeEntryForm } from "@/components/trades/NewTradeEntryForm";
 // Local types + normalizer (builder-driven IPS)
 // -----------------------------
 
-type ViewType = "selection" | "entry" | "prospective" | "active";
+type ViewType = "selection" | "entry" | "prospective" | "active" | "action_needed";
 
 type ContractType =
   | "put-credit-spread"
@@ -256,11 +257,38 @@ export default function TradesPage() {
   const [isLoading, setIsLoading] = useState<boolean>(true);
   const [prospectiveTrades, setProspectiveTrades] = useState<ProspectiveTrade[]>([]);
   const [activeTrades, setActiveTrades] = useState<any[]>([]);
+  const [actionNeededTrades, setActionNeededTrades] = useState<any[]>([]);
   const [selectedProspective, setSelectedProspective] = useState<Set<string>>(new Set());
   const [selectedActive, setSelectedActive] = useState<Set<string>>(new Set());
+  const [selectedActionNeeded, setSelectedActionNeeded] = useState<Set<string>>(new Set());
   const [quotes, setQuotes] = useState<Record<string, number>>({});
   const [editInitialData, setEditInitialData] = useState<any | null>(null);
   const [loadingProspective, setLoadingProspective] = useState<boolean>(false);
+  const [closingDialog, setClosingDialog] = useState<{
+    open: boolean;
+    trade: any | null;
+    closeDate: string;
+    closeMethod: string;
+    underlyingPriceAtClose: string;
+    costToClosePerSpread: string;
+    exitPremiumPerContract: string;
+    contractsClosed: string;
+    commissionsTotal: string;
+    feesTotal: string;
+    notes: string;
+  }>({
+    open: false,
+    trade: null,
+    closeDate: new Date().toISOString().slice(0,10),
+    closeMethod: 'manual_close',
+    underlyingPriceAtClose: '',
+    costToClosePerSpread: '',
+    exitPremiumPerContract: '',
+    contractsClosed: '',
+    commissionsTotal: '',
+    feesTotal: '',
+    notes: ''
+  });
 
   const userId = "user-123"; // TODO: replace with auth
 
@@ -402,6 +430,24 @@ export default function TradesPage() {
 
   useEffect(() => {
     if (currentView === 'active') fetchActiveTrades();
+  }, [currentView]);
+
+  // Fetch action needed trades
+  async function fetchActionNeededTrades() {
+    try {
+      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=action_needed`, { cache: 'no-store' });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Failed to load trades needing action');
+      setActionNeededTrades(json?.data || []);
+      setSelectedActionNeeded(new Set());
+    } catch (e) {
+      console.error(e);
+      setActionNeededTrades([]);
+    }
+  }
+
+  useEffect(() => {
+    if (currentView === 'action_needed') fetchActionNeededTrades();
   }, [currentView]);
 
   // Resume from scoring page with prior draft
@@ -924,6 +970,7 @@ export default function TradesPage() {
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setCurrentView('selection')}><Plus className="h-4 w-4 mr-2"/> New Trade</Button>
             <Button variant="outline" onClick={() => setCurrentView('prospective')}>View Prospective</Button>
+            <Button variant="outline" onClick={() => setCurrentView('action_needed')}>View Action Needed</Button>
           </div>
         </div>
 
@@ -996,9 +1043,9 @@ export default function TradesPage() {
                               <Button size="sm" variant="outline" onClick={() => setCurrentView('active')}>View</Button>
                               <Button size="sm" variant="outline" onClick={() => (window.location.href = `/trades?edit=${r.id}`)}>Edit</Button>
                               <Button size="sm" variant="destructive" onClick={async ()=>{
-                                await fetch('/api/trades', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [r.id], status: 'closed' }) });
+                                await fetch('/api/trades', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [r.id], status: 'action_needed' }) });
                                 await fetchActiveTrades();
-                              }}>Close</Button>
+                              }}>Move to Action Needed</Button>
                             </div>
                           </td>
                         </tr>
@@ -1010,6 +1057,193 @@ export default function TradesPage() {
             )}
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  // -----------------------------
+  // Action Needed view
+  // -----------------------------
+  if (currentView === 'action_needed') {
+    const fmt = (n?: number | null) => (n == null ? '—' : `${n}`);
+    const closeMethods = [
+      { key: 'manual_close', label: 'Manual Close' },
+      { key: 'expired_worthless', label: 'Expired — Worthless' },
+      { key: 'expired_itm_assigned', label: 'Expired — ITM Assigned' },
+      { key: 'rolled', label: 'Rolled' },
+      { key: 'stop_hit', label: 'Stop Hit' },
+      { key: 'target_hit', label: 'Target Hit' },
+      { key: 'risk_rules_exit', label: 'Risk Rules Exit' },
+      { key: 'other', label: 'Other' },
+    ];
+
+    return (
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">Action Needed</h1>
+            <p className="text-gray-600">Enter final details to close trades</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setCurrentView('active')}>View Active</Button>
+            <Button variant="outline" onClick={() => setCurrentView('prospective')}>View Prospective</Button>
+          </div>
+        </div>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Trades Requiring Close Details</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {actionNeededTrades.length === 0 ? (
+              <div className="text-center py-12 text-gray-600">No trades need action.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="text-left text-gray-600">
+                    <tr>
+                      <th className="py-2 pr-2"></th>
+                      <th className="py-2 pr-4">Name</th>
+                      <th className="py-2 pr-4">Symbol</th>
+                      <th className="py-2 pr-4">Contract</th>
+                      <th className="py-2 pr-4">Expiry</th>
+                      <th className="py-2 pr-4">Contracts</th>
+                      <th className="py-2 pr-4">Credit</th>
+                      <th className="py-2 pr-4">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {actionNeededTrades.map((r:any)=>{
+                      return (
+                        <tr key={r.id} className="border-t">
+                          <td className="py-2 pr-2">•</td>
+                          <td className="py-2 pr-4">{r.name || r.symbol}</td>
+                          <td className="py-2 pr-4">{r.symbol}</td>
+                          <td className="py-2 pr-4">{String(r.contract_type || '').replace(/-/g,' ')}</td>
+                          <td className="py-2 pr-4">{r.expiration_date ? new Date(r.expiration_date).toLocaleDateString() : '—'}</td>
+                          <td className="py-2 pr-4">{fmt(r.number_of_contracts)}</td>
+                          <td className="py-2 pr-4">{r.credit_received!=null ? `$${Number(r.credit_received).toFixed(2)}` : '—'}</td>
+                          <td className="py-2 pr-4">
+                            <div className="flex gap-2">
+                              <Button size="sm" onClick={() => setClosingDialog({
+                                open: true,
+                                trade: r,
+                                closeDate: new Date().toISOString().slice(0,10),
+                                closeMethod: 'manual_close',
+                                underlyingPriceAtClose: '',
+                                costToClosePerSpread: '',
+                                exitPremiumPerContract: '',
+                                contractsClosed: String(r.number_of_contracts ?? ''),
+                                commissionsTotal: '',
+                                feesTotal: '',
+                                notes: '',
+                              })}>Enter Close Details</Button>
+                              <Button size="sm" variant="outline" onClick={async ()=>{
+                                await fetch('/api/trades', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [r.id], status: 'active' }) });
+                                await fetchActionNeededTrades();
+                              }}>Back to Active</Button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Close Details Dialog */}
+        <Dialog open={closingDialog.open} onOpenChange={(o)=> setClosingDialog(prev => ({ ...prev, open: o }))}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Enter Close Details</DialogTitle>
+            </DialogHeader>
+            {closingDialog.trade && (
+              <div className="space-y-3">
+                <div className="text-sm text-gray-600">{closingDialog.trade.name || closingDialog.trade.symbol}</div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-sm">Close Date</Label>
+                    <Input type="date" value={closingDialog.closeDate} onChange={(e)=> setClosingDialog(prev => ({ ...prev, closeDate: e.target.value }))} />
+                  </div>
+                  <div>
+                    <Label className="text-sm">Method</Label>
+                    <select className="w-full border rounded h-9 px-2 text-sm" value={closingDialog.closeMethod} onChange={(e)=> setClosingDialog(prev => ({ ...prev, closeMethod: e.target.value }))}>
+                      {closeMethods.map(m=> <option key={m.key} value={m.key}>{m.label}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <Label className="text-sm">Underlying @ Close</Label>
+                    <Input inputMode="decimal" value={closingDialog.underlyingPriceAtClose} onChange={(e)=> setClosingDialog(prev => ({ ...prev, underlyingPriceAtClose: e.target.value }))} placeholder="e.g., 153.25" />
+                  </div>
+                  {/* Strategy-specific fields */}
+                  {(['put-credit-spread','call-credit-spread','iron-condor'].includes(String(closingDialog.trade.contract_type))) ? (
+                    <>
+                      <div>
+                        <Label className="text-sm">Cost to Close (per spread)</Label>
+                        <Input inputMode="decimal" value={closingDialog.costToClosePerSpread} onChange={(e)=> setClosingDialog(prev => ({ ...prev, costToClosePerSpread: e.target.value }))} placeholder="e.g., 0.35" />
+                      </div>
+                      <div>
+                        <Label className="text-sm">Contracts Closed</Label>
+                        <Input inputMode="numeric" value={closingDialog.contractsClosed} onChange={(e)=> setClosingDialog(prev => ({ ...prev, contractsClosed: e.target.value }))} placeholder="e.g., 1" />
+                      </div>
+                    </>
+                  ) : null}
+                  {(['long-call','long-put','covered-call'].includes(String(closingDialog.trade.contract_type))) ? (
+                    <>
+                      <div>
+                        <Label className="text-sm">Exit Premium (per contract)</Label>
+                        <Input inputMode="decimal" value={closingDialog.exitPremiumPerContract} onChange={(e)=> setClosingDialog(prev => ({ ...prev, exitPremiumPerContract: e.target.value }))} placeholder="e.g., 2.10" />
+                      </div>
+                      <div>
+                        <Label className="text-sm">Contracts Closed</Label>
+                        <Input inputMode="numeric" value={closingDialog.contractsClosed} onChange={(e)=> setClosingDialog(prev => ({ ...prev, contractsClosed: e.target.value }))} placeholder="e.g., 1" />
+                      </div>
+                    </>
+                  ) : null}
+                  <div>
+                    <Label className="text-sm">Commissions</Label>
+                    <Input inputMode="decimal" value={closingDialog.commissionsTotal} onChange={(e)=> setClosingDialog(prev => ({ ...prev, commissionsTotal: e.target.value }))} placeholder="e.g., 1.30" />
+                  </div>
+                  <div>
+                    <Label className="text-sm">Fees</Label>
+                    <Input inputMode="decimal" value={closingDialog.feesTotal} onChange={(e)=> setClosingDialog(prev => ({ ...prev, feesTotal: e.target.value }))} placeholder="e.g., 0.65" />
+                  </div>
+                  <div className="md:col-span-2">
+                    <Label className="text-sm">Notes</Label>
+                    <Input value={closingDialog.notes} onChange={(e)=> setClosingDialog(prev => ({ ...prev, notes: e.target.value }))} placeholder="Optional notes" />
+                  </div>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button variant="outline" onClick={()=> setClosingDialog(prev => ({ ...prev, open: false }))}>Cancel</Button>
+              <Button onClick={async ()=>{
+                if (!closingDialog.trade) return;
+                const payload: any = {
+                  tradeId: closingDialog.trade.id,
+                  closeMethod: closingDialog.closeMethod,
+                  closeDate: closingDialog.closeDate,
+                  underlyingPriceAtClose: closingDialog.underlyingPriceAtClose ? parseFloat(closingDialog.underlyingPriceAtClose) : null,
+                  costToClosePerSpread: closingDialog.costToClosePerSpread ? parseFloat(closingDialog.costToClosePerSpread) : null,
+                  exitPremiumPerContract: closingDialog.exitPremiumPerContract ? parseFloat(closingDialog.exitPremiumPerContract) : null,
+                  contractsClosed: closingDialog.contractsClosed ? parseInt(closingDialog.contractsClosed, 10) : null,
+                  commissionsTotal: closingDialog.commissionsTotal ? parseFloat(closingDialog.commissionsTotal) : null,
+                  feesTotal: closingDialog.feesTotal ? parseFloat(closingDialog.feesTotal) : null,
+                  notes: closingDialog.notes || null,
+                };
+                const res = await fetch('/api/trades/close', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+                if (!res.ok) {
+                  console.error('Close failed');
+                }
+                await fetchActionNeededTrades();
+                setClosingDialog(prev => ({ ...prev, open: false }));
+              }}>Save & Close Trade</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }

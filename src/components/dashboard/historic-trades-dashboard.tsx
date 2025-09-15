@@ -129,13 +129,15 @@ export default function HistoricTradesDashboard() {
 
         const toTitle = (s:string)=> s.replace(/-/g,' ').replace(/\b\w/g,m=>m.toUpperCase())
         const mapped: HistoricTrade[] = rows.map((r:any)=>{
-          const details = closeMap[r.id] || {}
-          const closedDate = details.date || r.updated_at || r.closed_at || r.created_at
+          const closureArr = Array.isArray(r.trade_closures) ? r.trade_closures : (r.trade_closures ? [r.trade_closures] : [])
+          const closure = closureArr[0] || null
+          const details = closure || closeMap[r.id] || {}
+          const closedDate = details.close_date || details.date || r.closed_at || r.updated_at || r.created_at
           const credit = Number(r.credit_received ?? 0) || 0
-          const closeCost = typeof details.costToClose === 'number' ? details.costToClose : undefined
-          const contracts = Number(r.number_of_contracts ?? 0) || 0
-          const actualPL = typeof details.plDollar === 'number' ? details.plDollar : (closeCost!=null ? (credit - closeCost) * contracts * 100 : 0)
-          const actualPLPercent = typeof details.plPercent === 'number' ? details.plPercent : (credit ? ((credit - (closeCost ?? 0))/credit)*100 : 0)
+          const closeCost = typeof details.cost_to_close_per_spread === 'number' ? details.cost_to_close_per_spread : (typeof details.costToClose === 'number' ? details.costToClose : undefined)
+          const contracts = Number(r.number_of_contracts ?? details.contractsClosed ?? 0) || 0
+          const actualPL = typeof details.realized_pl === 'number' ? details.realized_pl : (typeof details.plDollar === 'number' ? details.plDollar : (closeCost!=null ? (credit - closeCost) * contracts * 100 : 0))
+          const actualPLPercent = typeof details.realized_pl_percent === 'number' ? details.realized_pl_percent : (typeof details.plPercent === 'number' ? details.plPercent : (credit ? ((credit - (closeCost ?? 0))/credit)*100 : 0))
           return {
             id: r.id,
             name: r.name || r.symbol,
@@ -165,7 +167,7 @@ export default function HistoricTradesDashboard() {
             ivAtEntry: Number(r.iv_at_entry ?? 0) || 0,
             ivAtClose: 0,
             sector: r.sector || '-',
-            closingReason: details.reason || 'Closed',
+            closingReason: details.close_method || details.reason || 'Closed',
             ipsScore: typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined,
           } as HistoricTrade
         })

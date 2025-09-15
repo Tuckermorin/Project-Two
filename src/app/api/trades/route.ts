@@ -198,7 +198,8 @@ export async function GET(request: NextRequest) {
           factors_used,
           targets_met,
           target_percentage
-        )
+        ),
+        trade_closures(*)
       `)
       .eq('user_id', userId)
       .order('created_at', { ascending: false });
@@ -236,7 +237,7 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
-    const { ids, status, userId } = body as { ids: string[]; status: 'prospective'|'active'|'closed'|'expired'|'cancelled'; userId?: string };
+    const { ids, status, userId } = body as { ids: string[]; status: 'prospective'|'active'|'action_needed'|'closed'|'expired'|'cancelled'; userId?: string };
     if (!Array.isArray(ids) || ids.length === 0 || !status) {
       return NextResponse.json({ error: 'ids[] and status required' }, { status: 400 });
     }
@@ -244,6 +245,7 @@ export async function PATCH(request: NextRequest) {
     // When moving to active, stamp entry_date
     const updatePayload: any = { status };
     if (status === 'active') updatePayload.entry_date = new Date().toISOString();
+    if (status === 'closed') updatePayload.closed_at = new Date().toISOString();
 
     const { error } = await supabase
       .from('trades')
