@@ -108,6 +108,21 @@ export default function ExcelStyleTradesDashboard() {
   const [loading, setLoading] = useState<boolean>(false)
   const userId = 'user-123'
 
+  // Close/action-needed dialog state (local UI helper)
+  const [closing, setClosing] = useState<{
+    open: boolean;
+    trade: Trade | null;
+    costToClose: string;
+    reason: string;
+    date: string;
+  }>({
+    open: false,
+    trade: null,
+    costToClose: '',
+    reason: 'manual close',
+    date: new Date().toISOString().slice(0, 10),
+  })
+
   const toTitle = (s: string) => s.replace(/-/g, ' ').replace(/\b\w/g, m => m.toUpperCase())
   const daysToExpiry = (exp: string): number => {
     const d = new Date(exp)
@@ -141,11 +156,12 @@ export default function ExcelStyleTradesDashboard() {
           const short = Number(r.short_strike ?? 0) || 0
           const percentToShort = short > 0 ? ((current - short) / short) * 100 : 0
           const exp = r.expiration_date || ''
-          // crude growth proxy: prefer pl_percent if present, otherwise use % to short
-          const growthProxy = (typeof r.pl_percent === 'number' ? Number(r.pl_percent) : percentToShort) as number
-          let status = 'WATCH'
-          if (growthProxy >= 50) status = 'GOOD'
-          if (growthProxy <= -50 || (typeof r.pl_percent === 'number' && Number(r.pl_percent) <= -250)) status = 'EXIT'
+          // WATCH only if IPS score < 75 or % to short < 5%
+          const ipsScore = typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined
+          const watch = (ipsScore != null && ipsScore < 75) || (percentToShort < 5)
+          let status: 'GOOD' | 'WATCH' | 'EXIT' = 'GOOD'
+          if (watch) status = 'WATCH'
+          else if (percentToShort < 0) status = 'EXIT'
 
           const obj: Trade = {
             id: r.id,
@@ -482,8 +498,9 @@ export default function ExcelStyleTradesDashboard() {
                           variant="outline"
                           size="sm"
                           className="h-6 px-2 text-xs"
-                          onClick={() => setClosing({ open: true, trade, costToClose: '', reason: 'Manual Close', date: new Date().toISOString().slice(0,10) })}
+                          onClick={() => setClosing({ open: true, trade, costToClose: '', reason: 'manual close', date: new Date().toISOString().slice(0,10) })}
                         >Action Needed</Button>
+                        
                       </div>
                     </td>
                   )}
@@ -509,7 +526,17 @@ export default function ExcelStyleTradesDashboard() {
             </div>
             <div>
               <Label className="text-sm">Closing Reason</Label>
-              <Input value={closing.reason} onChange={(e)=> setClosing(prev => ({ ...prev, reason: e.target.value }))} placeholder="e.g., Manual Close, Expired Profit" />
+              <Select value={closing.reason} onValueChange={(v)=> setClosing(prev => ({ ...prev, reason: v }))}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select reason" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="manual close">Manual Close</SelectItem>
+                  <SelectItem value="expired">Expired</SelectItem>
+                  <SelectItem value="exit (profit)">Exit (Profit)</SelectItem>
+                  <SelectItem value="exit (loss)">Exit (Loss)</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
             <div>
               <Label className="text-sm">Cost to Close (per spread)</Label>

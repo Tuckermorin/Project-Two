@@ -38,7 +38,7 @@ import { NewTradeEntryForm } from "@/components/trades/NewTradeEntryForm";
 // Local types + normalizer (builder-driven IPS)
 // -----------------------------
 
-type ViewType = "selection" | "entry" | "prospective" | "active" | "action_needed";
+type ViewType = "selection" | "entry" | "prospective" | "active" | "action_needed" | "analyze";
 
 type ContractType =
   | "put-credit-spread"
@@ -289,6 +289,19 @@ export default function TradesPage() {
     feesTotal: '',
     notes: ''
   });
+
+  // AI screenshot analyze dialog state
+  const [aiDialog, setAiDialog] = useState<{
+    open: boolean;
+    ipsId: string | null;
+    file: File | null;
+    loading: boolean;
+    results: any | null;
+    error?: string;
+  }>({ open: false, ipsId: null, file: null, loading: false, results: null });
+
+  // AI analyze results for full-screen review
+  const [aiResults, setAiResults] = useState<any | null>(null);
 
   const userId = "user-123"; // TODO: replace with auth
 
@@ -581,6 +594,30 @@ export default function TradesPage() {
   // Selection view: show active IPS tiles (driven by builder rules)
   // -----------------------------
   if (currentView === "selection") {
+    async function handleAnalyze() {
+      if (!aiDialog.file || !aiDialog.ipsId) return;
+      try {
+        setAiDialog((p)=> ({ ...p, loading: true, error: undefined }));
+        const ips = activeIPSs.find((i)=> (i as any).id === aiDialog.ipsId) as any;
+        const fd = new FormData();
+        fd.append('file', aiDialog.file);
+        if (ips) fd.append('ips', JSON.stringify(ips));
+        // Encourage the model to output suggestions matching IPS strategy
+        try {
+          const mapped = mapIPSToContractType(ips);
+          if (mapped?.type) fd.append('preferred_type', mapped.type);
+        } catch {}
+        const res = await fetch('/api/ai/options-scan', { method: 'POST', body: fd });
+        const json = await res.json();
+        if (!res.ok || !json?.success) throw new Error(json?.error || 'Analyze failed');
+        setAiDialog((p)=> ({ ...p, results: json.data, loading: false }));
+        setAiResults(json.data || null);
+        setAiDialog((p)=> ({ ...p, open: false }));
+        setCurrentView('analyze' as any);
+      } catch (e:any) {
+        setAiDialog((p)=> ({ ...p, loading: false, error: e?.message || 'Analyze failed' }));
+      }
+    }
     return (
       <div className="max-w-6xl mx-auto p-6">
         <div className="mb-8 flex items-start justify-between">
@@ -591,6 +628,9 @@ export default function TradesPage() {
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setCurrentView('prospective')}>View Prospective Trades</Button>
             <Button variant="outline" onClick={() => setCurrentView('active')}>View Active Trades</Button>
+            <Button onClick={() => setAiDialog(p=> ({ ...p, open: true, ipsId: (activeIPSs[0] as any)?.id || null }))}>
+              <FileText className="h-4 w-4 mr-2" /> Analyze Screenshot (AI)
+            </Button>
           </div>
         </div>
 
@@ -683,6 +723,37 @@ export default function TradesPage() {
             })}
           </div>
         )}
+        {/* Analyze Screenshot Dialog */}
+        <Dialog open={aiDialog.open} onOpenChange={(o)=> setAiDialog((p)=> ({ ...p, open: o }))}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Analyze Options Screenshot</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-3">
+              <div>
+                <Label className="text-sm">Choose IPS</Label>
+                <select className="w-full border rounded h-9 px-2 text-sm" value={aiDialog.ipsId ?? ''} onChange={(e)=> setAiDialog(p=> ({ ...p, ipsId: e.target.value || null }))}>
+                  <option value="">Select an IPS…</option>
+                  {activeIPSs.map((ips:any)=> (
+                    <option key={ips.id} value={ips.id}>{ips.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <Label className="text-sm">Upload Screenshot</Label>
+                <input type="file" accept="image/*" onChange={(e)=> setAiDialog(p=> ({ ...p, file: e.target.files?.[0] || null }))} />
+              </div>
+              {aiDialog.error && (<div className="text-sm text-red-600">{aiDialog.error}</div>)}
+              <div className="flex gap-2">
+                <Button variant="outline" onClick={()=> setAiDialog(p=> ({ ...p, open: false, results: null, file: null }))}>Close</Button>
+                <Button disabled={!aiDialog.file || !aiDialog.ipsId || aiDialog.loading} onClick={handleAnalyze}>
+                  {aiDialog.loading ? (<><RefreshCw className="h-4 w-4 mr-2 animate-spin"/> Analyzing…</>) : 'Analyze'}
+                </Button>
+              </div>
+              {/* Suggestions now shown on a dedicated page for clarity */}
+            </div>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   }
@@ -714,6 +785,7 @@ export default function TradesPage() {
               onSubmit={(fd, score) => handleTradeSubmit(fd, score)}
               onCancel={() => setCurrentView("selection")}
               isLoading={isLoading}
+              initialData={editInitialData || undefined}
             />
           );
         })()}
@@ -1017,9 +1089,12 @@ export default function TradesPage() {
                         cushion = ((r.short_strike - price) / r.short_strike) * 100;
                       }
                       let statusTxt = 'GOOD'; let statusClass = 'bg-green-50 text-green-700';
-                      if (cushion != null) {
-                        if (cushion < 0) { statusTxt = 'EXIT (LOSS)'; statusClass = 'bg-red-50 text-red-700'; }
-                        else if (cushion < 2) { statusTxt = 'WATCH'; statusClass = 'bg-yellow-50 text-yellow-700'; }
+                      const ipsScoreVal = r.ips_score != null ? Number(r.ips_score) : null;
+                      const watchFlag = (ipsScoreVal != null && ipsScoreVal < 75) || (cushion != null && cushion < 5);
+                      if (cushion != null && cushion < 0) {
+                        statusTxt = 'EXIT (LOSS)'; statusClass = 'bg-red-50 text-red-700';
+                      } else if (watchFlag) {
+                        statusTxt = 'WATCH'; statusClass = 'bg-yellow-50 text-yellow-700';
                       }
                       return (
                         <tr key={r.id} className="border-t">
@@ -1061,6 +1136,105 @@ export default function TradesPage() {
     );
   }
 
+  // -----------------------------
+  // Analyze Results view
+  // -----------------------------
+  if (currentView === 'analyze') {
+    const suggestions: any[] = Array.isArray(aiResults?.suggestions) ? aiResults.suggestions : [];
+    const sorted = [...suggestions].sort((a,b)=> {
+      const sa = Number(a.score ?? 0);
+      const sb = Number(b.score ?? 0);
+      if (isFinite(sb - sa) && sb !== sa) return sb - sa;
+      // fallback: prefer higher credit, lower debit
+      const ca = Number(a.creditReceived ?? 0);
+      const cb = Number(b.creditReceived ?? 0);
+      if (cb !== ca) return cb - ca;
+      const da = Number(a.debitPaid ?? Infinity);
+      const db = Number(b.debitPaid ?? Infinity);
+      return da - db;
+    });
+    const fmt = (n:any)=> (n==null || n==='') ? '—' : typeof n==='number' ? (Math.abs(n)>=1? n.toFixed(2): n.toString()) : String(n);
+    const ipsForScan = activeIPSs.find((i:any)=> i.id === aiDialog.ipsId) as any;
+    const mapped = ipsForScan ? mapIPSToContractType(ipsForScan) : null;
+    return (
+      <div className="max-w-6xl mx-auto p-6">
+        <div className="mb-6 flex items-center justify-between">
+          <div>
+            <h1 className="text-3xl font-bold">AI Suggestions</h1>
+            <p className="text-gray-600">Most optimal first based on the screenshot{mapped ? ` • Strategy: ${mapped.label}` : ''}</p>
+          </div>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={()=> setCurrentView('selection')}>Back to IPS Selection</Button>
+          </div>
+        </div>
+
+        {sorted.length === 0 ? (
+          <Card>
+            <CardContent className="py-6 text-gray-800">
+              <div className="font-medium mb-1">No suggestions returned by AI</div>
+              <div className="text-sm text-gray-600 mb-3">
+                {aiResults?.explanation || (aiResults?.meta?.originalCount > 0 && aiResults?.meta?.filteredCount === 0
+                  ? `The analyzer found ${aiResults?.meta?.originalCount} candidate(s), but they did not match your IPS strategy${mapped ? ` (${mapped.label})` : ''}.`
+                  : 'The analyzer could not read enough information from the screenshot to form valid trades. Ensure the option chain rows (strikes, bid/ask, delta) are clearly visible and not cropped.')}
+              </div>
+              <div className="text-xs text-gray-500">
+                Tips:
+                <ul className="list-disc ml-5 mt-1 space-y-1">
+                  <li>Zoom in on the chain so one expiry fits the screen.</li>
+                  <li>Include headers and columns (Strike, Bid/Ask, Delta).</li>
+                  <li>Capture the correct side for your strategy{mapped ? ` (${mapped.label})` : ''}.</li>
+                </ul>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="space-y-3">
+            {sorted.map((s:any, idx:number)=> (
+              <Card key={idx}>
+                <CardContent className="p-4 flex items-center justify-between">
+                  <div className="text-sm">
+                    <div className="font-medium">{(s.contractType || '').replace(/-/g,' ')} {s.symbol || aiResults?.symbol || ''}</div>
+                    <div className="text-gray-600">
+                      Exp: {fmt(s.expirationDate)}
+                      {s.shortPutStrike!=null ? <> • P {fmt(s.shortPutStrike)}/{fmt(s.longPutStrike)}</> : null}
+                      {s.shortCallStrike!=null ? <> • C {fmt(s.shortCallStrike)}/{fmt(s.longCallStrike)}</> : null}
+                      {s.optionStrike!=null ? <> • K {fmt(s.optionStrike)}</> : null}
+                      {s.creditReceived!=null ? <> • Credit ${fmt(s.creditReceived)}</> : null}
+                      {s.debitPaid!=null ? <> • Debit ${fmt(s.debitPaid)}</> : null}
+                      {s.score!=null ? <> • Score {fmt(s.score)}/100</> : null}
+                    </div>
+                    {s.rationale && <div className="text-xs text-gray-500 mt-1">{s.rationale}</div>}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button onClick={()=>{
+                      if (!activeIPSs.length) return;
+                      const ip = activeIPSs.find((i:any)=> i.id === aiDialog.ipsId) || activeIPSs[0];
+                      const ips = ip as any;
+                      setSelectedIPS(ips);
+                      setEditInitialData({
+                        symbol: s.symbol || aiResults?.symbol || '',
+                        expirationDate: s.expirationDate || '',
+                        contractType: s.contractType,
+                        shortPutStrike: s.shortPutStrike,
+                        longPutStrike: s.longPutStrike,
+                        shortCallStrike: s.shortCallStrike,
+                        longCallStrike: s.longCallStrike,
+                        optionStrike: s.optionStrike,
+                        creditReceived: s.creditReceived,
+                        debitPaid: s.debitPaid,
+                        numberOfContracts: 1,
+                      });
+                      setCurrentView('entry');
+                    }}>Place This Trade</Button>
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
   // -----------------------------
   // Action Needed view
   // -----------------------------
