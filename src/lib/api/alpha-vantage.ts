@@ -127,6 +127,9 @@ export class AlphaVantageClient {
     Object.entries(params).forEach(([key, value]) => {
       url.searchParams.set(key, value);
     });
+    // Prefer realtime data if enabled on the account
+    const entitlement = process.env.ALPHA_VANTAGE_ENTITLEMENT || 'realtime';
+    if (entitlement) url.searchParams.set('entitlement', entitlement);
 
     try {
       const response = await fetch(url.toString());
@@ -161,6 +164,35 @@ export class AlphaVantageClient {
         `Network error: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
+  }
+
+  /**
+   * Alpha Vantage SYMBOL_SEARCH helper
+   * https://www.alphavantage.co/documentation/#symbolsearch
+   */
+  async searchSymbols(query: string): Promise<Array<{
+    symbol: string;
+    name: string;
+    type?: string;
+    region?: string;
+    currency?: string;
+    matchScore?: number;
+  }>> {
+    const data = await this.makeRequest<{ bestMatches?: any[] }>({
+      function: 'SYMBOL_SEARCH',
+      keywords: query
+    });
+    const matches = Array.isArray((data as any)?.bestMatches)
+      ? (data as any).bestMatches
+      : [];
+    return matches.map((m: any) => ({
+      symbol: m['1. symbol'] ?? m.symbol ?? '',
+      name: m['2. name'] ?? m.name ?? '',
+      type: m['3. type'] ?? m.type,
+      region: m['4. region'] ?? m.region,
+      currency: m['8. currency'] ?? m.currency,
+      matchScore: m['9. matchScore'] ? Number(m['9. matchScore']) : undefined,
+    })).filter((r: any) => r.symbol);
   }
 
   async getCompanyOverview(symbol: string): Promise<CompanyOverview> {
@@ -233,18 +265,20 @@ export class AlphaVantageClient {
     console.log(`Fetching complete fundamental data for ${symbol}`);
     
     try {
-      // Make requests with delays to respect rate limits (5 requests/minute)
+      // Make requests with minimal delays. Account now supports 150 rpm.
+      // Keep a tiny throttle to avoid burst errors; configurable via env.
+      const throttle = Number(process.env.ALPHA_VANTAGE_MIN_DELAY_MS || process.env.ALPHA_VANTAGE_THROTTLE_MS || 100);
       const overview = await this.getCompanyOverview(symbol);
-      await this.delay(12000); // 12 second delay between calls
+      if (throttle > 0) await this.delay(throttle);
       
       const incomeStatement = await this.getIncomeStatement(symbol);
-      await this.delay(12000);
+      if (throttle > 0) await this.delay(throttle);
       
       const balanceSheet = await this.getBalanceSheet(symbol);
-      await this.delay(12000);
+      if (throttle > 0) await this.delay(throttle);
       
       const cashFlow = await this.getCashFlow(symbol);
-      await this.delay(12000);
+      if (throttle > 0) await this.delay(throttle);
       
       const earnings = await this.getEarnings(symbol);
 
@@ -291,6 +325,93 @@ export class AlphaVantageClient {
     }
     
     return results;
+  }
+
+  // ---------- Technical Indicators ----------
+  private extractLatestFromTA(obj: any, key: string) {
+    const block = obj?.[key];
+    if (!block || typeof block !== 'object') return null;
+    const first = Object.keys(block)[0];
+    if (!first) return null;
+    return { date: first, values: block[first] };
+  }
+
+  async getSMA(symbol: string, timePeriod = 50, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'SMA', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: SMA');
+    const v = latest?.values?.SMA != null ? Number(latest.values.SMA) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getRSI(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'RSI', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: RSI');
+    const v = latest?.values?.RSI != null ? Number(latest.values.RSI) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getMACD(symbol: string, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'MACD', symbol: symbol.toUpperCase(), interval, series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: MACD');
+    const out = latest?.values || {};
+    const macd = out.MACD != null ? Number(out.MACD) : null;
+    const signal = out.MACD_Signal != null ? Number(out.MACD_Signal) : null;
+    const hist = out.MACD_Hist != null ? Number(out.MACD_Hist) : null;
+    return { macd: Number.isFinite(macd) ? macd : null, signal: Number.isFinite(signal) ? signal : null, histogram: Number.isFinite(hist) ? hist : null, date: latest?.date || null };
+  }
+
+  // ---------- Alpha Intelligence: News Sentiment ----------
+  async getNewsSentiment(symbol: string, limit = 50) {
+    const data = await this.makeRequest<any>({
+      function: 'NEWS_SENTIMENT', tickers: symbol.toUpperCase(), sort: 'LATEST', limit: String(limit)
+    });
+    const feed: any[] = Array.isArray(data?.feed) ? data.feed : [];
+    let sum = 0, n = 0, pos = 0, neg = 0, neu = 0;
+    for (const item of feed) {
+      const s = Number(item?.overall_sentiment_score);
+      if (Number.isFinite(s)) { sum += s; n++; }
+      const lbl = String(item?.overall_sentiment_label || '').toLowerCase();
+      if (lbl.includes('positive')) pos++; else if (lbl.includes('negative')) neg++; else neu++;
+    }
+    const avg = n ? sum / n : null;
+    return { average_score: avg, count: n, positive: pos, negative: neg, neutral: neu };
+  }
+
+  // ---------- Macro / Economic Indicators ----------
+  private latestFromDataSeries(obj: any): { date: string | null; value: number | null } {
+    const data = obj?.data || obj?.['data'] || obj?.['Data'] || obj?.['value'] || obj?.['series'];
+    if (Array.isArray(data) && data.length) {
+      const d = data[0];
+      const val = Number(d?.value ?? d?.Value ?? d?.v);
+      return { date: d?.date ?? d?.Date ?? null, value: Number.isFinite(val) ? val : null };
+    }
+    // Some endpoints return { data: { last_updated, value } }
+    const value = Number(obj?.value);
+    if (Number.isFinite(value)) return { date: obj?.last_updated || null, value };
+    return { date: null, value: null };
+  }
+
+  async getCPI() {
+    const data = await this.makeRequest<any>({ function: 'CPI', interval: 'monthly' });
+    return this.latestFromDataSeries(data);
+  }
+  async getUnemploymentRate() {
+    const data = await this.makeRequest<any>({ function: 'UNEMPLOYMENT' });
+    return this.latestFromDataSeries(data);
+  }
+  async getFederalFundsRate() {
+    const data = await this.makeRequest<any>({ function: 'FEDERAL_FUNDS_RATE', interval: 'monthly' });
+    return this.latestFromDataSeries(data);
+  }
+  async getTreasuryYield10Y() {
+    const data = await this.makeRequest<any>({ function: 'TREASURY_YIELD', maturity: '10year', interval: 'daily' });
+    return this.latestFromDataSeries(data);
   }
 }
 

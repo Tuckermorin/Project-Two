@@ -30,7 +30,8 @@ function parseGlobalQuote(json: any, symbol: string): UnifiedStockData | null {
 }
 
 export async function fetchGlobalQuote(symbol: string, apiKey: string): Promise<UnifiedStockData> {
-  const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&apikey=${encodeURIComponent(apiKey)}`;
+  const entitlement = encodeURIComponent(process.env.ALPHA_VANTAGE_ENTITLEMENT || 'realtime');
+  const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${encodeURIComponent(symbol)}&entitlement=${entitlement}&apikey=${encodeURIComponent(apiKey)}`;
 
   const res = await fetch(url, { cache: 'no-store' });
   // Alpha Vantage uses 200 OK even on rate-limit, with a JSON "Note"

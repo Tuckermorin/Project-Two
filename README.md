@@ -2,6 +2,11 @@
 
 Focused trade journaling with IPS‑weighted scoring.
 
+What's new:
+- Alpha Vantage ticker search in the New Trade form (typeahead powered by SYMBOL_SEARCH).
+- API factor auto‑fetch once a symbol is chosen.
+- Ollama tool‑calling for market lookups during AI analysis.
+
 ## UI Snapshots
 The A.I. is used once a trade is entered and scored based off an Investment Policy.
 
@@ -46,3 +51,9 @@ If the embed doesn’t load, download/watch:
 | POST | `/api/trades/score` | Compute IPS weighted score from factor values. |
 | GET | `/api/trades/factors` | Fetch factor values for a symbol under an IPS. |
 | POST | `/api/trades/factors` | Save/override a single factor value. |
+
+## Environment
+
+- `ALPHA_VANTAGE_API_KEY` required for quotes, fundamentals and search.
+- Optional: `ALPHA_VANTAGE_MIN_DELAY_MS` tiny throttle between sequential AV calls (default 100ms).
+- Optional: `ALPHA_VANTAGE_DAILY_BUDGET` local guard for `/api/market-data` route (default 50000).

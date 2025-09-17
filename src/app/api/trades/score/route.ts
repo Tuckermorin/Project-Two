@@ -138,7 +138,7 @@ export async function POST(request: NextRequest) {
     
     factorScores.push({
         factorName,
-        value,
+        value: val,
         weight,
         individualScore,
         weightedScore,

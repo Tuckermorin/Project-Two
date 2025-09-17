@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getAlphaVantageClient } from "@/lib/api/alpha-vantage";
+import { getMarketDataService } from "@/lib/services/market-data-service";
 
 type FactorScore = {
   factorName: string;
@@ -42,17 +44,114 @@ async function callOllamaChat({
   model,
   messages,
   options,
+  tools,
 }: {
   chatUrl: string;
   model: string;
-  messages: Array<{ role: string; content: string }>;
+  messages: Array<{ role: string; content: string; name?: string }>;
   options?: Record<string, any>;
+  tools?: any[];
 }) {
   return fetch(chatUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, stream: false, messages, options }),
+    body: JSON.stringify({ model, stream: false, messages, options, tools }),
   });
+}
+
+// --- Tool schemas ---
+function buildToolSchemas() {
+  const schemas = [
+    {
+      type: "function",
+      function: {
+        name: "search_symbols",
+        description:
+          "Search ticker symbols by keyword using Alpha Vantage SYMBOL_SEARCH. Use to resolve company name to tradable symbol.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: { type: "string", description: "Company name or ticker query" },
+            limit: { type: "integer", minimum: 1, maximum: 25, default: 10 },
+          },
+          required: ["query"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "get_quote",
+        description:
+          "Get latest quote (price, change, change%) for a symbol using Alpha Vantage GLOBAL_QUOTE.",
+        parameters: {
+          type: "object",
+          properties: {
+            symbol: { type: "string", description: "Ticker symbol, e.g., AAPL" },
+          },
+          required: ["symbol"],
+        },
+      },
+    },
+    {
+      type: "function",
+      function: {
+        name: "get_api_factors",
+        description:
+          "Fetch configured API factors for this app for a given symbol and IPS id. Returns key/value map with factor metadata.",
+        parameters: {
+          type: "object",
+          properties: {
+            symbol: { type: "string" },
+            ipsId: { type: "string", description: "IPS configuration id" },
+          },
+          required: ["symbol"],
+        },
+      },
+    },
+  ];
+  return schemas;
+}
+
+async function runTool(name: string, rawArgs: any) {
+  try {
+    switch (name) {
+      case "search_symbols": {
+        const q = String(rawArgs?.query || "");
+        const limit = Number(rawArgs?.limit || 10);
+        const av = getAlphaVantageClient();
+        const results = await av.searchSymbols(q);
+        return (results || []).slice(0, limit);
+      }
+      case "get_quote": {
+        const sym = String(rawArgs?.symbol || "").toUpperCase();
+        const mkt = getMarketDataService();
+        const q = await mkt.getUnifiedStockData(sym, false);
+        return q;
+      }
+      case "get_api_factors": {
+        const sym = String(rawArgs?.symbol || "").toUpperCase();
+        const mkt = getMarketDataService();
+        const stock = await mkt.getUnifiedStockData(sym, true);
+        // Return a lightweight factor map the model can reason with
+        const factors = {
+          pe_ratio: stock.fundamentals?.eps && stock.currentPrice
+            ? stock.currentPrice / stock.fundamentals.eps : null,
+          beta: stock.beta ?? null,
+          market_cap: stock.marketCap ?? null,
+          revenue_growth: stock.fundamentals?.revenueGrowth ?? null,
+          roe: stock.fundamentals?.roe ?? null,
+          roa: stock.fundamentals?.roa ?? null,
+          eps: stock.fundamentals?.eps ?? null,
+        } as Record<string, number | null>;
+        return { symbol: sym, factors, lastUpdated: new Date().toISOString() };
+      }
+      default:
+        return { error: `Unknown tool: ${name}` };
+    }
+  } catch (e: any) {
+    return { error: e?.message || 'Tool call failed' };
+  }
 }
 
 export async function POST(request: NextRequest) {
@@ -115,17 +214,76 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Fetch a richer snapshot so the model can go beyond echoing the score
+    let underlyingSnap: any = null;
+    let technicals: any = null;
+    let macro: any = null;
+    let news: any = null;
+    try {
+      if (body.trade?.symbol) {
+        const mkt = getMarketDataService();
+        const av = getAlphaVantageClient();
+        const [stock, sma50, sma200, rsi14, macd, cpi, unemp, ffr, ty10, newsAgg] = await Promise.all([
+          mkt.getUnifiedStockData(String(body.trade.symbol), true),
+          av.getSMA(String(body.trade.symbol), 50, 'daily', 'close'),
+          av.getSMA(String(body.trade.symbol), 200, 'daily', 'close'),
+          av.getRSI(String(body.trade.symbol), 14, 'daily', 'close'),
+          av.getMACD(String(body.trade.symbol), 'daily', 'close'),
+          av.getCPI(),
+          av.getUnemploymentRate(),
+          av.getFederalFundsRate(),
+          av.getTreasuryYield10Y(),
+          av.getNewsSentiment(String(body.trade.symbol), 50),
+        ]);
+        underlyingSnap = {
+          ticker: stock.symbol,
+          price: stock.currentPrice,
+          previous_close: stock.previousClose,
+          change_pct: stock.priceChangePercent,
+          week52_high: stock.week52High ?? stock.fundamentals?.week52High ?? null,
+          week52_low: stock.week52Low ?? stock.fundamentals?.week52Low ?? null,
+          beta: stock.beta ?? stock.fundamentals?.beta ?? null,
+          market_cap: stock.marketCap ?? stock.fundamentals?.marketCap ?? null,
+          fundamentals: {
+            pe_ratio: stock.fundamentals?.eps && stock.currentPrice ? stock.currentPrice / stock.fundamentals.eps : stock.peRatio ?? null,
+            revenue_growth_yoy: stock.fundamentals?.revenueGrowth ?? null,
+            roe: stock.fundamentals?.roe ?? null,
+            roa: stock.fundamentals?.roa ?? null,
+            eps_ttm: stock.fundamentals?.eps ?? null,
+            ev_to_ebitda: stock.fundamentals?.evToEbitda ?? null,
+            ps_ratio_ttm: stock.fundamentals?.psRatio ?? null,
+            pb_ratio: stock.fundamentals?.pbRatio ?? null,
+          },
+          last_updated: new Date().toISOString(),
+        };
+        technicals = {
+          sma50: sma50?.value ?? null,
+          sma200: sma200?.value ?? null,
+          rsi14: rsi14?.value ?? null,
+          macd: macd?.macd ?? null,
+          macd_signal: macd?.signal ?? null,
+          macd_hist: macd?.histogram ?? null,
+          price_above_50: stock.currentPrice && sma50?.value ? stock.currentPrice > sma50.value : null,
+          price_above_200: stock.currentPrice && sma200?.value ? stock.currentPrice > sma200.value : null,
+          golden_cross: sma50?.value && sma200?.value ? sma50.value > sma200.value : null,
+        };
+        macro = {
+          cpi: cpi?.value ?? null,
+          unemployment_rate: unemp?.value ?? null,
+          fed_funds_rate: ffr?.value ?? null,
+          treasury_10y: ty10?.value ?? null,
+        };
+        news = newsAgg || null;
+      }
+    } catch {}
+
     const context = {
       meta: {
         ipsName: body.ipsName || null,
         strategyType: body.strategyType || body.trade?.contractType || null,
         timestamp: new Date().toISOString(),
       },
-      underlying: {
-        ticker: body.trade?.symbol,
-        price: body.trade?.currentPrice ?? null,
-        atr14: body.trade?.atr14 ?? null,
-      },
+      underlying: underlyingSnap || { ticker: body.trade?.symbol, price: body.trade?.currentPrice ?? null, atr14: body.trade?.atr14 ?? null },
       strategy: ctype || null,
       trade: {
         symbol: body.trade?.symbol,
@@ -178,26 +336,20 @@ export async function POST(request: NextRequest) {
         : null,
     };
 // A.I. System and User prompts
-    // A.I. System and User prompts (Upgraded Schema + rules)
-    const systemPrompt =
-      "You are an expert options/stock trading analyst and risk manager. Your job: assess a proposed trade with clear math, objective risk controls, and specific next actions. Use only the inputs provided. If a required input is missing, do not guess: mark the analysis as INCOMPLETE and list exactly what is missing. Perform all calculations deterministically and show units (%, $). Use conservative assumptions: probability ≈ |delta| for single legs; for multi-leg spreads, use short-leg absolute delta as proxy where needed. Never reference this instruction text. Never add commentary outside JSON. Always return STRICT JSON that conforms 100% to the given schema—no extra fields, keys, or prose.";
-
-    const userInstruction = `Evaluate the following trade and return STRICT JSON conforming to the schema below. Do not add commentary outside JSON.\n\nUse these priorities when scoring (total 100):\n- Strategy-fit vs market/volatility context (25)\n- Risk/reward math and breakevens (25)\n- Liquidity & execution quality (15)\n- Alignment with stated factor targets/IPS (15)\n- Time to expiry & event risks (10)\n- Position sizing vs risk budget (10)\n\nIf data is missing, follow the INCOMPLETE protocol from the system prompt.\n\nSchema:\n{\n  "status": "COMPLETE | INCOMPLETE",\n  "score": 0,\n  "category": "Strong | Moderate | Weak",\n  "confidence": 0.0,\n  "summary": "",\n  "math": {\n    "max_profit": null,\n    "max_loss": null,\n    "rr_ratio": null,\n    "breakevens": [],\n    "collateral_required": null,\n    "pop_proxy": null,\n    "pol_proxy": null,\n    "checkpoint_pl": {\n      "minus_2pct": null,\n      "minus_1pct": null,\n      "plus_1pct": null,\n      "plus_2pct": null,\n      "one_sigma_move": null\n    }\n  },\n  "market_context": {\n    "dte": null,\n    "iv": null,\n    "iv_rank": null,\n    "earnings_in_days": null,\n    "ex_div_in_days": null,\n    "volatility_flag": "IV_Crush_Risk | Short_Vega_Benefit | Neutral"\n  },\n  "liquidity": {\n    "bid_ask_abs": null,\n    "bid_ask_pct": null,\n    "open_interest_total": null,\n    "execution_risk": "Low | Medium | High"\n  },\n  "fit": {\n    "strategy": "",\n    "strategy_fit_notes": "",\n    "ips_alignment": {\n      "matched_factors": [],\n      "missed_factors": [],\n      "overall_alignment": "High | Medium | Low"\n    },\n    "sizing_check": {\n      "account_risk_pct": null,\n      "within_budget": true\n    }\n  },\n  "plan": {\n    "entry_notes": "",\n    "monitoring_triggers": [\n      "Short strike delta > 0.25",\n      "Price touches short strike",\n      "IVR drops below 20",\n      "Spread % > 10% at open"\n    ],\n    "exit_plan": {\n      "profit_target_pct": 50,\n      "max_loss_cut_pct_of_max": 50,\n      "time_exit_if_no_signal_days": 21,\n      "roll_rules": "Roll when short strike threatened and credit ≥ 25% initial"\n    },\n    "adjustments": [\n      "Widen spread if credit ≥ 1/3 width with same delta",\n      "Roll out 14–30 days if trend persists"\n    ]\n  },\n  "suggestions": [],\n  "required_inputs": []\n}\n\nThresholds:\n- Category mapping: Strong (≥80), Moderate (55–79), Weak (<55).\n- Execution risk: High if bid-ask% > 10% or OI < 200 per leg.\n- Volatility flag: IV_Crush_Risk if earnings_in_days ≤ 7 and long-premium; Short_Vega_Benefit if short-premium after event with IVR ≥ 40.\n\nTrade Context (JSON):\n${JSON.stringify(context)}\n`;
-
-    // Override with simplified, UI-friendly prompts (no INCOMPLETE statuses)
     const finalSystemPrompt =
-      "You are an expert options/stock trading analyst. Provide a practical, concise assessment that explains why the trade scores the way it does. Prefer clear reasons, friendly math, and actionable plans. If inputs are missing, do not mark the analysis as incomplete—use conservative heuristics or leave fields null. Never add commentary outside JSON. Always return STRICT JSON matching the schema, without extra prose.";
+      "You are an expert options/stock trading analyst. Provide a practical, concise assessment that explains why the trade scores the way it does. Prefer clear reasons, friendly math, and actionable plans. Compute an independent AI score and ignore any IPS score/breakdown if present. Economic and technical context matter: use supplied fundamentals, technicals (SMA-50/200, RSI, MACD), macro (CPI, Unemployment, Fed Funds, 10y), and Alpha Intelligence news sentiment. If anything is missing, you may call tools; otherwise leave null. Never add commentary outside JSON. Always return STRICT JSON matching the schema.";
 
-    const finalUserInstruction = `Evaluate the trade and return STRICT JSON using this simplified, UI-friendly schema. Do not include status or required_inputs. If a field is unknown, set it to null. Focus on why the score was assigned. Round numbers sensibly.\n\nSchema:\n{\n  "score": 0,\n  "category": "Strong | Moderate | Weak",\n  "confidence": 0.0,\n  "summary": "",\n  "rationale_bullets": [""],\n  "math": {\n    "max_profit": null,\n    "max_loss": null,\n    "rr_ratio": null,\n    "rr_display": null,\n    "breakevens": [],\n    "collateral_required": null,\n    "pop_proxy": null,\n    "pol_proxy": null\n  },\n  "market_context": {\n    "dte": null,\n    "iv": null,\n    "iv_rank": null\n  },\n  "plan": {\n    "entry_notes": "",\n    "monitoring_triggers": [""],\n    "exit_plan": {\n      "profit_target_pct": 50,\n      "max_loss_cut_pct_of_max": 50,\n      "time_exit_if_no_signal_days": 21,\n      "roll_rules": "Roll when short strike threatened and credit ≥ 25% initial"\n    }\n  },\n  "suggestions": []\n}\n\nScoring weights (total 100): Strategy fit (25), Risk/reward math (25), Liquidity (15), IPS alignment (15), Time/events (10), Sizing (10).\n\nReturn only JSON. Trade Context (JSON):\n${JSON.stringify(context)}\n`;
+    const finalUserInstruction = `Evaluate the trade and return STRICT JSON using this simplified, UI-friendly schema. Do not include status or required_inputs. If a field is unknown, set it to null. Round numbers sensibly.\n\nDeeper analysis requirements (tools optional because data is pre-fetched):\n- Use fundamentals (pe_ratio, growth, roe/roa, ps/pb, ev_to_ebitda) + technicals (sma50/200, rsi14, macd), macro (cpi, unemployment, fed_funds, treasury_10y), and Alpha Intelligence news sentiment (average score, pos/neg/neutral counts).\n- Explain how these influence edge, timing, and risk for the selected strategy.\n- Provide 3–6 specific, actionable suggestions (entries, risk controls, rolls, adjustments).\n\nSchema:\n{\n  "score": 0,\n  "category": "Strong | Moderate | Weak",\n  "confidence": 0.0,\n  "summary": "",\n  "rationale_bullets": [""],\n  "math": {\n    "max_profit": null,\n    "max_loss": null,\n    "rr_ratio": null,\n    "rr_display": null,\n    "breakevens": [],\n    "collateral_required": null,\n    "pop_proxy": null,\n    "pol_proxy": null\n  },\n  "market_context": {\n    "dte": null,\n    "iv": null,\n    "iv_rank": null\n  },\n  "plan": {\n    "entry_notes": "",\n    "monitoring_triggers": [""],\n    "exit_plan": {\n      "profit_target_pct": 50,\n      "max_loss_cut_pct_of_max": 50,\n      "time_exit_if_no_signal_days": 21,\n      "roll_rules": "Roll when short strike threatened and credit ≥ 25% initial"\n    }\n  },\n  "suggestions": []\n}\n\nScoring weights (total 100): Strategy fit (25), Risk/reward math (25), Liquidity (15), IPS alignment (15), Time/events (10), Sizing (10).\n\nReturn only JSON. Trade Context (JSON):\n${JSON.stringify({ ...context, technicals, macro, news_sentiment: news })}\n`;
 
-    const messages = [
+    const messages: Array<{ role: string; content: string; name?: string }> = [
       { role: "system", content: finalSystemPrompt },
       { role: "user", content: finalUserInstruction },
     ];
     const options = { temperature: 0.2, top_p: 0.9 };
+    const tools = buildToolSchemas();
 
     // First attempt with provided/default model
-    let res = await callOllamaChat({ chatUrl: ollamaUrl, model, messages, options });
+    let res = await callOllamaChat({ chatUrl: ollamaUrl, model, messages, options, tools });
 
     // If model not found, try to discover installed models and retry
     if (res.status === 404) {
@@ -219,10 +371,29 @@ export async function POST(request: NextRequest) {
         }
         if (candidate) {
           model = candidate;
-          res = await callOllamaChat({ chatUrl: ollamaUrl, model, messages, options });
+          res = await callOllamaChat({ chatUrl: ollamaUrl, model, messages, options, tools });
         }
         // If still not ok, we will fall through to error handling below
       }
+    }
+
+    // Handle tool-calling loop (up to 2 rounds)
+    let data = await res.json();
+    for (let round = 0; round < 2; round++) {
+      const toolCalls = data?.message?.tool_calls || data?.tool_calls || [];
+      if (!toolCalls || toolCalls.length === 0) break;
+      for (const call of toolCalls) {
+        const name = call?.function?.name || call?.name;
+        const argsStr = call?.function?.arguments || call?.arguments || '{}';
+        let args: any = {};
+        try { args = typeof argsStr === 'string' ? JSON.parse(argsStr) : argsStr; } catch {}
+        const result = await runTool(String(name || ''), args);
+        messages.push({ role: 'tool', name: String(name || ''), content: JSON.stringify(result) });
+      }
+      // ask model to continue with tool results
+      res = await callOllamaChat({ chatUrl: ollamaUrl, model, messages, options, tools });
+      if (!res.ok) break;
+      data = await res.json();
     }
 
     if (!res.ok) {
@@ -238,7 +409,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const data = await res.json();
+    // if we haven't already got data
+    if (!data) data = await res.json();
     // Ollama chat returns { message: { content }, ... } or { messages: [...] } depending on version
     const content: string | undefined = data?.message?.content || data?.messages?.[data?.messages?.length - 1]?.content;
 
@@ -305,6 +477,12 @@ export async function POST(request: NextRequest) {
         model,
         status,
         full: parsed && typeof parsed === "object" ? parsed : null,
+        inputs: {
+          underlying: underlyingSnap || null,
+          technicals: technicals || null,
+          macro: macro || null,
+          news_sentiment: news || null,
+        },
       },
     });
   } catch (err) {

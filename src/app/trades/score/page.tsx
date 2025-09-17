@@ -64,6 +64,7 @@ export default function ScoreTradePage() {
         model?: string;
         status?: string;
         full?: any;
+        inputs?: any;
       }
     | null
   >(null);
@@ -259,8 +260,6 @@ export default function ScoreTradePage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           trade: t,
-          score: score?.score,
-          breakdown: score?.breakdown,
           ipsName: ipsDisplayName ?? draft.ipsName ?? draft.ipsId,
           strategyType,
           model: process.env.NEXT_PUBLIC_OLLAMA_MODEL,
@@ -474,6 +473,40 @@ export default function ScoreTradePage() {
               {/* Extended structured analysis (collapsed by default) */}
               {aiResult.full && aiShowDetails ? (
                 <div className="space-y-4 pt-2 border-t">
+                  {/* Inputs snapshot used by AI */}
+                  {aiResult.inputs ? (
+                    <div>
+                      <div className="font-medium text-sm mb-1">Data Snapshot</div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-700">
+                        {/* Underlying */}
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-gray-600">Underlying</div>
+                          <div>Ticker: {aiResult.inputs.underlying?.ticker ?? draft.trade?.symbol ?? '—'}</div>
+                          <div>Price: {fmtCurrency(aiResult.inputs.underlying?.price)}</div>
+                          <div>Change %: {aiResult.inputs.underlying?.change_pct ?? '—'}%</div>
+                          <div>52w High: {fmtCurrency(aiResult.inputs.underlying?.week52_high)} • 52w Low: {fmtCurrency(aiResult.inputs.underlying?.week52_low)}</div>
+                          <div>Beta: {aiResult.inputs.underlying?.beta ?? '—'} • Market Cap: {aiResult.inputs.underlying?.market_cap ? `$${Number(aiResult.inputs.underlying.market_cap).toLocaleString()}` : '—'}</div>
+                          {aiResult.inputs.underlying?.fundamentals && (
+                            <div className="text-xs text-gray-600">
+                              PE: {aiResult.inputs.underlying.fundamentals.pe_ratio ?? '—'} • Growth YoY: {aiResult.inputs.underlying.fundamentals.revenue_growth_yoy ?? '—'}% • ROE: {aiResult.inputs.underlying.fundamentals.roe ?? '—'}% • ROA: {aiResult.inputs.underlying.fundamentals.roa ?? '—'}%
+                              <br />EV/EBITDA: {aiResult.inputs.underlying.fundamentals.ev_to_ebitda ?? '—'} • P/S: {aiResult.inputs.underlying.fundamentals.ps_ratio_ttm ?? '—'} • P/B: {aiResult.inputs.underlying.fundamentals.pb_ratio ?? '—'}
+                            </div>
+                          )}
+                        </div>
+                        {/* Technicals & Macro */}
+                        <div className="space-y-1">
+                          <div className="text-xs font-semibold text-gray-600">Technicals</div>
+                          <div>SMA50: {aiResult.inputs.technicals?.sma50 ?? '—'} • SMA200: {aiResult.inputs.technicals?.sma200 ?? '—'}</div>
+                          <div>RSI(14): {aiResult.inputs.technicals?.rsi14 ?? '—'} • MACD: {aiResult.inputs.technicals?.macd ?? '—'} ({aiResult.inputs.technicals?.macd_signal ?? '—'})</div>
+                          <div className="text-xs text-gray-600">Above 50: {String(aiResult.inputs.technicals?.price_above_50 ?? '—')} • Above 200: {String(aiResult.inputs.technicals?.price_above_200 ?? '—')} • Golden Cross: {String(aiResult.inputs.technicals?.golden_cross ?? '—')}</div>
+                          <div className="text-xs font-semibold text-gray-600 mt-2">Macro</div>
+                          <div>CPI: {aiResult.inputs.macro?.cpi ?? '—'} • Unemployment: {aiResult.inputs.macro?.unemployment_rate ?? '—'} • Fed Funds: {aiResult.inputs.macro?.fed_funds_rate ?? '—'} • 10Y: {aiResult.inputs.macro?.treasury_10y ?? '—'}</div>
+                          <div className="text-xs font-semibold text-gray-600 mt-2">News Sentiment</div>
+                          <div>Avg: {aiResult.inputs.news_sentiment?.average_score ?? '—'} • Count: {aiResult.inputs.news_sentiment?.count ?? 0} • +{aiResult.inputs.news_sentiment?.positive ?? 0} / -{aiResult.inputs.news_sentiment?.negative ?? 0} / ={aiResult.inputs.news_sentiment?.neutral ?? 0}</div>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                   {/* Math */}
                   {aiResult.full.math ? (
                     <div>

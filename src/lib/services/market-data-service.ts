@@ -37,6 +37,12 @@ interface UnifiedStockData {
     debtToEquity?: number;
     roe?: number;
     roa?: number;
+    beta?: number;
+    marketCap?: number;
+    week52High?: number;
+    week52Low?: number;
+    dividendYield?: number;
+    revenuePerShareTTM?: number;
   };
 }
 
@@ -203,6 +209,8 @@ class MarketDataService {
         avgVolume: quote.average_volume,
         beta: fundamentals?.beta,
         peRatio: fundamentals?.pbRatio,
+        week52High: fundamentals?.week52High,
+        week52Low: fundamentals?.week52Low,
         marketCap: undefined,
         lastUpdated: new Date(),
         fundamentals
@@ -507,7 +515,7 @@ class MarketDataService {
     
     return {
       revenue: this.parseFinancialValue(overview.RevenueTTM),
-      grossMargin: this.parsePercentage(overview.GrossProfitTTM),
+      grossMargin: this.parsePercentage((overview as any).GrossMargin || ''),
       operatingMargin: this.parsePercentage(overview.OperatingMarginTTM),
       eps: this.parseFinancialValue(overview.EPS),
       bookValue: this.parseFinancialValue(overview.BookValue),
@@ -521,7 +529,11 @@ class MarketDataService {
       revenueGrowth: this.parsePercentage(overview.QuarterlyRevenueGrowthYOY),
       earningsGrowth: this.parsePercentage(overview.QuarterlyEarningsGrowthYOY),
       roe: this.parsePercentage(overview.ReturnOnEquityTTM),
-      roa: this.parsePercentage(overview.ReturnOnAssetsTTM)
+      roa: this.parsePercentage(overview.ReturnOnAssetsTTM),
+      week52High: this.parseFinancialValue((overview as any)['52WeekHigh']),
+      week52Low: this.parseFinancialValue((overview as any)['52WeekLow']),
+      dividendYield: this.parseFinancialValue(overview.DividendYield),
+      revenuePerShareTTM: this.parseFinancialValue(overview.RevenuePerShareTTM)
     };
   }
 

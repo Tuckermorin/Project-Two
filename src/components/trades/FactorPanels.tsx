@@ -60,17 +60,11 @@ export function ApiFactorsPanel({ factors, values, isConnected = true, onRefresh
               <div className="col-span-7">
                 {canEdit ? (
                   <Input
-                    type={f.inputType === 'number' ? 'number' : 'text'}
+                    type="text"
+                    inputMode={f.inputType === 'number' ? 'decimal' : 'text'}
                     value={v === undefined || v === null ? '' : String(v)}
-                    onChange={(e) => {
-                      const raw = e.target.value;
-                      if (f.inputType === 'number') {
-                        const num = raw === '' ? '' : Number(raw);
-                        onChange!(f.key, raw === '' || Number.isNaN(num) ? null : (num as any));
-                      } else {
-                        onChange!(f.key, raw);
-                      }
-                    }}
+                    onChange={(e) => onChange!(f.key, e.target.value)}
+                    onBlur={(e) => { if (e.target.value.trim() === '') onChange!(f.key, null); }}
                   />
                 ) : (
                   <Input value={v === undefined || v === null ? '' : String(v)} readOnly className="bg-muted/40" />
@@ -130,14 +124,19 @@ export function ManualFactorsPanel({ factors, values, onChange }: ManualProps) {
                   </select>
                 ) : (
                   <Input
-                    type={f.inputType === "number" ? "number" : "text"}
-                    value={String(current)}
-                    onChange={(e) =>
-                      onChange(
-                        f.key,
-                        f.inputType === "number" ? Number(e.target.value) : e.target.value
-                      )
-                    }
+                    type="text"
+                    inputMode={f.inputType === "number" ? "decimal" : "text"}
+                    value={current === undefined || current === null ? '' : String(current)}
+                    onChange={(e) => {
+                      const raw = e.target.value;
+                      // Preserve the user's exact decimal typing (e.g., "0.05").
+                      // We intentionally do NOT coerce to Number here.
+                      onChange(f.key, raw);
+                    }}
+                    onBlur={(e) => {
+                      // Optional normalization on blur: collapse empty to null
+                      if (e.target.value.trim() === '') onChange(f.key, null);
+                    }}
                   />
                 )}
               </div>

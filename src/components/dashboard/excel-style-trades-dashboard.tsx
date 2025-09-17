@@ -152,7 +152,7 @@ export default function ExcelStyleTradesDashboard() {
           } catch {}
         }
         const normalized: Trade[] = rows.map((r:any) => {
-          const current = quoteMap[r.symbol] ?? Number(r.current_price ?? 0) || 0
+          const current = (quoteMap[r.symbol] ?? Number(r.current_price ?? 0)) || 0
           const short = Number(r.short_strike ?? 0) || 0
           const percentToShort = short > 0 ? ((current - short) / short) * 100 : 0
           const exp = r.expiration_date || ''

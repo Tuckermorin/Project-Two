@@ -99,6 +99,19 @@ export function NewTradeEntryForm({
   const [manualValues, setManualValues] = useState<FactorValueMap>({});
   const [apiValues, setApiValues] = useState<FactorValueMap>({});
   const [apiBusy, setApiBusy] = useState(false);
+  const [snapBusy, setSnapBusy] = useState(false);
+  const [marketSnap, setMarketSnap] = useState<{
+    price: number | null;
+    changePct: number | null;
+    high52: number | null;
+    low52: number | null;
+  } | null>(null);
+  // Symbol search state (Alpha Vantage SYMBOL_SEARCH)
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchBusy, setSearchBusy] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Array<{symbol:string; name:string; region?:string; type?:string; currency?:string}>>([]);
+  const [searchTimer, setSearchTimer] = useState<any>(null);
 
   useEffect(() => {
     loadIPSFactors((selectedIPS as any).ips_id || selectedIPS.id)
@@ -123,6 +136,60 @@ export function NewTradeEntryForm({
   useEffect(() => {
     refreshApiValues(formData.symbol);
   }, [formData.symbol, factors.api.length]);
+
+  // Load market snapshot (price, 52w range)
+  useEffect(() => {
+    const sym = (formData.symbol || '').trim();
+    if (!sym) { setMarketSnap(null); return; }
+    let ignore = false;
+    (async () => {
+      try {
+        setSnapBusy(true);
+        const r = await fetch(`/api/market-data/fundamental?symbol=${encodeURIComponent(sym)}`, { cache: 'no-store' });
+        const j = await r.json();
+        const d = j?.data || {};
+        if (!ignore) {
+          setMarketSnap({
+            price: Number(d?.currentPrice ?? d?.price ?? 0) || null,
+            changePct: Number(d?.priceChangePercent ?? 0) || null,
+            high52: Number(d?.week52High ?? d?.fundamentals?.week52High ?? 0) || null,
+            low52: Number(d?.week52Low ?? d?.fundamentals?.week52Low ?? 0) || null,
+          });
+        }
+      } catch {
+        if (!ignore) setMarketSnap(null);
+      } finally {
+        if (!ignore) setSnapBusy(false);
+      }
+    })();
+    return () => { ignore = true; };
+  }, [formData.symbol]);
+
+  // Debounced ticker search
+  useEffect(() => {
+    if (!searchOpen) return;
+    if (searchTimer) clearTimeout(searchTimer);
+    const t = setTimeout(async () => {
+      const q = searchQuery.trim();
+      if (!q || q.length < 1) {
+        setSearchResults([]);
+        return;
+      }
+      try {
+        setSearchBusy(true);
+        const res = await fetch(`/api/market-data/symbol-search?q=${encodeURIComponent(q)}&limit=8`, { cache: 'no-store' });
+        const data = await res.json();
+        if (data?.success) setSearchResults(data.data || []);
+        else setSearchResults([]);
+      } catch {
+        setSearchResults([]);
+      } finally {
+        setSearchBusy(false);
+      }
+    }, 250);
+    setSearchTimer(t);
+    return () => clearTimeout(t);
+  }, [searchQuery, searchOpen]);
 
   const handleScore = () => {
     try {
@@ -157,16 +224,49 @@ export function NewTradeEntryForm({
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <div>
+            <div className="relative">
               <Label htmlFor="symbol">Symbol</Label>
               <Input
                 id="symbol"
                 value={formData.symbol}
-                onChange={(e) =>
-                  setFormData((p) => ({ ...p, symbol: e.target.value.trim().toUpperCase() }))
-                }
-                placeholder="AAPL"
+                onFocus={() => setSearchOpen(true)}
+                onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
+                onChange={(e) => {
+                  const v = e.target.value.toUpperCase();
+                  setFormData((p) => ({ ...p, symbol: v.replace(/\s+/g, '') }));
+                  setSearchQuery(e.target.value);
+                }}
+                placeholder="Search by symbol or company"
               />
+              {searchOpen && (searchQuery || '').length >= 1 && (
+                <div className="absolute z-20 mt-1 w-full rounded border bg-background shadow">
+                  {searchBusy && (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">Searching…</div>
+                  )}
+                  {!searchBusy && searchResults.length === 0 && (
+                    <div className="px-3 py-2 text-xs text-muted-foreground">No matches</div>
+                  )}
+                  {!searchBusy && searchResults.map((r) => (
+                    <button
+                      key={`${r.symbol}-${r.name}`}
+                      type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-muted/40"
+                      onMouseDown={(ev) => ev.preventDefault()}
+                      onClick={() => {
+                        setFormData((p) => ({ ...p, symbol: r.symbol.toUpperCase() }));
+                        setSearchOpen(false);
+                        setSearchQuery("");
+                        setSearchResults([]);
+                        // trigger factor refresh explicitly
+                        refreshApiValues(r.symbol.toUpperCase());
+                      }}
+                    >
+                      <div className="text-sm font-medium">{r.symbol} <span className="text-muted-foreground">• {r.name}</span></div>
+                      {r.region && <div className="text-[11px] text-muted-foreground">{r.region}{r.currency ? ` • ${r.currency}` : ''}</div>}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div>
               <Label>Strategy</Label>
@@ -304,6 +404,37 @@ export function NewTradeEntryForm({
           </div>
         </CardContent>
       </Card>
+
+      {formData.symbol && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Market Snapshot</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {snapBusy && <div className="text-sm text-muted-foreground">Loading market data…</div>}
+            {!snapBusy && (
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div>
+                  <div className="text-muted-foreground">Current Price</div>
+                  <div className="font-medium">{marketSnap?.price != null ? `$${marketSnap.price.toFixed(2)}` : '-'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">Change %</div>
+                  <div className={`font-medium ${Number(marketSnap?.changePct) >= 0 ? 'text-green-600' : 'text-red-600'}`}>{marketSnap?.changePct != null ? `${marketSnap.changePct.toFixed(2)}%` : '-'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">52-Week High</div>
+                  <div className="font-medium">{marketSnap?.high52 != null ? `$${marketSnap.high52.toFixed(2)}` : '-'}</div>
+                </div>
+                <div>
+                  <div className="text-muted-foreground">52-Week Low</div>
+                  <div className="font-medium">{marketSnap?.low52 != null ? `$${marketSnap.low52.toFixed(2)}` : '-'}</div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <ApiFactorsPanel

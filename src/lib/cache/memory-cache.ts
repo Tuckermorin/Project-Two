@@ -57,4 +57,6 @@ export const marketCache = new MemoryCache<any>(3 * 60 * 60 * 1000); // 3 hour T
 export const dailyCounter = new DailyCounter();
 
 // configuration
-export const DAILY_BUDGET = 25;
+// With upgraded Alpha Vantage tier (150 rpm), raise local budget guard.
+// Optionally override via env ALPHA_VANTAGE_DAILY_BUDGET.
+export const DAILY_BUDGET = Number(process.env.ALPHA_VANTAGE_DAILY_BUDGET || 50000);

@@ -115,18 +115,21 @@ export async function GET(request: NextRequest) {
             value = stockData.fundamentals?.roa;
             break;
           case 'Dividend Yield':
-            // Calculate dividend yield based on available data
-            value = stockData.fundamentals?.eps && stockData.currentPrice 
-              ? (stockData.fundamentals.eps / stockData.currentPrice) * 100 
-              : undefined;
+            value = stockData.fundamentals?.dividendYield;
             break;
           case 'Earnings per Share':
             value = stockData.fundamentals?.eps;
             break;
           case 'Revenue per Share TTM':
-            value = stockData.fundamentals?.revenue && stockData.marketCap 
-              ? stockData.fundamentals.revenue / (stockData.marketCap || 1) 
-              : undefined;
+            value = (stockData.fundamentals as any)?.revenuePerShareTTM;
+            break;
+          case '52 Week High':
+          case '52-Week High':
+            value = stockData.week52High;
+            break;
+          case '52 Week Low':
+          case '52-Week Low':
+            value = stockData.week52Low;
             break;
           case 'Volume':
             value = stockData.volume;
