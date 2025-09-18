@@ -166,7 +166,7 @@ export async function POST(request: NextRequest) {
 
     const ollamaUrl = process.env.OLLAMA_API_URL?.trim() || "http://golem:11434/api/chat";
     const bodyModel = (body as any)?.model?.trim?.();
-    let model = bodyModel || process.env.OLLAMA_MODEL?.trim() || "llama3.2:latest";
+    let model = bodyModel || process.env.OLLAMA_MODEL?.trim() || "llama4:maverick";
 
     // Compute base origin for tags lookup if needed
     let baseOrigin = "";
@@ -223,6 +223,7 @@ export async function POST(request: NextRequest) {
       if (body.trade?.symbol) {
         const mkt = getMarketDataService();
         const av = getAlphaVantageClient();
+        // Pull extended Alpha Vantage fundamentals, technicals, macro and news
         const [stock, sma50, sma200, rsi14, macd, cpi, unemp, ffr, ty10, newsAgg] = await Promise.all([
           mkt.getUnifiedStockData(String(body.trade.symbol), true),
           av.getSMA(String(body.trade.symbol), 50, 'daily', 'close'),
@@ -246,13 +247,21 @@ export async function POST(request: NextRequest) {
           market_cap: stock.marketCap ?? stock.fundamentals?.marketCap ?? null,
           fundamentals: {
             pe_ratio: stock.fundamentals?.eps && stock.currentPrice ? stock.currentPrice / stock.fundamentals.eps : stock.peRatio ?? null,
-            revenue_growth_yoy: stock.fundamentals?.revenueGrowth ?? null,
-            roe: stock.fundamentals?.roe ?? null,
-            roa: stock.fundamentals?.roa ?? null,
-            eps_ttm: stock.fundamentals?.eps ?? null,
-            ev_to_ebitda: stock.fundamentals?.evToEbitda ?? null,
             ps_ratio_ttm: stock.fundamentals?.psRatio ?? null,
             pb_ratio: stock.fundamentals?.pbRatio ?? null,
+            peg_ratio: stock.fundamentals?.pegRatio ?? null,
+            ev_to_ebitda: stock.fundamentals?.evToEbitda ?? null,
+            eps_ttm: stock.fundamentals?.eps ?? null,
+            revenue_ttm: stock.fundamentals?.revenue ?? null,
+            revenue_per_share_ttm: stock.fundamentals?.revenuePerShareTTM ?? null,
+            gross_margin_pct: stock.fundamentals?.grossMargin ?? null,
+            operating_margin_pct: stock.fundamentals?.operatingMargin ?? null,
+            net_margin_pct: stock.fundamentals?.netMargin ?? null,
+            roe_pct: stock.fundamentals?.roe ?? null,
+            roa_pct: stock.fundamentals?.roa ?? null,
+            revenue_growth_yoy_pct: stock.fundamentals?.revenueGrowth ?? null,
+            earnings_growth_yoy_pct: stock.fundamentals?.earningsGrowth ?? null,
+            dividend_yield_pct: stock.fundamentals?.dividendYield ?? null,
           },
           last_updated: new Date().toISOString(),
         };
@@ -266,6 +275,7 @@ export async function POST(request: NextRequest) {
           price_above_50: stock.currentPrice && sma50?.value ? stock.currentPrice > sma50.value : null,
           price_above_200: stock.currentPrice && sma200?.value ? stock.currentPrice > sma200.value : null,
           golden_cross: sma50?.value && sma200?.value ? sma50.value > sma200.value : null,
+          trend_bias: sma50?.value && sma200?.value ? (sma50.value > sma200.value ? 'uptrend' : 'downtrend') : null,
         };
         macro = {
           cpi: cpi?.value ?? null,
@@ -339,7 +349,7 @@ export async function POST(request: NextRequest) {
     const finalSystemPrompt =
       "You are an expert options/stock trading analyst. Provide a practical, concise assessment that explains why the trade scores the way it does. Prefer clear reasons, friendly math, and actionable plans. Compute an independent AI score and ignore any IPS score/breakdown if present. Economic and technical context matter: use supplied fundamentals, technicals (SMA-50/200, RSI, MACD), macro (CPI, Unemployment, Fed Funds, 10y), and Alpha Intelligence news sentiment. If anything is missing, you may call tools; otherwise leave null. Never add commentary outside JSON. Always return STRICT JSON matching the schema.";
 
-    const finalUserInstruction = `Evaluate the trade and return STRICT JSON using this simplified, UI-friendly schema. Do not include status or required_inputs. If a field is unknown, set it to null. Round numbers sensibly.\n\nDeeper analysis requirements (tools optional because data is pre-fetched):\n- Use fundamentals (pe_ratio, growth, roe/roa, ps/pb, ev_to_ebitda) + technicals (sma50/200, rsi14, macd), macro (cpi, unemployment, fed_funds, treasury_10y), and Alpha Intelligence news sentiment (average score, pos/neg/neutral counts).\n- Explain how these influence edge, timing, and risk for the selected strategy.\n- Provide 3–6 specific, actionable suggestions (entries, risk controls, rolls, adjustments).\n\nSchema:\n{\n  "score": 0,\n  "category": "Strong | Moderate | Weak",\n  "confidence": 0.0,\n  "summary": "",\n  "rationale_bullets": [""],\n  "math": {\n    "max_profit": null,\n    "max_loss": null,\n    "rr_ratio": null,\n    "rr_display": null,\n    "breakevens": [],\n    "collateral_required": null,\n    "pop_proxy": null,\n    "pol_proxy": null\n  },\n  "market_context": {\n    "dte": null,\n    "iv": null,\n    "iv_rank": null\n  },\n  "plan": {\n    "entry_notes": "",\n    "monitoring_triggers": [""],\n    "exit_plan": {\n      "profit_target_pct": 50,\n      "max_loss_cut_pct_of_max": 50,\n      "time_exit_if_no_signal_days": 21,\n      "roll_rules": "Roll when short strike threatened and credit ≥ 25% initial"\n    }\n  },\n  "suggestions": []\n}\n\nScoring weights (total 100): Strategy fit (25), Risk/reward math (25), Liquidity (15), IPS alignment (15), Time/events (10), Sizing (10).\n\nReturn only JSON. Trade Context (JSON):\n${JSON.stringify({ ...context, technicals, macro, news_sentiment: news })}\n`;
+    const finalUserInstruction = `Evaluate the trade and return STRICT JSON using this simplified, UI-friendly schema. Do not include status or required_inputs. If a field is unknown, set it to null. Round numbers sensibly.\n\nAugmented data available (pre-fetched via Alpha Vantage):\n- Fundamentals: PE, PEG, PS, PB, EV/EBITDA, EPS, revenue (TTM), revenue per share TTM, margins (gross/operating/net), ROE/ROA, YoY revenue & earnings growth, dividend yield.\n- Technicals: SMA(50/200), RSI(14), MACD, trend bias (golden cross proxy), price vs averages.\n- Macro: CPI, Unemployment, Fed Funds, 10Y yield.\n- News: Alpha Intelligence average sentiment and pos/neg/neutral counts.\n\nExplain how these influence edge, timing, and risk for the selected strategy. Provide 3–6 specific, actionable suggestions (entries, risk controls, rolls, adjustments).\n\nSchema:\n{\n  "score": 0,\n  "category": "Strong | Moderate | Weak",\n  "confidence": 0.0,\n  "summary": "",\n  "rationale_bullets": [""],\n  "math": {\n    "max_profit": null,\n    "max_loss": null,\n    "rr_ratio": null,\n    "rr_display": null,\n    "breakevens": [],\n    "collateral_required": null,\n    "pop_proxy": null,\n    "pol_proxy": null\n  },\n  "market_context": {\n    "dte": null,\n    "iv": null,\n    "iv_rank": null\n  },\n  "plan": {\n    "entry_notes": "",\n    "monitoring_triggers": [""],\n    "exit_plan": {\n      "profit_target_pct": 50,\n      "max_loss_cut_pct_of_max": 50,\n      "time_exit_if_no_signal_days": 21,\n      "roll_rules": "Roll when short strike threatened and credit ≥ 25% initial"\n    }\n  },\n  "suggestions": []\n}\n\nScoring weights (total 100): Strategy fit (25), Risk/reward math (25), Liquidity (15), IPS alignment (15), Time/events (10), Sizing (10).\n\nReturn only JSON. Trade Context (JSON):\n${JSON.stringify({ ...context, technicals, macro, news_sentiment: news })}\n`;
 
     const messages: Array<{ role: string; content: string; name?: string }> = [
       { role: "system", content: finalSystemPrompt },
@@ -358,6 +368,8 @@ export async function POST(request: NextRequest) {
         const installed = await listInstalledModels(baseOrigin);
         // Choose a likely chat-capable model
         const preferredOrder = [
+          "gpt-oss:120b",
+          "llama4:maverick",
           "llama3.2:latest",
           "llama3.1:latest",
           "llama3:latest",

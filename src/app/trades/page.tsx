@@ -1,7 +1,7 @@
 // src/app/trades/page.tsx
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -302,6 +302,24 @@ export default function TradesPage() {
 
   // AI analyze results for full-screen review
   const [aiResults, setAiResults] = useState<any | null>(null);
+
+  // Batch AI for Prospective Trades
+  type AIAnalysis = {
+    score: number | null;
+    summary: string;
+    rationale?: string;
+    suggestions: string[];
+    confidence: number;
+    category: "Strong" | "Moderate" | "Weak";
+    model?: string;
+    status?: string;
+    full?: any;
+    inputs?: any;
+  };
+  const [aiByTrade, setAiByTrade] = useState<Record<string, AIAnalysis | undefined>>({});
+  const [aiOpenRows, setAiOpenRows] = useState<Set<string>>(new Set());
+  const [aiBatchRunning, setAiBatchRunning] = useState(false);
+  const [aiBatchMsg, setAiBatchMsg] = useState<string | null>(null);
 
   const userId = "user-123"; // TODO: replace with auth
 
@@ -800,6 +818,41 @@ export default function TradesPage() {
     const fmt = (n?: number | string) =>
       n === undefined || n === "" ? "—" : typeof n === "number" ? (Math.abs(n) >= 1 ? n.toFixed(2) : n.toString()) : n;
 
+    async function runAIForSelected() {
+      if (selectedProspective.size === 0 || aiBatchRunning) return;
+      const ids = Array.from(selectedProspective);
+      setAiBatchRunning(true);
+      try {
+        for (let i = 0; i < ids.length; i++) {
+          const id = ids[i];
+          setAiBatchMsg(`Analyzing ${i + 1} of ${ids.length}…`);
+          const t = prospectiveTrades.find((x) => x.id === id);
+          if (!t) continue;
+          const res = await fetch("/api/ai/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              trade: t.data,
+              ipsName: t.ips?.name || t.ips?.id,
+              strategyType: t.data.contractType,
+            }),
+          });
+          const json = await res.json().catch(() => null);
+          if (res.ok && json?.success && json?.data) {
+            setAiByTrade((prev) => ({ ...prev, [id]: json.data }));
+          } else {
+            setAiByTrade((prev) => ({ ...prev, [id]: undefined }));
+          }
+        }
+        setAiBatchMsg(null);
+      } catch (e) {
+        setAiBatchMsg("Analysis failed. Try again later.");
+      } finally {
+        setAiBatchRunning(false);
+        setTimeout(() => setAiBatchMsg(null), 2000);
+      }
+    }
+
     return (
       <div className="max-w-6xl mx-auto p-6">
         <div className="mb-6 flex items-center justify-between">
@@ -906,13 +959,18 @@ export default function TradesPage() {
               ) : (
                 <>
                 <div className="flex items-center justify-between mb-3">
-                  <div className="text-sm text-gray-600">Selected: {selectedProspective.size}</div>
+                  <div className="text-sm text-gray-600 flex items-center gap-3">
+                    <span>Selected: {selectedProspective.size}</span>
+                    {aiBatchRunning || aiBatchMsg ? (
+                      <span className="text-xs text-blue-600">{aiBatchMsg || "Analyzing…"}</span>
+                    ) : null}
+                  </div>
                   <div className="flex gap-2">
-                    <Button variant="outline" onClick={bulkDeleteProspective} disabled={selectedProspective.size === 0}>Remove</Button>
-                    <Button onClick={bulkProspectiveToActive} disabled={selectedProspective.size === 0} className="bg-blue-600 text-white">Add to Active</Button>
-                    <Button variant="outline" onClick={() => (window.location.href = '/journal')}>A.I. Analysis</Button>
-                    <Button variant="outline" onClick={() => setCurrentView('selection')}>Place New Trade</Button>
-                    <Button variant="outline" onClick={() => setCurrentView('selection')}>Trade Dashboard</Button>
+                    <Button variant="outline" onClick={bulkDeleteProspective} disabled={selectedProspective.size === 0 || aiBatchRunning}>Remove</Button>
+                    <Button onClick={bulkProspectiveToActive} disabled={selectedProspective.size === 0 || aiBatchRunning} className="bg-blue-600 text-white">Add to Active</Button>
+                    <Button variant="outline" onClick={runAIForSelected} disabled={selectedProspective.size === 0 || aiBatchRunning}>A.I. Analysis</Button>
+                    <Button variant="outline" onClick={() => setCurrentView('selection')} disabled={aiBatchRunning}>Place New Trade</Button>
+                    <Button variant="outline" onClick={() => setCurrentView('selection')} disabled={aiBatchRunning}>Trade Dashboard</Button>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
@@ -936,12 +994,21 @@ export default function TradesPage() {
                         <th className="py-2 pr-4">Key Terms</th>
                         <th className="py-2 pr-4">Credit/Debit</th>
                         <th className="py-2 pr-4">Score</th>
+                        <th className="py-2 pr-4">A.I. Score</th>
+                        <th className="py-2 pr-4">Details</th>
                         <th className="py-2 pr-4">Actions</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {prospectiveTrades.map((t) => {
-                        const d = t.data;
+                      {prospectiveTrades
+                        .slice()
+                        .sort((a, b) => {
+                          const as = (aiByTrade[a.id]?.score ?? a.score ?? -Infinity) as number;
+                          const bs = (aiByTrade[b.id]?.score ?? b.score ?? -Infinity) as number;
+                          return (isFinite(bs) ? bs : -1) - (isFinite(as) ? as : -1);
+                        })
+                        .map((t) => {
+                         const d = t.data;
                         const contract = d.contractType.replace(/-/g, " ").toUpperCase();
                         const credit =
                           d.creditReceived ?? d.premiumReceived ?? (d.debitPaid ? -Math.abs(d.debitPaid) : 0);
@@ -971,7 +1038,8 @@ export default function TradesPage() {
                         }
                         const isSel = selectedProspective.has(t.id);
                         return (
-                          <tr key={t.id} className="border-t">
+                          <Fragment key={t.id}>
+                          <tr className="border-t">
                             <td className="py-2 pr-2">
                               <Checkbox
                                 checked={isSel}
@@ -993,8 +1061,25 @@ export default function TradesPage() {
                             <td className="py-2 pr-4">{credit === undefined ? "—" : `$${fmt(credit)}`}</td>
                             <td className="py-2 pr-4">{t.score ? t.score.toFixed(1) : "—"}</td>
                             <td className="py-2 pr-4">
+                              {aiByTrade[t.id]?.score != null ? (
+                                <span className={`font-semibold ${Number(aiByTrade[t.id]?.score) >= 80 ? 'text-green-600' : Number(aiByTrade[t.id]?.score) >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>
+                                  {Math.round(Number(aiByTrade[t.id]?.score))}
+                                </span>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </td>
+                            <td className="py-2 pr-4">
+                              <Button size="sm" variant="outline" onClick={() => setAiOpenRows(prev => {
+                                const next = new Set(prev);
+                                if (next.has(t.id)) next.delete(t.id); else next.add(t.id);
+                                return next;
+                              })} disabled={!aiByTrade[t.id]}>
+                                View Details
+                              </Button>
+                            </td>
+                            <td className="py-2 pr-4">
                               <div className="flex gap-2">
-                                <Button size="sm" variant="outline" onClick={() => (window.location.href = '/journal')}>AI</Button>
                                 <Button
                                   size="sm"
                                   onClick={async ()=>{
@@ -1013,6 +1098,79 @@ export default function TradesPage() {
                               </div>
                             </td>
                           </tr>
+                          {aiOpenRows.has(t.id) && aiByTrade[t.id] ? (
+                            <tr className="bg-gray-50">
+                              <td></td>
+                              <td colSpan={11} className="p-4">
+                                {(() => {
+                                  const R = aiByTrade[t.id]!;
+                                  const categoryClass = R.score != null && Number(R.score) >= 80
+                                    ? 'bg-green-100 text-green-800'
+                                    : R.score != null && Number(R.score) >= 60
+                                    ? 'bg-yellow-100 text-yellow-800'
+                                    : 'bg-red-100 text-red-800';
+                                  return (
+                                    <div className="space-y-2">
+                                      <div className="flex items-start justify-between">
+                                        <div className="text-sm text-gray-700 whitespace-pre-line pr-4">
+                                          {R.summary}
+                                        </div>
+                                        <div className="text-right min-w-[140px]">
+                                          <div className="text-2xl font-bold text-blue-600">{R.score != null ? Math.round(Number(R.score)) : '—'}</div>
+                                          <span className={`inline-block text-xs px-2 py-1 rounded ${categoryClass}`}>{R.category}</span>
+                                        </div>
+                                      </div>
+                                      {Array.isArray(R.suggestions) && R.suggestions.length > 0 && (
+                                        <div className="text-sm text-gray-700">
+                                          <div className="font-medium text-sm mb-1">Suggestions</div>
+                                          <ul className="list-disc list-inside">
+                                            {R.suggestions.slice(0, 3).map((s, i) => (<li key={i}>{s}</li>))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                      {R.full ? (
+                                        <details>
+                                          <summary className="text-sm text-blue-600 cursor-pointer select-none">Show additional details</summary>
+                                          <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-gray-700">
+                                            {R.inputs ? (
+                                              <div className="space-y-1">
+                                                <div className="text-xs font-semibold text-gray-600">Data Snapshot</div>
+                                                <div>Price: {R.inputs?.underlying?.price ?? '—'} • 52w: {R.inputs?.underlying?.week52_low ?? '—'} / {R.inputs?.underlying?.week52_high ?? '—'}</div>
+                                                <div>Trend: {R.inputs?.technicals?.trend_bias ?? (R.inputs?.technicals?.golden_cross ? 'uptrend' : '—')}</div>
+                                                <div>RSI(14): {R.inputs?.technicals?.rsi14 ?? '—'} • SMA50/200: {R.inputs?.technicals?.sma50 ?? '—'} / {R.inputs?.technicals?.sma200 ?? '—'}</div>
+                                                <div>MACD: {R.inputs?.technicals?.macd ?? '—'} ({R.inputs?.technicals?.macd_signal ?? '—'})</div>
+                                                <div>Macro: CPI {R.inputs?.macro?.cpi ?? '—'} • Unemp {R.inputs?.macro?.unemployment_rate ?? '—'} • FFR {R.inputs?.macro?.fed_funds_rate ?? '—'} • 10Y {R.inputs?.macro?.treasury_10y ?? '—'}</div>
+                                                <div>News Sentiment: avg {R.inputs?.news_sentiment?.average_score ?? '—'} ({R.inputs?.news_sentiment?.positive ?? 0}+/{R.inputs?.news_sentiment?.negative ?? 0}-/{R.inputs?.news_sentiment?.neutral ?? 0}=)</div>
+                                              </div>
+                                            ) : null}
+                                            {R.inputs?.underlying?.fundamentals ? (
+                                              <div className="space-y-1">
+                                                <div className="text-xs font-semibold text-gray-600">Fundamentals</div>
+                                                <div>PE: {R.inputs.underlying.fundamentals.pe_ratio ?? '—'} • PEG: {R.inputs.underlying.fundamentals.peg_ratio ?? '—'}</div>
+                                                <div>PS/PB: {R.inputs.underlying.fundamentals.ps_ratio_ttm ?? '—'} / {R.inputs.underlying.fundamentals.pb_ratio ?? '—'} • EV/EBITDA: {R.inputs.underlying.fundamentals.ev_to_ebitda ?? '—'}</div>
+                                                <div>Margins (G/O/N): {R.inputs.underlying.fundamentals.gross_margin_pct ?? '—'}% / {R.inputs.underlying.fundamentals.operating_margin_pct ?? '—'}% / {R.inputs.underlying.fundamentals.net_margin_pct ?? '—'}%</div>
+                                                <div>ROE/ROA: {R.inputs.underlying.fundamentals.roe_pct ?? '—'}% / {R.inputs.underlying.fundamentals.roa_pct ?? '—'}%</div>
+                                                <div>Growth (Rev/EPS YoY): {R.inputs.underlying.fundamentals.revenue_growth_yoy_pct ?? '—'}% / {R.inputs.underlying.fundamentals.earnings_growth_yoy_pct ?? '—'}%</div>
+                                                <div>Dividend Yield: {R.inputs.underlying.fundamentals.dividend_yield_pct ?? '—'}%</div>
+                                              </div>
+                                            ) : null}
+                                            {R.full?.math ? (
+                                              <div className="space-y-1">
+                                                <div className="text-xs font-semibold text-gray-600">Math</div>
+                                                <div>Max Profit: {R.full.math.max_profit ?? '—'} • Max Loss: {R.full.math.max_loss ?? '—'}</div>
+                                                <div>PoP: {R.full.math.pop_proxy ?? '—'} • RR: {R.full.math.rr_ratio ?? '—'}</div>
+                                              </div>
+                                            ) : null}
+                                          </div>
+                                        </details>
+                                      ) : null}
+                                    </div>
+                                  );
+                                })()}
+                              </td>
+                            </tr>
+                          ) : null}
+                          </Fragment>
                         );
                       })}
                     </tbody>

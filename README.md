@@ -1,6 +1,6 @@
-# AI Trade Analysis & IPS Scoring
+# Tenxiv — AI-Enhanced Trade Analysis
 
-Focused trade journaling with IPS‑weighted scoring.
+Focused trade journaling with IPS‑weighted scoring and an Express API that integrates with Ollama for structured, JSON-first A.I. reasoning.
 
 What's new:
 - Alpha Vantage ticker search in the New Trade form (typeahead powered by SYMBOL_SEARCH).
@@ -35,10 +35,12 @@ If the embed doesn’t load, download/watch:
 - Create trade: `POST /api/trades` with `userId`, `ipsId`, `tradeData`, and optional `ipsScore/scoreId`.
 - Manage lifecycle: `GET /api/trades`, `PATCH /api/trades`, `DELETE /api/trades`.
 
-## API Endpoints (IPS & Trades)
+## API Endpoints (LLM + IPS/Trades)
 
 | Method | Path | Description |
 |---|---|---|
+| GET | `/api/health` | Express: health check for LLM server. |
+| POST | `/api/llm/analyze` | Express: analyze a trade via Ollama (JSON result). |
 | POST | `/api/ips` | Create an IPS with factor rows (ids or names resolved). |
 | GET | `/api/ips` | List IPS configurations (with factor counts). |
 | PUT | `/api/ips` | Update an IPS and replace factors. |
@@ -57,3 +59,32 @@ If the embed doesn’t load, download/watch:
 - `ALPHA_VANTAGE_API_KEY` required for quotes, fundamentals and search.
 - Optional: `ALPHA_VANTAGE_MIN_DELAY_MS` tiny throttle between sequential AV calls (default 100ms).
 - Optional: `ALPHA_VANTAGE_DAILY_BUDGET` local guard for `/api/market-data` route (default 50000).
+
+LLM / Express server:
+- `OLLAMA_HOST` (default `http://golem:11434`) — connect via Tailscale
+- `OLLAMA_MODEL` (recommended `gpt-oss:120b` or `llama4:maverick`)
+
+Run locally:
+- `npm run server` (starts Express at `http://localhost:4000`)
+- `npm run dev` (starts Next.js)
+
+Postman usage:
+- Import `POST /api/llm/analyze` and send a JSON body:
+```
+{
+  "trade": { "symbol": "AAPL", "contractType": "put-credit-spread", "expirationDate": "2025-10-18", "numberOfContracts": 1, "shortPutStrike": 190, "longPutStrike": 185, "creditReceived": 1.25 },
+  "ipsName": "PCS Conservative",
+  "strategyType": "put-credit-spread",
+  "model": "llama4:maverick"
+}
+```
+Response is strict JSON with `score`, `summary`, `rationale_bullets`, `math`, `market_context`, `plan`, and `suggestions`.
+
+## Tool Calling (Express)
+
+- Tools are defined and passed to Ollama via the `tools` parameter in `server.js`:
+  - `search_symbols(query, limit?)`: Alpha Vantage SYMBOL_SEARCH.
+  - `get_quote(symbol)`: Alpha Vantage GLOBAL_QUOTE.
+  - `get_overview(symbol)`: Alpha Vantage OVERVIEW fundamentals.
+- When the model requests a tool call, the server executes the function (fetches data from Alpha Vantage), then appends a `tool` role message containing the JSON result and calls Ollama again to let the model incorporate the output.
+- The server preserves the message sequence through 2 tool rounds and returns a strict JSON response for programmatic use.
