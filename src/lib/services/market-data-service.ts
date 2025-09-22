@@ -149,6 +149,7 @@ class MarketDataService {
         };
 
         let fundamentals;
+        let currency: string | undefined;
         if (includeFundamentals) {
         // Check cache first for fundamentals (24 hour TTL)
         const cacheKey = `fundamentals_${symbol}`;
@@ -167,6 +168,7 @@ class MarketDataService {
             try {
             const fundamentalData = await this.alphaVantage.getCompleteFundamentalData(symbol);
             fundamentals = this.extractFundamentals(fundamentalData);
+            currency = fundamentalData?.overview?.Currency || currency;
             
             // Fix: adjust setCache call based on your method signature
             this.setCache(cacheKey, {
@@ -211,8 +213,9 @@ class MarketDataService {
         peRatio: fundamentals?.pbRatio,
         week52High: fundamentals?.week52High,
         week52Low: fundamentals?.week52Low,
-        marketCap: undefined,
+        marketCap: fundamentals?.marketCap,
         lastUpdated: new Date(),
+        currency,
         fundamentals
         };
 

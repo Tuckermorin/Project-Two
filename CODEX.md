@@ -1,39 +1,27 @@
-15-minute Delayed US Stock Market Data: Enabled
+# Authentication Integration Checklist
 
-To access 15-minute delayed US stock market data, please append entitlement=delayed to the data request. For example:
-https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=IBM&interval=5min&entitlement=delayed&apikey=XF0H4EC893MP2ATJ
+The application is wired for Supabase Auth. Complete these steps to finish the connection:
 
-https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&entitlement=delayed&apikey=XF0H4EC893MP2ATJ
+1. **Supabase project**
+   - Create (or reuse) a Supabase project.
+   - Enable **Email/Password** authentication under *Authentication → Providers*.
+   - Set the *Site URL* to your production domain (and `http://localhost:3000` for local development).
 
-https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=IBM&outputsize=full&entitlement=delayed&apikey=XF0H4EC893MP2ATJ
+2. **Environment variables**
+   - Add the following to `.env` (all required):
+     - `NEXT_PUBLIC_SUPABASE_URL="https://YOUR_PROJECT.supabase.co"`
+     - `NEXT_PUBLIC_SUPABASE_ANON_KEY="YOUR_PUBLIC_ANON_KEY"`
+     - `SUPABASE_SERVICE_ROLE_KEY="YOUR_SERVICE_ROLE_KEY"`
+   - Restart the Next.js dev server after updating the file.
 
-💡Tip: you can also access 15-minute delayed technical indicators with similar URL configurations:
-https://www.alphavantage.co/query?function=SMA&symbol=IBM&interval=5min&time_period=10&series_type=close&entitlement=delayed&apikey=XF0H4EC893MP2ATJ
+3. **Redirect URLs / CORS**
+   - In Supabase, open *Authentication → URL Configuration* and add your production domain and `http://localhost:3000` to the Redirect URLs list so the auth cookies can round-trip.
 
+4. **User management**
+   - Create user accounts via the Supabase dashboard or the `/login` page.
+   - The Account screen updates `auth.users` metadata (display name + phone). Password resets still rely on Supabase’s built-in flows.
 
-Realtime US Stock Market Data: Enabled
+5. **Emails (optional)**
+   - Configure SMTP settings in Supabase if you want password reset / confirmation emails.
 
-To access realtime US stock market data, please append entitlement=realtime to the data request. For example:
-https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=IBM&interval=5min&entitlement=realtime&apikey=XF0H4EC893MP2ATJ
-
-https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&entitlement=realtime&apikey=XF0H4EC893MP2ATJ
-
-https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=IBM&outputsize=full&entitlement=realtime&apikey=XF0H4EC893MP2ATJ
-
-💡Tip: you can also access realtime technical indicators with similar URL configurations:
-https://www.alphavantage.co/query?function=SMA&symbol=IBM&interval=5min&time_period=10&series_type=close&entitlement=realtime&apikey=XF0H4EC893MP2ATJ
-
-❗IMPORTANT: if your subscription plan is also eligible for realtime US options data, please set up your options data entitlements here.
----
-## Next Auth Steps
-
-- Provision Supabase project (or NextAuth provider) and set environment variables in :
-  - 
-  - 
----
-## Authentication Setup
-
-- Provision Supabase (or NextAuth) credentials and add the secrets to `.env` (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`).
-- Wrap the app in a session provider inside `src/app/layout.tsx` once auth is enabled.
-- Replace the disabled submit actions in `src/app/login/page.tsx` and `src/app/account/page.tsx` with real API calls when sessions are available.
-- Update `src/components/navigation.tsx` to show the signed-in user dropdown after wiring authentication.
+Once these steps are complete, the navigation bar, login page, and account page will automatically reflect the signed-in session.

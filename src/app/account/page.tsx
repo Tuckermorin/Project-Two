@@ -1,16 +1,81 @@
 "use client"
 
 import Link from "next/link"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
+import { AlertCircle } from "lucide-react"
+import { useSession, useSupabaseClient } from "@supabase/auth-helpers-react"
 
 export default function AccountPage() {
   const [displayName, setDisplayName] = useState("")
   const [phone, setPhone] = useState("")
+  const [statusMessage, setStatusMessage] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
+  const [loading, setLoading] = useState(false)
+  const session = useSession()
+  const supabase = useSupabaseClient()
+  const router = useRouter()
+
+  const user = session?.user
+
+  useEffect(() => {
+    if (!user) return
+    setDisplayName(user.user_metadata?.display_name ?? '')
+    const metadataPhone = user.user_metadata?.phone ?? ''
+    setPhone(metadataPhone)
+  }, [user])
+
+  const handleSave = async () => {
+    if (!user) return
+    setLoading(true)
+    setErrorMessage(null)
+    setStatusMessage(null)
+    const { error } = await supabase.auth.updateUser({
+      data: {
+        display_name: displayName,
+        phone,
+      },
+    })
+    if (error) {
+      setErrorMessage(error.message)
+    } else {
+      setStatusMessage('Profile updated successfully.')
+      router.refresh()
+    }
+    setLoading(false)
+  }
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    router.push('/login')
+    router.refresh()
+  }
+
+  if (!user) {
+    return (
+      <div className="container mx-auto px-4 py-16 max-w-xl">
+        <Card>
+          <CardHeader>
+            <CardTitle>Account</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-sm text-gray-700">
+            <div className="flex items-center gap-2 text-red-600">
+              <AlertCircle className="h-4 w-4" />
+              You need to be signed in to manage your account.
+            </div>
+            <Button asChild>
+              <Link href="/login">Go to Login</Link>
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="container mx-auto px-4 py-10 max-w-4xl space-y-6">
@@ -40,7 +105,7 @@ export default function AccountPage() {
               </div>
               <div>
                 <Label htmlFor="email">Email</Label>
-                <Input id="email" value="you@example.com" readOnly className="bg-gray-100" />
+                <Input id="email" value={user.email ?? ''} readOnly className="bg-gray-100" />
               </div>
               <div>
                 <Label htmlFor="phone">Phone</Label>
@@ -57,12 +122,19 @@ export default function AccountPage() {
               </div>
             </div>
             <div className="flex gap-2">
-              <Button type="button" disabled>Save changes</Button>
-              <Button type="button" variant="outline" disabled>Cancel</Button>
+              <Button type="button" onClick={handleSave} disabled={loading}>
+                {loading ? 'Saving…' : 'Save changes'}
+              </Button>
+              <Button type="button" variant="outline" onClick={() => handleSignOut()}>
+                Sign out
+              </Button>
             </div>
-            <p className="text-xs text-gray-500">
-              Connect real authentication to enable profile updates (see <code>CODEX.md</code>).
-            </p>
+            {statusMessage && (
+              <p className="text-xs text-green-600">{statusMessage}</p>
+            )}
+            {errorMessage && (
+              <p className="text-xs text-red-600">{errorMessage}</p>
+            )}
           </CardContent>
         </Card>
 
@@ -71,12 +143,9 @@ export default function AccountPage() {
             <CardTitle>Next steps</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3 text-sm text-gray-700">
-            <p>1. Configure auth provider keys in <code>.env</code>.</p>
-            <p>2. Connect Supabase Auth or NextAuth session provider in <code>src/app/layout.tsx</code>.</p>
-            <p>3. Replace the disabled buttons with real mutations once sessions are available.</p>
-            <Button asChild variant="outline" size="sm" className="mt-2">
-              <Link href="/login">Go to login</Link>
-            </Button>
+            <p>Signed in as <span className="font-semibold">{user.email}</span>.</p>
+            <p>Use the form to update your display name or phone. This data is stored in your Supabase user metadata.</p>
+            <p>Need to manage your password? Use the Supabase dashboard to enable reset emails.</p>
           </CardContent>
         </Card>
       </div>

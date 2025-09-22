@@ -1,7 +1,7 @@
 "use client"
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { cn } from '@/lib/utils'
 import { 
   BarChart3, 
@@ -13,6 +13,7 @@ import {
   Home,
   UserCircle
 } from 'lucide-react'
+import { useSession, useSupabaseClient } from '@supabase/auth-helpers-react'
 
 const navigation = [
   { name: 'Dashboard', href: '/', icon: Home },
@@ -25,6 +26,14 @@ const navigation = [
 
 export function Navigation() {
   const pathname = usePathname()
+  const router = useRouter()
+  const session = useSession()
+  const supabase = useSupabaseClient()
+
+  const handleSignOut = async () => {
+    await supabase.auth.signOut()
+    router.refresh()
+  }
 
   return (
     <nav className="bg-white shadow-sm border-b">
@@ -57,21 +66,33 @@ export function Navigation() {
             </div>
           </div>
           <div className="hidden sm:flex items-center gap-4">
-            <Link
-              href="/account"
-              className={cn(
-                'inline-flex items-center text-sm text-gray-600 hover:text-gray-900'
-              )}
-            >
-              <UserCircle className="h-5 w-5 mr-1" />
-              Account
-            </Link>
-            <Link
-              href="/login"
-              className="inline-flex items-center rounded-md border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50"
-            >
-              Login
-            </Link>
+            {session ? (
+              <>
+                <Link
+                  href="/account"
+                  className="inline-flex items-center rounded-full border border-gray-200 px-3 py-1 text-sm text-gray-700 hover:bg-gray-50"
+                >
+                  <UserCircle className="h-4 w-4 mr-1" />
+                  {session.user.email ?? session.user.user_metadata?.display_name ?? 'Account'}
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleSignOut}
+                  className="text-sm text-gray-600 hover:text-gray-900"
+                >
+                  Sign out
+                </button>
+              </>
+            ) : (
+              <>
+                <Link
+                  href="/login"
+                  className="inline-flex items-center rounded-md border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50"
+                >
+                  Login
+                </Link>
+              </>
+            )}
           </div>
         </div>
       </div>

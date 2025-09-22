@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, useRef } from "react"
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -31,6 +31,8 @@ type Stock = {
   beta?: number
   analystTargetPrice?: number
   eps?: number
+  lastUpdated?: string
+  error?: string | null
 }
 
 const AV_BASE = "https://www.alphavantage.co/query"
@@ -93,6 +95,8 @@ async function fetchAlphaVantage(symbol: string) {
 
 const STORAGE_KEY = "watchlist:v2"
 
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
 // Columns available in list view
 const ALL_COLUMNS = [
   { key: "symbol", label: "Symbol" },
@@ -126,6 +130,12 @@ export default function WatchlistPage() {
   const [preview, setPreview] = useState<Partial<Stock> | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [searchQuery, setSearchQuery] = useState("")
+  const [searchResults, setSearchResults] = useState<Array<{ symbol: string; name: string; region?: string; currency?: string }>>([])
+  const [searchBusy, setSearchBusy] = useState(false)
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // view/sort/filter controls
   const [viewMode, setViewMode] = useState<"tiles" | "list">("tiles")
@@ -133,6 +143,10 @@ export default function WatchlistPage() {
   const [sortBy, setSortBy] = useState<ColumnKey>("symbol")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
   const [sectorFilter, setSectorFilter] = useState("")
+  const pendingKeys = useMemo(
+    () => stocks.filter(s => !s.lastUpdated).map(s => s.id).join('|'),
+    [stocks]
+  )
 
   // load persisted
   useEffect(() => {
@@ -157,6 +171,106 @@ export default function WatchlistPage() {
     if (!hydrated) return
     localStorage.setItem(STORAGE_KEY, JSON.stringify({ stocks, selectedCols, viewMode }))
   }, [stocks, selectedCols, viewMode, hydrated])
+
+  // Load fresh market data for stocks without a recent snapshot
+  useEffect(() => {
+    if (!hydrated) return
+    if (!pendingKeys) return
+
+    let cancelled = false
+
+    const mapUnifiedToStock = (data: any): Partial<Stock> => {
+      if (!data) return {}
+      const fundamentals = data.fundamentals || {}
+      return {
+        currentPrice: data.currentPrice ?? undefined,
+        change: data.priceChange ?? undefined,
+        changePercent: data.priceChangePercent ?? undefined,
+        volume: data.volume ?? undefined,
+        marketCap: data.marketCap ?? fundamentals.marketCap ?? undefined,
+        peRatio: data.peRatio ?? fundamentals.peRatio ?? undefined,
+        beta: data.beta ?? fundamentals.beta ?? undefined,
+        week52High: data.week52High ?? fundamentals.week52High ?? undefined,
+        week52Low: data.week52Low ?? fundamentals.week52Low ?? undefined,
+        dividendYield: fundamentals.dividendYield ?? undefined,
+        analystTargetPrice: fundamentals.analystTargetPrice ?? undefined,
+        eps: fundamentals.eps ?? undefined,
+        currency: data.currency ?? fundamentals.currency ?? undefined,
+        lastUpdated: new Date().toISOString(),
+        error: null,
+      }
+    }
+
+    const fetchSymbol = async (symbol: string) => {
+      const url = `/api/market-data/fundamental?symbol=${encodeURIComponent(symbol)}`
+      let attempt = 0
+      let lastError: string | null = null
+
+      while (attempt < 3) {
+        try {
+          const res = await fetch(url, { cache: 'no-store' })
+          if (res.status === 429 || res.headers.get('X-RateLimited') === 'true') {
+            lastError = 'Alpha Vantage rate limit reached. Some watchlist data may be stale.'
+            attempt += 1
+            await sleep(1200 * attempt)
+            continue
+          }
+          if (!res.ok) {
+            const body = await res.json().catch(() => null)
+            throw new Error(body?.error || body?.message || res.statusText)
+          }
+          const body = await res.json()
+          if (!body?.data) throw new Error('No data returned')
+          return { mapped: mapUnifiedToStock(body.data), notice: lastError }
+        } catch (err: any) {
+          lastError = err?.message || 'Failed to fetch watchlist data'
+          attempt += 1
+          await sleep(800 * attempt)
+        }
+      }
+
+      throw new Error(lastError || 'Failed to fetch watchlist data')
+    }
+
+    const pending = stocks.filter((s) => !s.lastUpdated)
+    if (pending.length === 0) return
+
+    (async () => {
+      for (const stock of pending) {
+        if (cancelled) break
+        try {
+          const result = await fetchSymbol(stock.symbol)
+          if (cancelled) break
+          if (result?.notice) setNotice(result.notice)
+          else setNotice(null)
+          setStocks((prev) =>
+            prev.map((item) =>
+              item.id === stock.id
+                ? { ...item, ...result.mapped }
+                : item
+            )
+          )
+        } catch (err: any) {
+          if (cancelled) break
+          setNotice((prev) => prev ?? err?.message ?? 'Unable to update watchlist data.')
+          setStocks((prev) =>
+            prev.map((item) =>
+              item.id === stock.id
+                ? { ...item, error: err?.message || 'Failed to refresh data', lastUpdated: item.lastUpdated ?? new Date().toISOString() }
+                : item
+            )
+          )
+        }
+
+        // avoid hitting rate limits with a small delay between calls
+        await sleep(500)
+      }
+    })()
+
+    return () => {
+      cancelled = true
+    }
+  }, [hydrated, pendingKeys, stocks])
 
   // ticker => preview fetch (debounced)
   useEffect(() => {
@@ -188,6 +302,39 @@ export default function WatchlistPage() {
     }
   }, [symbol])
 
+  // symbol search (shared with trades entry)
+  useEffect(() => {
+    if (!searchOpen) return
+    if (searchTimer.current) clearTimeout(searchTimer.current)
+    const q = searchQuery.trim()
+    if (!q) {
+      setSearchResults([])
+      setSearchBusy(false)
+      return
+    }
+    setSearchBusy(true)
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/market-data/symbol-search?q=${encodeURIComponent(q)}&limit=8`, { cache: 'no-store' })
+        const data = await res.json().catch(() => null)
+        if (res.ok && data?.success !== false) {
+          const results = Array.isArray(data?.data) ? data.data : data?.matches || []
+          setSearchResults(results.map((r: any) => ({ symbol: r.symbol ?? r.Symbol ?? '', name: r.name ?? r.Name ?? '', region: r.region ?? r.Region, currency: r.currency ?? r.Currency })).filter((r: any) => r.symbol))
+        } else {
+          setSearchResults([])
+        }
+      } catch {
+        setSearchResults([])
+      } finally {
+        setSearchBusy(false)
+      }
+    }, 250)
+
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current)
+    }
+  }, [searchQuery, searchOpen])
+
   const handleAddStock = () => {
     const s = symbol.trim().toUpperCase()
     if (!s || !preview) return
@@ -210,6 +357,7 @@ export default function WatchlistPage() {
       analystTargetPrice: preview.analystTargetPrice,
       eps: preview.eps,
       notes: notes.trim() || undefined,
+      error: null,
     }
     setStocks(prev => [...prev, stock])
     setSymbol("")
@@ -217,6 +365,7 @@ export default function WatchlistPage() {
     setPreview(null)
     setError(null)
     setShowAddForm(false)
+    setNotice(null)
   }
 
   const handleRemoveStock = (id: string) => {
@@ -259,6 +408,11 @@ export default function WatchlistPage() {
 
   return (
     <div className="container mx-auto px-4 py-8">
+      {notice && (
+        <div className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">
+          {notice}
+        </div>
+      )}
       {/* Watchlist Stats moved to top */}
       <Card className="mb-6">
         <CardHeader>
@@ -315,11 +469,18 @@ export default function WatchlistPage() {
             </div>
           )}
         </div>
-
-        <Button onClick={() => setShowAddForm(v => !v)}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Stock
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={() => {
+            setNotice(null)
+            setStocks(prev => prev.map(stock => ({ ...stock, lastUpdated: undefined })))
+          }}>
+            Refresh Data
+          </Button>
+          <Button onClick={() => setShowAddForm(v => !v)}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Stock
+          </Button>
+        </div>
       </div>
 
       {/* Add Stock Form (ticker drives values; only Notes is editable) */}
@@ -334,11 +495,52 @@ export default function WatchlistPage() {
                 <label className="block text-sm font-medium text-gray-700 mb-1">Ticker *</label>
                 <div className="relative">
                   <Input
-                    placeholder="e.g., AAPL"
+                    placeholder="Search by symbol or company"
                     value={symbol}
-                    onChange={e => setSymbol(e.target.value.toUpperCase())}
+                    onFocus={() => setSearchOpen(true)}
+                    onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
+                    onChange={(e) => {
+                      const value = e.target.value.toUpperCase()
+                      setSymbol(value.replace(/\s+/g, ''))
+                      setSearchQuery(e.target.value)
+                    }}
+                    autoComplete="off"
                   />
-                  {loading && <Loader2 className="absolute right-2 top-2.5 h-5 w-5 animate-spin text-gray-400" />}
+                  {(loading || searchBusy) && <Loader2 className="absolute right-2 top-2.5 h-5 w-5 animate-spin text-gray-400" />}
+                  {searchOpen && (searchQuery || '').length >= 1 && (
+                    <div className="absolute z-20 mt-1 w-full rounded border bg-background shadow">
+                      {searchBusy && (
+                        <div className="px-3 py-2 text-xs text-muted-foreground">Searching…</div>
+                      )}
+                      {!searchBusy && searchResults.length === 0 && (
+                        <div className="px-3 py-2 text-xs text-muted-foreground">No matches</div>
+                      )}
+                      {!searchBusy && searchResults.map((result) => (
+                        <button
+                          key={`${result.symbol}-${result.name}`}
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-muted/40"
+                          onMouseDown={(ev) => ev.preventDefault()}
+                          onClick={() => {
+                            setSymbol(result.symbol.toUpperCase())
+                            setSearchQuery('')
+                            setSearchResults([])
+                            setSearchOpen(false)
+                          }}
+                        >
+                          <div className="text-sm font-medium">
+                            {result.symbol}
+                            <span className="text-muted-foreground"> • {result.name}</span>
+                          </div>
+                          {(result.region || result.currency) && (
+                            <div className="text-[11px] text-muted-foreground">
+                              {result.region ?? ''}{result.currency ? ` • ${result.currency}` : ''}
+                            </div>
+                          )}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
                 {error && (
                   <div className="flex items-center text-sm text-red-600 mt-2">
@@ -459,16 +661,22 @@ export default function WatchlistPage() {
                       <div>EPS: <span className="font-medium">{stock.eps != null ? stock.eps.toFixed(2) : '—'}</span></div>
                     </div>
 
-                    {stock.notes && (
-                      <div>
-                        <p className="text-sm text-gray-600">Notes</p>
-                        <p className="text-sm text-gray-800">{stock.notes}</p>
-                      </div>
-                    )}
+                  {stock.notes && (
+                    <div>
+                      <p className="text-sm text-gray-600">Notes</p>
+                      <p className="text-sm text-gray-800">{stock.notes}</p>
+                    </div>
+                  )}
 
-                    <div className="flex gap-2">
-                      <Button asChild size="sm" variant="outline" className="flex-1">
-                        <Link href={`/watchlist/${stock.symbol}`}>
+                  {stock.error && (
+                    <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+                      {stock.error}
+                    </div>
+                  )}
+
+                  <div className="flex gap-2">
+                    <Button asChild size="sm" variant="outline" className="flex-1">
+                      <Link href={`/watchlist/${stock.symbol}`}>
                           <TrendingUp className="h-4 w-4 mr-1" />
                           Analyze
                         </Link>
@@ -555,6 +763,9 @@ export default function WatchlistPage() {
                         <Button size="sm" variant="ghost" onClick={() => handleRemoveStock(s.id)} aria-label={`Remove ${s.symbol}`}>
                           <Trash2 className="h-4 w-4" />
                         </Button>
+                        {s.error && (
+                          <div className="mt-2 text-xs text-red-600">{s.error}</div>
+                        )}
                       </td>
                     </tr>
                   )
