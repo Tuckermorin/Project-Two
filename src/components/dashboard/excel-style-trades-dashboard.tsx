@@ -11,7 +11,8 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, Trash2 } from 'lucide-react'
+import { dispatchTradesUpdated } from '@/lib/events'
 
 // Trade data type
 interface Trade {
@@ -37,6 +38,7 @@ interface Trade {
   sector: string
   status: string
   ipsScore?: number
+  ipsName?: string | null
   dateClosed?: string
   costToClose?: number
   percentOfCredit?: number
@@ -107,6 +109,7 @@ export default function ExcelStyleTradesDashboard() {
   const [trades, setTrades] = useState<Trade[]>([])
   const [loading, setLoading] = useState<boolean>(false)
   const userId = 'user-123'
+  const LOCAL_CLOSURE_KEY = 'tenxiv:trade-closures'
 
   // Close/action-needed dialog state (local UI helper)
   const [closing, setClosing] = useState<{
@@ -115,13 +118,64 @@ export default function ExcelStyleTradesDashboard() {
     costToClose: string;
     reason: string;
     date: string;
+    moveToActionNeeded: boolean;
   }>({
     open: false,
     trade: null,
     costToClose: '',
     reason: 'manual close',
     date: new Date().toISOString().slice(0, 10),
+    moveToActionNeeded: false,
   })
+
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; trade: Trade | null }>({ open: false, trade: null })
+
+  const resetClosingDialog = () => {
+    setClosing({
+      open: false,
+      trade: null,
+      costToClose: '',
+      reason: 'manual close',
+      date: new Date().toISOString().slice(0,10),
+      moveToActionNeeded: false,
+    })
+  }
+
+  function upsertLocalClosure(tradeId: string, payload: Record<string, unknown>) {
+    try {
+      const raw = localStorage.getItem(LOCAL_CLOSURE_KEY)
+      const obj = raw ? JSON.parse(raw) : {}
+      obj[tradeId] = { ...(obj[tradeId] || {}), ...payload }
+      localStorage.setItem(LOCAL_CLOSURE_KEY, JSON.stringify(obj))
+    } catch {}
+  }
+
+  function removeLocalClosure(tradeId: string) {
+    try {
+      const raw = localStorage.getItem(LOCAL_CLOSURE_KEY)
+      if (!raw) return
+      const obj = JSON.parse(raw)
+      if (obj[tradeId]) {
+        delete obj[tradeId]
+        localStorage.setItem(LOCAL_CLOSURE_KEY, JSON.stringify(obj))
+      }
+    } catch {}
+  }
+
+  async function deleteTrade(trade: Trade) {
+    try {
+      await fetch('/api/trades', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [trade.id] })
+      })
+      setTrades(prev => prev.filter(t => t.id !== trade.id))
+      removeLocalClosure(trade.id)
+      dispatchTradesUpdated({ type: 'delete', scope: 'active', id: trade.id })
+    } catch (e) {
+      console.error('Failed to delete trade', e)
+    }
+  }
 
   const toTitle = (s: string) => s.replace(/-/g, ' ').replace(/\b\w/g, m => m.toUpperCase())
   const daysToExpiry = (exp: string): number => {
@@ -186,6 +240,7 @@ export default function ExcelStyleTradesDashboard() {
             sector: r.sector || '-',
             status,
             ipsScore: typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined,
+            ipsName: r.ips_name ?? r.ips_configurations?.name ?? null,
             plPercent: typeof r.pl_percent === 'number' ? Number(r.pl_percent) : undefined,
           }
           return obj
@@ -498,9 +553,24 @@ export default function ExcelStyleTradesDashboard() {
                           variant="outline"
                           size="sm"
                           className="h-6 px-2 text-xs"
-                          onClick={() => setClosing({ open: true, trade, costToClose: '', reason: 'manual close', date: new Date().toISOString().slice(0,10) })}
-                        >Action Needed</Button>
-                        
+                          onClick={() => setClosing({
+                            open: true,
+                            trade,
+                            costToClose: '',
+                            reason: 'manual close',
+                            date: new Date().toISOString().slice(0,10),
+                            moveToActionNeeded: false,
+                          })}
+                        >Close</Button>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-6 px-2 text-xs flex items-center gap-1"
+                          onClick={() => setDeleteDialog({ open: true, trade })}
+                          aria-label={`Delete ${trade.name}`}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
                       </div>
                     </td>
                   )}
@@ -512,56 +582,148 @@ export default function ExcelStyleTradesDashboard() {
       </CardContent>
     </Card>
     {/* Close Trade Dialog */}
-    <Dialog open={closing.open} onOpenChange={(o)=> setClosing(prev => ({ ...prev, open: o }))}>
+    <Dialog
+      open={closing.open}
+      onOpenChange={(open) => {
+        if (!open) resetClosingDialog()
+        else setClosing(prev => ({ ...prev, open }))
+      }}
+    >
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Mark Trade as Action Needed</DialogTitle>
+          <DialogTitle>Close Trade</DialogTitle>
         </DialogHeader>
         {closing.trade && (
-          <div className="space-y-3">
-            <div className="text-sm text-gray-600">{closing.trade.name}</div>
-            <div>
-              <Label className="text-sm">Close Date</Label>
-              <Input type="date" value={closing.date} onChange={(e)=> setClosing(prev => ({ ...prev, date: e.target.value }))} />
+          <div className="space-y-4">
+            <div className="flex items-start justify-between gap-3 rounded-md border bg-gray-50 p-3">
+              <div>
+                <Label htmlFor="move-to-action-needed" className="text-sm font-medium">Move to Action Needed</Label>
+                <p className="text-xs text-gray-500">Keep the trade open while you finalize close-out details later.</p>
+              </div>
+              <Checkbox
+                id="move-to-action-needed"
+                checked={closing.moveToActionNeeded}
+                onCheckedChange={(checked)=> setClosing(prev => ({ ...prev, moveToActionNeeded: Boolean(checked) }))}
+              />
             </div>
-            <div>
-              <Label className="text-sm">Closing Reason</Label>
-              <Select value={closing.reason} onValueChange={(v)=> setClosing(prev => ({ ...prev, reason: v }))}>
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="Select reason" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="manual close">Manual Close</SelectItem>
-                  <SelectItem value="expired">Expired</SelectItem>
-                  <SelectItem value="exit (profit)">Exit (Profit)</SelectItem>
-                  <SelectItem value="exit (loss)">Exit (Loss)</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-sm">Cost to Close (per spread)</Label>
-              <Input inputMode="decimal" value={closing.costToClose} onChange={(e)=> setClosing(prev => ({ ...prev, costToClose: e.target.value }))} placeholder="e.g., 0.35" />
-              <div className="text-xs text-gray-500 mt-1">Initial credit: ${closing.trade.creditReceived.toFixed(2)} • Contracts: {closing.trade.contracts}</div>
+            <div className="space-y-3">
+              <div className="text-sm text-gray-600">{closing.trade.name}</div>
+              <div>
+                <Label className="text-sm">Close Date</Label>
+                <Input type="date" value={closing.date} onChange={(e)=> setClosing(prev => ({ ...prev, date: e.target.value }))} />
+              </div>
+              <div>
+                <Label className="text-sm">Closing Reason</Label>
+                <Select value={closing.reason} onValueChange={(v)=> setClosing(prev => ({ ...prev, reason: v }))}>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select reason" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="manual close">Manual Close</SelectItem>
+                    <SelectItem value="expired">Expired</SelectItem>
+                    <SelectItem value="exit (profit)">Exit (Profit)</SelectItem>
+                    <SelectItem value="exit (loss)">Exit (Loss)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-sm">Cost to Close (per spread)</Label>
+                <Input
+                  inputMode="decimal"
+                  value={closing.costToClose}
+                  onChange={(e)=> setClosing(prev => ({ ...prev, costToClose: e.target.value }))}
+                  placeholder="e.g., 0.35"
+                />
+                <div className="text-xs text-gray-500 mt-1">Initial credit: ${closing.trade.creditReceived.toFixed(2)} • Contracts: {closing.trade.contracts}</div>
+              </div>
             </div>
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" onClick={()=> setClosing(prev => ({ ...prev, open: false }))}>Cancel</Button>
-          <Button onClick={async ()=>{
-            if (!closing.trade) return
-            const cc = parseFloat(closing.costToClose)
-            const valid = !isNaN(cc)
-            const contracts = closing.trade.contracts || 0
-            const credit = closing.trade.creditReceived || 0
-            const plDollar = valid ? (credit - cc) * contracts * 100 : undefined
-            const plPercent = valid && credit !== 0 ? ((credit - cc) / credit) * 100 : undefined
-            try { const raw = localStorage.getItem('tenxiv:trade-closures'); const obj = raw ? JSON.parse(raw) : {}; obj[closing.trade.id] = { date: closing.date, reason: closing.reason, costToClose: valid ? cc : null, plDollar, plPercent }; localStorage.setItem('tenxiv:trade-closures', JSON.stringify(obj)); } catch {}
-            try {
-              await fetch('/api/trades', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [closing.trade.id], status: 'action_needed' }) })
-              setTrades(prev => prev.filter(t => t.id !== closing.trade!.id))
-            } catch (e) { console.error('Close failed', e) }
-            setClosing(prev => ({ ...prev, open: false }))
-          }}>Send to Action Needed</Button>
+          <Button
+            variant="outline"
+            onClick={resetClosingDialog}
+          >
+            Cancel
+          </Button>
+          <Button
+            onClick={async () => {
+              if (!closing.trade) return
+
+              const cc = parseFloat(closing.costToClose)
+              const costIsNumber = !Number.isNaN(cc)
+              const contracts = closing.trade.contracts || 0
+              const credit = closing.trade.creditReceived || 0
+
+              if (closing.moveToActionNeeded) {
+                const plDollar = costIsNumber ? (credit - cc) * contracts * 100 : undefined
+                const plPercent = costIsNumber && credit !== 0 ? ((credit - cc) / credit) * 100 : undefined
+                upsertLocalClosure(closing.trade.id, {
+                  date: closing.date,
+                  reason: closing.reason,
+                  costToClose: costIsNumber ? cc : null,
+                  plDollar,
+                  plPercent,
+                  ipsName: closing.trade.ipsName ?? null,
+                  needsAction: true,
+                  updatedAt: new Date().toISOString(),
+                })
+                dispatchTradesUpdated({ type: 'moved-to-action-needed', id: closing.trade.id })
+              } else {
+                const payload: Record<string, unknown> = {
+                  tradeId: closing.trade.id,
+                  closeMethod: closing.reason,
+                  closeDate: closing.date,
+                  costToClosePerSpread: costIsNumber ? cc : null,
+                  contractsClosed: contracts || null,
+                }
+
+                try {
+                  await fetch('/api/trades/close', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload),
+                  })
+                  setTrades(prev => prev.filter(t => t.id !== closing.trade!.id))
+                  removeLocalClosure(closing.trade.id)
+                  dispatchTradesUpdated({ type: 'closed', id: closing.trade.id })
+                } catch (e) {
+                  console.error('Close trade failed', e)
+                }
+              }
+
+              resetClosingDialog()
+            }}
+          >
+            Close Trade
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    <Dialog
+      open={deleteDialog.open}
+      onOpenChange={(open) => setDeleteDialog(prev => ({ ...prev, open }))}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete Trade</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-gray-600">
+          {`Are you sure you want to delete ${deleteDialog.trade?.name || 'this trade'}? This action cannot be undone.`}
+        </p>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setDeleteDialog({ open: false, trade: null })}>Cancel</Button>
+          <Button
+            variant="destructive"
+            onClick={async () => {
+              if (deleteDialog.trade) {
+                await deleteTrade(deleteDialog.trade)
+              }
+              setDeleteDialog({ open: false, trade: null })
+            }}
+          >
+            Delete Trade
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

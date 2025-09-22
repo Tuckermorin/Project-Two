@@ -23,10 +23,9 @@ export function formatTime(value: Date | string | number): string {
 }
 
 /**
- * Round a number to the nearest tenth.
+ * Format a number with configurable decimal precision (defaults to 2 places).
  */
-export function formatNumber(value: number | null | undefined): string {
-  if (value === null || value === undefined || isNaN(value)) return ""
-  const rounded = Math.round(value * 10) / 10
-  return rounded.toFixed(1)
+export function formatNumber(value: number | null | undefined, decimals = 2): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return ""
+  return Number(value).toFixed(decimals)
 }

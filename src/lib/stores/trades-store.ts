@@ -23,7 +23,7 @@ export interface Trade {
   delta?: number
   
   // Trade management
-  status: 'potential' | 'active' | 'action_needed' | 'closed' | 'expired'
+  status: 'potential' | 'active' | 'pending' | 'closed' | 'expired'
   entryDate: string
   ipsScore: number
   ipsNotes: string

@@ -26,6 +26,9 @@ type Overview = {
   Name?: string; Sector?: string; Industry?: string; Exchange?: string; MarketCapitalization?: string;
   PERatio?: string; DividendYield?: string; FiftyTwoWeekHigh?: string; FiftyTwoWeekLow?: string; Currency?: string;
   EBITDA?: string; EPS?: string; Beta?: string; ProfitMargin?: string; OperatingMarginTTM?: string;
+  AnalystTargetPrice?: string; RevenueTTM?: string; NetIncomeTTM?: string; ReturnOnEquityTTM?: string;
+  QuarterlyRevenueGrowthYOY?: string; QuarterlyEarningsGrowthYOY?: string;
+  FiftyDayMovingAverage?: string; TwoHundredDayMovingAverage?: string;
 }
 
 type Candle = { date: string; open: number; high: number; low: number; close: number; volume: number }
@@ -173,6 +176,34 @@ export default function WatchDetailPage() {
                 </tbody>
               </table>
               <p className="text-[11px] text-gray-500 mt-2">Alpha Vantage free tier provides end‑of‑day updates.</p>
+            </CardContent>
+          </Card>
+
+          {/* Valuation & Growth */}
+          <Card className="lg:col-span-3">
+            <CardHeader><CardTitle>Key Metrics</CardTitle></CardHeader>
+            <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm text-gray-700">
+              <div className="space-y-1">
+                <h3 className="text-xs font-semibold uppercase text-gray-500">Valuation</h3>
+                <p>Analyst Target: <span className="font-medium">{overview?.AnalystTargetPrice ?? '—'}</span></p>
+                <p>Market Cap: <span className="font-medium">{overview?.MarketCapitalization ?? '—'}</span></p>
+                <p>Beta: <span className="font-medium">{overview?.Beta ?? '—'}</span></p>
+                <p>EPS (TTM): <span className="font-medium">{overview?.EPS ?? '—'}</span></p>
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-xs font-semibold uppercase text-gray-500">Growth & Profitability</h3>
+                <p>Revenue TTM: <span className="font-medium">{overview?.RevenueTTM ?? '—'}</span></p>
+                <p>Net Income TTM: <span className="font-medium">{overview?.NetIncomeTTM ?? '—'}</span></p>
+                <p>Profit Margin: <span className="font-medium">{overview?.ProfitMargin ?? '—'}</span></p>
+                <p>ROE TTM: <span className="font-medium">{overview?.ReturnOnEquityTTM ?? '—'}</span></p>
+                <p>Revenue Growth YoY: <span className="font-medium">{overview?.QuarterlyRevenueGrowthYOY ?? '—'}</span></p>
+                <p>Earnings Growth YoY: <span className="font-medium">{overview?.QuarterlyEarningsGrowthYOY ?? '—'}</span></p>
+              </div>
+              <div className="space-y-1">
+                <h3 className="text-xs font-semibold uppercase text-gray-500">Moving Averages</h3>
+                <p>50 Day MA: <span className="font-medium">{overview?.FiftyDayMovingAverage ?? '—'}</span></p>
+                <p>200 Day MA: <span className="font-medium">{overview?.TwoHundredDayMovingAverage ?? '—'}</span></p>
+              </div>
             </CardContent>
           </Card>
         </div>

@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Eye, Plus, Search, Trash2, TrendingUp, Loader2, AlertCircle, List, LayoutGrid } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 type Stock = {
   id: string
@@ -23,6 +24,13 @@ type Stock = {
   marketCap?: number
   peRatio?: number
   dividendYield?: number
+  change?: number
+  changePercent?: number
+  volume?: number
+  currency?: string
+  beta?: number
+  analystTargetPrice?: number
+  eps?: number
 }
 
 const AV_BASE = "https://www.alphavantage.co/query"
@@ -39,6 +47,11 @@ async function fetchAlphaVantage(symbol: string) {
 
   const q = quoteJson?.["Global Quote"] || {}
   const price = parseFloat(q?.["05. price"]) || undefined
+  const change = q?.["09. change"] ? Number(q["09. change"]) : undefined
+  const changePct = q?.["10. change percent"]
+    ? Number(String(q["10. change percent"]).replace('%', ''))
+    : undefined
+  const volume = q?.["06. volume"] ? Number(q["06. volume"]) : undefined
 
   const name = overviewJson?.Name as string | undefined
   const sector = overviewJson?.Sector as string | undefined
@@ -47,6 +60,10 @@ async function fetchAlphaVantage(symbol: string) {
   const div = overviewJson?.DividendYield ? Number(overviewJson.DividendYield) : undefined
   const wkHigh = overviewJson?.["52WeekHigh"] ? Number(overviewJson["52WeekHigh"]) : undefined
   const wkLow = overviewJson?.["52WeekLow"] ? Number(overviewJson["52WeekLow"]) : undefined
+  const beta = overviewJson?.Beta ? Number(overviewJson.Beta) : undefined
+  const analystTargetPrice = overviewJson?.AnalystTargetPrice ? Number(overviewJson.AnalystTargetPrice) : undefined
+  const eps = overviewJson?.EPS ? Number(overviewJson.EPS) : undefined
+  const currency = overviewJson?.Currency as string | undefined
 
   const hasData = !!price || !!name
   if (!hasData) {
@@ -64,6 +81,13 @@ async function fetchAlphaVantage(symbol: string) {
     marketCap: mcap,
     peRatio: pe,
     dividendYield: div,
+    change,
+    changePercent: changePct,
+    volume,
+    currency,
+    beta,
+    analystTargetPrice,
+    eps,
   } as Partial<Stock>
 }
 
@@ -75,9 +99,16 @@ const ALL_COLUMNS = [
   { key: "companyName", label: "Company" },
   { key: "sector", label: "Sector" },
   { key: "currentPrice", label: "Price" },
+  { key: "changePercent", label: "Change %" },
+  { key: "change", label: "Change ($)" },
   { key: "marketCap", label: "Market Cap" },
   { key: "peRatio", label: "P/E" },
+  { key: "eps", label: "EPS" },
   { key: "dividendYield", label: "Div Yield" },
+  { key: "beta", label: "Beta" },
+  { key: "analystTargetPrice", label: "Target" },
+  { key: "volume", label: "Volume" },
+  { key: "currency", label: "Currency" },
   { key: "week52", label: "52W Range" },
   { key: "notes", label: "Notes" },
 ] as const
@@ -98,7 +129,7 @@ export default function WatchlistPage() {
 
   // view/sort/filter controls
   const [viewMode, setViewMode] = useState<"tiles" | "list">("tiles")
-  const [selectedCols, setSelectedCols] = useState<ColumnKey[]>(["symbol", "companyName", "currentPrice", "marketCap", "notes"])
+  const [selectedCols, setSelectedCols] = useState<ColumnKey[]>(["symbol", "companyName", "currentPrice", "changePercent", "marketCap", "notes"])
   const [sortBy, setSortBy] = useState<ColumnKey>("symbol")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc")
   const [sectorFilter, setSectorFilter] = useState("")
@@ -171,6 +202,13 @@ export default function WatchlistPage() {
       marketCap: preview.marketCap,
       peRatio: preview.peRatio,
       dividendYield: preview.dividendYield,
+      change: preview.change,
+      changePercent: preview.changePercent,
+      volume: preview.volume,
+      currency: preview.currency,
+      beta: preview.beta,
+      analystTargetPrice: preview.analystTargetPrice,
+      eps: preview.eps,
       notes: notes.trim() || undefined,
     }
     setStocks(prev => [...prev, stock])
@@ -213,8 +251,11 @@ export default function WatchlistPage() {
   }, [stocks, sortBy, sortDir, sectorFilter])
 
   // helpers
-  const fmtNum = (n?: number) => (n == null ? "—" : Intl.NumberFormat().format(n))
-  const fmtMoney = (n?: number) => (n == null ? "—" : `$${n.toFixed(2)}`)
+  const fmtNum = (n?: number) => (n == null ? "—" : Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(n))
+  const fmtMoney = (n?: number, currency: string = 'USD') => (
+    n == null ? "—" : new Intl.NumberFormat('en-US', { style: 'currency', currency, maximumFractionDigits: 2 }).format(n)
+  )
+  const fmtPercent = (n?: number) => (n == null ? "—" : `${n >= 0 ? '+' : ''}${n.toFixed(2)}%`)
 
   return (
     <div className="container mx-auto px-4 py-8">
@@ -368,52 +409,79 @@ export default function WatchlistPage() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {stocks.map(stock => (
-              <Card key={stock.id} className="hover:shadow-md transition-shadow">
-                <CardContent className="p-6">
-                  <div className="flex justify-between items-start mb-4">
+            {stocks.map((stock) => {
+              const changePct = stock.changePercent ?? null
+              const changeClass = changePct == null ? 'text-gray-600' : changePct >= 0 ? 'text-green-600' : 'text-red-600'
+              const price = typeof stock.currentPrice === 'number' ? fmtMoney(stock.currentPrice, stock.currency ?? 'USD') : 'N/A'
+              const target = stock.analystTargetPrice != null ? fmtMoney(stock.analystTargetPrice, stock.currency ?? 'USD') : '—'
+              const range = stock.week52Low != null && stock.week52High != null
+                ? `${fmtMoney(stock.week52Low, stock.currency ?? 'USD')} – ${fmtMoney(stock.week52High, stock.currency ?? 'USD')}`
+                : '—'
+              const changeDollar = stock.change != null ? fmtMoney(stock.change, stock.currency ?? 'USD') : null
+              const changeDisplay = changePct == null && changeDollar == null
+                ? '—'
+                : `${changePct != null ? fmtPercent(changePct) : '—'}${changeDollar ? ` (${changeDollar})` : ''}`
+              return (
+                <Card key={stock.id} className="hover:shadow-md transition-shadow">
+                  <CardContent className="p-6 space-y-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <Link href={`/watchlist/${stock.symbol}`} className="group">
+                          <h3 className="text-lg font-bold text-gray-900 group-hover:underline">{stock.symbol}</h3>
+                          {stock.companyName && <p className="text-sm text-gray-600">{stock.companyName}</p>}
+                        </Link>
+                        {stock.sector && <Badge variant="secondary" className="mt-2">{stock.sector}</Badge>}
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => handleRemoveStock(stock.id)}
+                        aria-label={`Remove ${stock.symbol} from watchlist`}
+                      >
+                        <Trash2 className="h-4 w-4 text-gray-400 hover:text-red-500" />
+                      </Button>
+                    </div>
+
                     <div>
-                      <Link href={`/watchlist/${stock.symbol}`} className="group">
-                        <h3 className="text-lg font-bold text-gray-900 group-hover:underline">{stock.symbol}</h3>
-                        {stock.companyName && <p className="text-sm text-gray-600">{stock.companyName}</p>}
-                      </Link>
+                      <p className="text-sm text-gray-600">Current Price</p>
+                      <p className="text-2xl font-bold text-gray-900">{price}</p>
+                      <p className={`text-sm font-medium ${changeClass}`}>{changeDisplay}</p>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => handleRemoveStock(stock.id)}>
-                      <Trash2 className="h-4 w-4 text-gray-400 hover:text-red-500" />
-                    </Button>
-                  </div>
 
-                  {stock.sector && <Badge variant="secondary" className="mb-3">{stock.sector}</Badge>}
-
-                  <div className="mb-4">
-                    <p className="text-sm text-gray-600">Current Price</p>
-                    <p className="text-2xl font-bold text-gray-900">
-                      {typeof stock.currentPrice === "number" && stock.currentPrice > 0 ? `$${stock.currentPrice.toFixed(2)}` : "N/A"}
-                    </p>
-                  </div>
-
-                  {stock.notes && (
-                    <div className="mb-4">
-                      <p className="text-sm text-gray-600">Notes</p>
-                      <p className="text-sm text-gray-800">{stock.notes}</p>
+                    <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm text-gray-700">
+                      <div>52W Range: <span className="font-medium">{range}</span></div>
+                      <div>Volume: <span className="font-medium">{fmtNum(stock.volume)}</span></div>
+                      <div>Market Cap: <span className="font-medium">{fmtNum(stock.marketCap)}</span></div>
+                      <div>P/E: <span className="font-medium">{stock.peRatio ?? '—'}</span></div>
+                      <div>Dividend Yield: <span className="font-medium">{stock.dividendYield != null ? fmtPercent(stock.dividendYield * 100) : '—'}</span></div>
+                      <div>Beta: <span className="font-medium">{stock.beta ?? '—'}</span></div>
+                      <div>Target: <span className="font-medium">{target}</span></div>
+                      <div>EPS: <span className="font-medium">{stock.eps != null ? stock.eps.toFixed(2) : '—'}</span></div>
                     </div>
-                  )}
 
-                  <div className="flex gap-2">
-                    <Button asChild size="sm" variant="outline" className="flex-1">
-                      <Link href={`/watchlist/${stock.symbol}`}>
-                        <TrendingUp className="h-4 w-4 mr-1" />
-                        Analyze
-                      </Link>
-                    </Button>
-                    <Button size="sm" variant="outline">
-                      <Search className="h-4 w-4 mr-1" />
-                      Research
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                    {stock.notes && (
+                      <div>
+                        <p className="text-sm text-gray-600">Notes</p>
+                        <p className="text-sm text-gray-800">{stock.notes}</p>
+                      </div>
+                    )}
+
+                    <div className="flex gap-2">
+                      <Button asChild size="sm" variant="outline" className="flex-1">
+                        <Link href={`/watchlist/${stock.symbol}`}>
+                          <TrendingUp className="h-4 w-4 mr-1" />
+                          Analyze
+                        </Link>
+                      </Button>
+                      <Button size="sm" variant="outline">
+                        <Search className="h-4 w-4 mr-1" />
+                        Research
+                      </Button>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
           </div>
         )
       )}
@@ -446,37 +514,51 @@ export default function WatchlistPage() {
                 </tr>
               </thead>
               <tbody>
-                {visibleStocks.map(s => (
-                  <tr key={s.id} className="border-t">
-                    {selectedCols.includes("symbol") && (
-                      <td className="px-4 py-3">
-                        <Link href={`/watchlist/${s.symbol}`} className="font-semibold hover:underline">{s.symbol}</Link>
+                {visibleStocks.map((s) => {
+                  const changeClass = s.changePercent == null ? 'text-gray-600' : s.changePercent >= 0 ? 'text-green-600' : 'text-red-600'
+                  return (
+                    <tr key={s.id} className="border-t">
+                      {selectedCols.includes("symbol") && (
+                        <td className="px-4 py-3">
+                          <Link href={`/watchlist/${s.symbol}`} className="font-semibold hover:underline">{s.symbol}</Link>
+                        </td>
+                      )}
+                      {selectedCols.includes("companyName") && <td className="px-4 py-3">{s.companyName ?? "—"}</td>}
+                      {selectedCols.includes("sector") && <td className="px-4 py-3">{s.sector ?? "—"}</td>}
+                      {selectedCols.includes("currentPrice") && <td className="px-4 py-3">{fmtMoney(s.currentPrice, s.currency ?? 'USD')}</td>}
+                      {selectedCols.includes("changePercent") && (
+                        <td className={cn('px-4 py-3 font-medium', changeClass)}>{fmtPercent(s.changePercent ?? undefined)}</td>
+                      )}
+                      {selectedCols.includes("change") && <td className="px-4 py-3">{fmtMoney(s.change, s.currency ?? 'USD')}</td>}
+                      {selectedCols.includes("marketCap") && <td className="px-4 py-3">{fmtNum(s.marketCap)}</td>}
+                      {selectedCols.includes("peRatio") && <td className="px-4 py-3">{s.peRatio ?? "—"}</td>}
+                      {selectedCols.includes("eps") && <td className="px-4 py-3">{s.eps != null ? s.eps.toFixed(2) : '—'}</td>}
+                      {selectedCols.includes("dividendYield") && (
+                        <td className="px-4 py-3">{s.dividendYield != null ? `${(s.dividendYield * 100).toFixed(2)}%` : "—"}</td>
+                      )}
+                      {selectedCols.includes("beta") && <td className="px-4 py-3">{s.beta ?? '—'}</td>}
+                      {selectedCols.includes("analystTargetPrice") && <td className="px-4 py-3">{fmtMoney(s.analystTargetPrice, s.currency ?? 'USD')}</td>}
+                      {selectedCols.includes("volume") && <td className="px-4 py-3">{fmtNum(s.volume)}</td>}
+                      {selectedCols.includes("currency") && <td className="px-4 py-3">{s.currency ?? 'USD'}</td>}
+                      {selectedCols.includes("week52") && (
+                        <td className="px-4 py-3">
+                          {s.week52Low != null && s.week52High != null
+                            ? `${fmtMoney(s.week52Low, s.currency ?? 'USD')} – ${fmtMoney(s.week52High, s.currency ?? 'USD')}`
+                            : "—"}
+                        </td>
+                      )}
+                      {selectedCols.includes("notes") && <td className="px-4 py-3">{s.notes ?? "—"}</td>}
+                      <td className="px-4 py-3 text-right space-x-2">
+                        <Button asChild size="sm" variant="outline">
+                          <Link href={`/watchlist/${s.symbol}`}>Analyze</Link>
+                        </Button>
+                        <Button size="sm" variant="ghost" onClick={() => handleRemoveStock(s.id)} aria-label={`Remove ${s.symbol}`}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </td>
-                    )}
-                    {selectedCols.includes("companyName") && <td className="px-4 py-3">{s.companyName ?? "—"}</td>}
-                    {selectedCols.includes("sector") && <td className="px-4 py-3">{s.sector ?? "—"}</td>}
-                    {selectedCols.includes("currentPrice") && <td className="px-4 py-3">{fmtMoney(s.currentPrice)}</td>}
-                    {selectedCols.includes("marketCap") && <td className="px-4 py-3">{fmtNum(s.marketCap)}</td>}
-                    {selectedCols.includes("peRatio") && <td className="px-4 py-3">{s.peRatio ?? "—"}</td>}
-                    {selectedCols.includes("dividendYield") && (
-                      <td className="px-4 py-3">{s.dividendYield != null ? `${(s.dividendYield * 100).toFixed(2)}%` : "—"}</td>
-                    )}
-                    {selectedCols.includes("week52") && (
-                      <td className="px-4 py-3">
-                        {s.week52Low != null && s.week52High != null ? `$${s.week52Low.toFixed(2)} – $${s.week52High.toFixed(2)}` : "—"}
-                      </td>
-                    )}
-                    {selectedCols.includes("notes") && <td className="px-4 py-3">{s.notes ?? "—"}</td>}
-                    <td className="px-4 py-3 text-right">
-                      <Button asChild size="sm" variant="outline" className="mr-2">
-                        <Link href={`/watchlist/${s.symbol}`}>Analyze</Link>
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => handleRemoveStock(s.id)}>
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
+                    </tr>
+                  )
+                })}
                 {visibleStocks.length === 0 && (
                   <tr><td className="px-4 py-6 text-center text-gray-500" colSpan={selectedCols.length + 1}>No results</td></tr>
                 )}

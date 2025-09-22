@@ -12,6 +12,7 @@ export async function POST(request: NextRequest) {
     const { 
       userId, 
       ipsId, 
+      ipsName,
       strategyType,
       tradeData, 
       factorValues, 
@@ -43,6 +44,7 @@ export async function POST(request: NextRequest) {
         ips_score_calculation_id: scoreId,
         status: 'prospective',
         strategy_type: strategyType || tradeData?.contractType || 'unknown',
+        ips_name: ipsName || tradeData?.ipsName || null,
         name: tradeData.name,
         symbol: tradeData.symbol,
         contract_type: tradeData.contractType,
@@ -237,15 +239,17 @@ export async function GET(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   try {
     const body = await request.json();
-    const { ids, status, userId } = body as { ids: string[]; status: 'prospective'|'active'|'action_needed'|'closed'|'expired'|'cancelled'; userId?: string };
+    const { ids, status, userId } = body as { ids: string[]; status: 'prospective'|'active'|'pending'|'closed'|'expired'|'cancelled'|'action_needed'; userId?: string };
     if (!Array.isArray(ids) || ids.length === 0 || !status) {
       return NextResponse.json({ error: 'ids[] and status required' }, { status: 400 });
     }
 
+    const targetStatus = status === 'action_needed' ? 'pending' : status;
+
     // When moving to active, stamp entry_date
-    const updatePayload: any = { status };
-    if (status === 'active') updatePayload.entry_date = new Date().toISOString();
-    if (status === 'closed') updatePayload.closed_at = new Date().toISOString();
+    const updatePayload: any = { status: targetStatus };
+    if (targetStatus === 'active') updatePayload.entry_date = new Date().toISOString();
+    if (targetStatus === 'closed') updatePayload.closed_at = new Date().toISOString();
 
     const { error } = await supabase
       .from('trades')

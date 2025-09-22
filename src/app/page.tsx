@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { TrendingUp, TrendingDown, Activity, DollarSign, FileText, Eye, Target, AlertCircle } from 'lucide-react'
 import Link from 'next/link'
 import ExcelStyleTradesDashboard from '@/components/dashboard/excel-style-trades-dashboard'
+import ActionNeededTradesPanel from '@/components/dashboard/action-needed-trades'
 import HistoricTradesDashboard from '@/components/dashboard/historic-trades-dashboard'
 import { IPSPerformanceTracker } from '@/components/ips/ips-performance-tracker'
 import { MarketOverview } from '@/components/dashboard/market-overview'
@@ -100,7 +101,10 @@ export default function Dashboard() {
         <div className="lg:col-span-3 space-y-8">
           {/* Current Trades Component */}
           <ExcelStyleTradesDashboard />
-          
+
+          {/* Action Needed Component */}
+          <ActionNeededTradesPanel />
+
           {/* Historic Trades Component */}
           <HistoricTradesDashboard />
         </div>
@@ -111,10 +115,7 @@ export default function Dashboard() {
           <MarketOverview />
           
           {/* IPS Performance Tracker */}
-          <IPSPerformanceTracker 
-            hasActiveIPS={dashboardData.hasIPS}
-            // performanceData prop is optional, component will show empty state if not provided
-          />
+          <IPSPerformanceTracker />
           
           {/* Simplified Quick Start */}
           <SimplifiedQuickStart 

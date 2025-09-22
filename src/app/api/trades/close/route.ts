@@ -108,6 +108,7 @@ export async function POST(request: NextRequest) {
       trade_id: tradeId,
       close_method: closeMethod,
       close_date: new Date(closeDate).toISOString(),
+      ips_name: trade.ips_name ?? null,
       underlying_price_at_close: safe(underlyingPriceAtClose),
       cost_to_close_per_spread: cc,
       exit_premium_per_contract: exitPrem,
@@ -140,6 +141,7 @@ export async function POST(request: NextRequest) {
       .update({
         status: 'closed',
         closed_at: new Date(closeDate).toISOString(),
+        ips_name: trade.ips_name ?? null,
         realized_pl: safe(realizedPL),
         realized_pl_percent: safe(realizedPLPercent),
         updated_at: new Date().toISOString(),
@@ -156,4 +158,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Unexpected error' }, { status: 500 });
   }
 }
-

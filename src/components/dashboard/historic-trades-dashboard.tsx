@@ -2,14 +2,15 @@
 
 "use client"
 
-import React, { useState, useEffect } from 'react'
+import React, { useCallback, useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Checkbox } from '@/components/ui/checkbox'
-import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, History, TrendingUp, FileText } from 'lucide-react'
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { ArrowUpDown, ArrowUp, ArrowDown, Filter, Eye, EyeOff, Settings2, AlertCircle, History, Trash2, RefreshCw, Loader2 } from 'lucide-react'
+import { dispatchTradesUpdated, TRADES_UPDATED_EVENT } from '@/lib/events'
 
 // Historic trade data type
 interface HistoricTrade {
@@ -44,6 +45,7 @@ interface HistoricTrade {
   closingReason: string
   ipsScore?: number
   ipsAtClose?: number
+  ipsName?: string | null
   notes?: string
   lessons?: string
   [key: string]: any // For dynamic IPS factor columns
@@ -87,6 +89,7 @@ const allHistoricColumns: Column[] = [
   { key: 'closingReason', label: 'Closing Reason' },
   { key: 'ipsScore', label: 'IPS Score' },
   { key: 'ipsAtClose', label: 'IPS at Close' },
+  { key: 'ipsName', label: 'IPS Name' },
   { key: 'notes', label: 'Notes' },
   { key: 'lessons', label: 'Lessons' }
 ]
@@ -96,7 +99,7 @@ const defaultHistoricColumns = [
   'name', 'placed', 'closedDate', 'closedPrice', 'contractType', 
   'shortStrike', 'longStrike', 'creditReceived', 'premiumAtClose',
   'actualPL', 'actualPLPercent', 'deltaShortLeg', 'deltaAtClose',
-  'theta', 'thetaAtClose', 'closingReason', 'ipsScore'
+  'theta', 'thetaAtClose', 'closingReason', 'ipsScore', 'ipsName'
 ]
 
 // Simple view for historic trades  
@@ -113,31 +116,35 @@ export default function HistoricTradesDashboard() {
   
   const [trades, setTrades] = useState<HistoricTrade[]>([])
   const [loading, setLoading] = useState<boolean>(false)
+  const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; trade: HistoricTrade | null }>({ open: false, trade: null })
+  const [ipsFilter, setIpsFilter] = useState<string>('all')
+  const [error, setError] = useState<string | null>(null)
   const userId = 'user-123'
   const hasActiveIPS = false
   const activeIPSFactors: string[] = []
-  useEffect(() => {
-    const load = async () => {
-      try {
-        setLoading(true)
-        const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=closed`, { cache: 'no-store' })
-        const json = await res.json()
-        if (!res.ok) throw new Error(json?.error || 'Failed to load closed trades')
-        const rows = (json?.data || []) as any[]
-        let closeMap: Record<string, any> = {}
-        try { const raw = localStorage.getItem('tenxiv:trade-closures'); closeMap = raw ? JSON.parse(raw) : {} } catch {}
 
-        const toTitle = (s:string)=> s.replace(/-/g,' ').replace(/\b\w/g,m=>m.toUpperCase())
-        const mapped: HistoricTrade[] = rows.map((r:any)=>{
-          const closureArr = Array.isArray(r.trade_closures) ? r.trade_closures : (r.trade_closures ? [r.trade_closures] : [])
-          const closure = closureArr[0] || null
-          const details = closure || closeMap[r.id] || {}
-          const closedDate = details.close_date || details.date || r.closed_at || r.updated_at || r.created_at
-          const credit = Number(r.credit_received ?? 0) || 0
-          const closeCost = typeof details.cost_to_close_per_spread === 'number' ? details.cost_to_close_per_spread : (typeof details.costToClose === 'number' ? details.costToClose : undefined)
-          const contracts = Number(r.number_of_contracts ?? details.contractsClosed ?? 0) || 0
-          const actualPL = typeof details.realized_pl === 'number' ? details.realized_pl : (typeof details.plDollar === 'number' ? details.plDollar : (closeCost!=null ? (credit - closeCost) * contracts * 100 : 0))
-          const actualPLPercent = typeof details.realized_pl_percent === 'number' ? details.realized_pl_percent : (typeof details.plPercent === 'number' ? details.plPercent : (credit ? ((credit - (closeCost ?? 0))/credit)*100 : 0))
+  const loadTrades = useCallback(async () => {
+    try {
+      setLoading(true)
+      setError(null)
+      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=closed`, { cache: 'no-store' })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json?.error || 'Failed to load closed trades')
+      const rows = (json?.data || []) as any[]
+      let closeMap: Record<string, any> = {}
+      try { const raw = localStorage.getItem('tenxiv:trade-closures'); closeMap = raw ? JSON.parse(raw) : {} } catch {}
+
+      const toTitle = (s:string)=> s.replace(/-/g,' ').replace(/\b\w/g,m=>m.toUpperCase())
+      const mapped: HistoricTrade[] = rows.map((r:any)=>{
+        const closureArr = Array.isArray(r.trade_closures) ? r.trade_closures : (r.trade_closures ? [r.trade_closures] : [])
+        const closure = closureArr[0] || null
+        const details = closure || closeMap[r.id] || {}
+        const closedDate = details.close_date || details.date || r.closed_at || r.updated_at || r.created_at
+        const credit = Number(r.credit_received ?? 0) || 0
+        const closeCost = typeof details.cost_to_close_per_spread === 'number' ? details.cost_to_close_per_spread : (typeof details.costToClose === 'number' ? details.costToClose : undefined)
+        const contracts = Number(r.number_of_contracts ?? details.contractsClosed ?? 0) || 0
+        const actualPL = typeof details.realized_pl === 'number' ? details.realized_pl : (typeof details.plDollar === 'number' ? details.plDollar : (closeCost!=null ? (credit - closeCost) * contracts * 100 : 0))
+        const actualPLPercent = typeof details.realized_pl_percent === 'number' ? details.realized_pl_percent : (typeof details.plPercent === 'number' ? details.plPercent : (credit ? ((credit - (closeCost ?? 0))/credit)*100 : 0))
           return {
             id: r.id,
             name: r.name || r.symbol,
@@ -169,16 +176,42 @@ export default function HistoricTradesDashboard() {
             sector: r.sector || '-',
             closingReason: details.close_method || details.reason || 'Closed',
             ipsScore: typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined,
+            ipsName: details.ips_name || r.ips_name || r.ips_configurations?.name || null,
           } as HistoricTrade
         })
-        setTrades(mapped)
-      } catch (e) {
-        console.error('Failed to load history', e)
-        setTrades([])
-      } finally { setLoading(false) }
+      setTrades(mapped)
+    } catch (e: any) {
+      console.error('Failed to load history', e)
+      setTrades([])
+      setError(e?.message || 'Unable to load trade history')
+    } finally {
+      setLoading(false)
     }
-    load()
   }, [])
+
+  useEffect(() => {
+    loadTrades()
+  }, [loadTrades])
+
+  useEffect(() => {
+    const handler = () => loadTrades()
+    window.addEventListener(TRADES_UPDATED_EVENT, handler)
+    return () => window.removeEventListener(TRADES_UPDATED_EVENT, handler)
+  }, [loadTrades])
+
+  async function handleDelete(id: string) {
+    try {
+      await fetch('/api/trades', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [id] }),
+      })
+      setTrades(prev => prev.filter(t => t.id !== id))
+      dispatchTradesUpdated({ type: 'delete', scope: 'history', id })
+    } catch (e) {
+      console.error('Failed to delete historical trade', e)
+    }
+  }
 
   // Calculate summary statistics
   const stats = React.useMemo(() => {
@@ -216,14 +249,18 @@ export default function HistoricTradesDashboard() {
     if (filterText) {
       filtered = filtered.filter(trade => 
         trade.name.toLowerCase().includes(filterText.toLowerCase()) ||
-        trade.sector?.toLowerCase().includes(filterText.toLowerCase())
+        trade.sector?.toLowerCase().includes(filterText.toLowerCase()) ||
+        (trade.ipsName || '').toLowerCase().includes(filterText.toLowerCase())
       )
     }
     
     if (reasonFilter) {
       filtered = filtered.filter(trade => trade.closingReason === reasonFilter)
     }
-    
+    if (ipsFilter !== 'all') {
+      filtered = filtered.filter(trade => (trade.ipsName ?? 'Unassigned') === ipsFilter)
+    }
+
     // Apply sorting
     if (sortConfig) {
       filtered.sort((a, b) => {
@@ -237,12 +274,20 @@ export default function HistoricTradesDashboard() {
     }
     
     return filtered
-  }, [trades, filterText, reasonFilter, sortConfig])
+  }, [trades, filterText, reasonFilter, ipsFilter, sortConfig])
 
   // Get unique closing reasons for filter
   const closingReasons = React.useMemo(() => {
     const reasons = new Set(trades.map(t => t.closingReason).filter(Boolean))
     return Array.from(reasons)
+  }, [trades])
+
+  const ipsOptions = React.useMemo(() => {
+    const set = new Set<string>()
+    trades.forEach(t => {
+      if (t.ipsName) set.add(t.ipsName)
+    })
+    return Array.from(set).sort()
   }, [trades])
 
   // Handle sort
@@ -299,6 +344,8 @@ export default function HistoricTradesDashboard() {
       case 'placed':
       case 'closedDate':
         return formatDate(value)
+      case 'ipsName':
+        return value || '—'
       case 'deltaShortLeg':
       case 'deltaAtClose':
       case 'theta':
@@ -332,12 +379,50 @@ export default function HistoricTradesDashboard() {
     return allHistoricColumns.filter(col => baseColumns.includes(col.key))
   }, [viewMode, showIPS, hasActiveIPS, activeIPSFactors, visibleColumns])
 
+  if (loading && trades.length === 0) {
+    return (
+      <Card className="w-full">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Trade History</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-12 text-gray-600 flex items-center justify-center gap-2">
+            <Loader2 className="h-5 w-5 animate-spin" />
+            Loading closed trades…
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (error && trades.length === 0) {
+    return (
+      <Card className="w-full">
+        <CardHeader className="flex flex-row items-center justify-between">
+          <CardTitle>Trade History</CardTitle>
+          <Button variant="ghost" size="sm" onClick={loadTrades}>
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </CardHeader>
+        <CardContent>
+          <div className="text-center py-12 text-sm text-red-600 flex flex-col items-center gap-2">
+            <AlertCircle className="h-6 w-6" />
+            {error}
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
   // Empty state
   if (trades.length === 0) {
     return (
       <Card className="w-full">
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Trade History</CardTitle>
+          <Button variant="ghost" size="sm" onClick={loadTrades}>
+            <RefreshCw className="h-4 w-4" />
+          </Button>
         </CardHeader>
         <CardContent>
           <div className="text-center py-12">
@@ -352,6 +437,7 @@ export default function HistoricTradesDashboard() {
   }
 
   return (
+    <>
     <Card className="w-full">
       <CardHeader>
         <div className="flex flex-row items-center justify-between">
@@ -392,6 +478,10 @@ export default function HistoricTradesDashboard() {
                 Columns
               </Button>
             )}
+
+            <Button variant="ghost" size="sm" onClick={loadTrades} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+            </Button>
           </div>
         </div>
 
@@ -445,6 +535,17 @@ export default function HistoricTradesDashboard() {
               <SelectItem value="all">All closing reasons</SelectItem>
               {closingReasons.map(reason => (
                 <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={ipsFilter} onValueChange={(v) => setIpsFilter(v)}>
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="All IPS" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All IPS</SelectItem>
+              {ipsOptions.map(name => (
+                <SelectItem key={name} value={name}>{name}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -503,8 +604,14 @@ export default function HistoricTradesDashboard() {
                         <Button variant="outline" size="sm" className="h-6 px-2 text-xs">
                           View Details
                         </Button>
-                        <Button variant="outline" size="sm" className="h-6 px-2 text-xs">
-                          Add Lesson
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          className="h-6 px-2 text-xs flex items-center gap-1"
+                          onClick={() => setDeleteDialog({ open: true, trade })}
+                          aria-label={`Delete ${trade.name}`}
+                        >
+                          <Trash2 className="h-3 w-3" />
                         </Button>
                       </div>
                     </td>
@@ -529,13 +636,34 @@ export default function HistoricTradesDashboard() {
               Generate Report
             </Button>
           </div>
-          
-          <Button variant="outline">
-            <Calendar className="h-4 w-4 mr-2" />
-            Close Trade Manually
-          </Button>
         </div>
       </CardContent>
     </Card>
+    <Dialog
+      open={deleteDialog.open}
+      onOpenChange={(open) => setDeleteDialog(prev => ({ ...prev, open }))}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Delete Trade</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-gray-600">
+          {`Are you sure you want to delete ${deleteDialog.trade?.name || 'this trade'} from history? This action cannot be undone.`}
+        </p>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setDeleteDialog({ open: false, trade: null })}>Cancel</Button>
+          <Button
+            variant="destructive"
+            onClick={async () => {
+              if (deleteDialog.trade) await handleDelete(deleteDialog.trade.id)
+              setDeleteDialog({ open: false, trade: null })
+            }}
+          >
+            Delete Trade
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }

@@ -10,7 +10,8 @@ import {
   Eye, 
   BookOpen, 
   History,
-  Home
+  Home,
+  UserCircle
 } from 'lucide-react'
 
 const navigation = [
@@ -54,6 +55,23 @@ export function Navigation() {
                 )
               })}
             </div>
+          </div>
+          <div className="hidden sm:flex items-center gap-4">
+            <Link
+              href="/account"
+              className={cn(
+                'inline-flex items-center text-sm text-gray-600 hover:text-gray-900'
+              )}
+            >
+              <UserCircle className="h-5 w-5 mr-1" />
+              Account
+            </Link>
+            <Link
+              href="/login"
+              className="inline-flex items-center rounded-md border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50"
+            >
+              Login
+            </Link>
           </div>
         </div>
       </div>

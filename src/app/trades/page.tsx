@@ -33,6 +33,7 @@ import {
 import { ipsDataService, type IPSConfiguration } from "@/lib/services/ips-data-service";
 import type { FactorValueMap } from "@/lib/types";
 import { NewTradeEntryForm } from "@/components/trades/NewTradeEntryForm";
+import { dispatchTradesUpdated } from "@/lib/events";
 
 // -----------------------------
 // Local types + normalizer (builder-driven IPS)
@@ -466,7 +467,7 @@ export default function TradesPage() {
   // Fetch action needed trades
   async function fetchActionNeededTrades() {
     try {
-      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=action_needed`, { cache: 'no-store' });
+      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=pending`, { cache: 'no-store' });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to load trades needing action');
       setActionNeededTrades(json?.data || []);
@@ -1276,9 +1277,20 @@ export default function TradesPage() {
                               <Button size="sm" variant="outline" onClick={() => setCurrentView('active')}>View</Button>
                               <Button size="sm" variant="outline" onClick={() => (window.location.href = `/trades?edit=${r.id}`)}>Edit</Button>
                               <Button size="sm" variant="destructive" onClick={async ()=>{
-                                await fetch('/api/trades', { method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ ids: [r.id], status: 'action_needed' }) });
-                                await fetchActiveTrades();
-                              }}>Move to Action Needed</Button>
+                                try {
+                                  const key = 'tenxiv:trade-closures';
+                                  const raw = localStorage.getItem(key);
+                                  const obj = raw ? JSON.parse(raw) : {};
+                                  obj[r.id] = {
+                                    ...(obj[r.id] || {}),
+                                    needsAction: true,
+                                    ipsName: r.ips_name ?? r.ips_configurations?.name ?? null,
+                                    updatedAt: new Date().toISOString(),
+                                  };
+                                  localStorage.setItem(key, JSON.stringify(obj));
+                                } catch {}
+                                dispatchTradesUpdated({ type: 'moved-to-action-needed', id: r.id });
+                              }}>Close</Button>
                             </div>
                           </td>
                         </tr>

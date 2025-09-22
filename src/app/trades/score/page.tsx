@@ -201,6 +201,7 @@ export default function ScoreTradePage() {
         body: JSON.stringify({
           userId: "user-123",
           ipsId: draft.ipsId,
+          ipsName: draft.ipsName,
           strategyType,
           tradeData: {
             name: t.name,

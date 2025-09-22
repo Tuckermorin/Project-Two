@@ -68,7 +68,7 @@ export function TradingStats({
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">
-            {winRate !== null ? `${formatNumber(winRate)}%` : '--'}
+            {winRate !== null ? `${formatNumber(winRate, 1)}%` : '--'}
           </div>
           <p className="text-xs text-muted-foreground">
             {winRate === null ? 'No completed trades' : 'Historical performance'}
