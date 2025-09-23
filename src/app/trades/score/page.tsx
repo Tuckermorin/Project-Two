@@ -113,7 +113,6 @@ export default function ScoreTradePage() {
             const v = bag?.[f.key];
             if (v !== undefined && v !== null && v !== "") {
               valueByName[f.name] = v as any;
-              valueByName[f.key] = v as any;
             }
           });
         };
@@ -127,8 +126,6 @@ export default function ScoreTradePage() {
           body: JSON.stringify({
             ipsId: payload.ipsId,
             factorValues: valueByName,
-            tradeDraft: payload.trade,
-            strategyId: payload.strategyId,
           }),
         });
         const json: ScoreAPIResponse = await res.json();
