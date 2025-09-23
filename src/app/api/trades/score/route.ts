@@ -1,23 +1,110 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { extractFeatures, fingerprintForCaching } from '@/lib/scoring/feature-extractor';
+import { loadStrategyRubric, defaultRubric } from '@/lib/scoring/rubric-loader';
+import { scoreFeatures } from '@/lib/scoring/scoring-engine';
+import { calibrateScore } from '@/lib/scoring/calibration';
+import { lookupCachedScore, persistScore } from '@/lib/scoring/cache';
+import { generateNarrative } from '@/lib/scoring/narrative';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
 );
+
+function normaliseStrategy(contractType?: string | null): string {
+  return (contractType || 'put-credit-spread').toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+}
+
+function determineConfidence(params: { violations: string[]; penalties: string[]; missing: string[]; outOfRange: number }): 'low' | 'medium' | 'high' {
+  if (params.missing.length > 0 || params.outOfRange > 0 || params.violations.length > 0) {
+    return 'low';
+  }
+  if (params.penalties.length > 0) {
+    return 'medium';
+  }
+  return 'high';
+}
+
+function buildReasons(criterionScores: ReturnType<typeof scoreFeatures>['criterionScores'], penalties: string[]): string[] {
+  const metricEntries = criterionScores.flatMap((criterion) =>
+    criterion.metrics
+      .filter((m) => m.score != null)
+      .map((metric) => ({
+        metric: metric.metric,
+        score: metric.score ?? 0,
+        raw: metric.rawValue,
+        positive: (metric.score ?? 0) >= 70,
+      })),
+  );
+
+  const positives = metricEntries.filter((m) => m.positive).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const negatives = metricEntries.filter((m) => !m.positive).sort((a, b) => (a.score ?? 0) - (b.score ?? 0));
+
+  const reasons: string[] = [];
+  const toDisplay = (entry: typeof metricEntries[number]): string => {
+    const value = entry.raw;
+    if (typeof value === 'number') {
+      const isPct = entry.metric.includes('pct') || entry.metric.includes('percent');
+      return `${entry.metric.replace(/_/g, ' ')} ${isPct ? `${(value * (isPct ? 100 : 1)).toFixed(isPct ? 0 : 2)}${isPct ? '%' : ''}` : value.toFixed(3)} ${entry.score >= 70 ? '(+)' : '(−)'}`;
+    }
+    return `${entry.metric.replace(/_/g, ' ')} ${String(value)} ${entry.score >= 70 ? '(+)' : '(−)'}`;
+  };
+
+  positives.slice(0, 3).forEach((entry) => reasons.push(toDisplay(entry)));
+  negatives.slice(0, 2).forEach((entry) => {
+    if (reasons.length < 5) reasons.push(toDisplay(entry));
+  });
+
+  for (const penalty of penalties) {
+    if (reasons.length >= 5) break;
+    reasons.push(`Penalty applied: ${penalty}`);
+  }
+
+  if (reasons.length < 3 && negatives.length > 0) {
+    for (const entry of negatives) {
+      if (reasons.length >= 3) break;
+      const formatted = toDisplay(entry);
+      if (!reasons.includes(formatted)) reasons.push(formatted);
+    }
+  }
+
+  return reasons.slice(0, 5);
+}
+
+function buildFactorScores(criterionScores: ReturnType<typeof scoreFeatures>['criterionScores']) {
+  const factors: Array<{ factorName: string; value: number | string | boolean | null; weight: number; individualScore: number | null; weightedScore: number; targetMet: boolean }> = [];
+  for (const criterion of criterionScores) {
+    const metricWeight = (criterion.weight || 0) / Math.max(1, criterion.metrics.length);
+    for (const metric of criterion.metrics) {
+      const value = metric.rawValue ?? null;
+      const score = metric.score ?? null;
+      const weightedScore = score != null ? score * metricWeight : 0;
+      factors.push({
+        factorName: `${criterion.criterion}.${metric.metric}`,
+        value: typeof value === 'number' || typeof value === 'boolean' ? value : value ?? null,
+        weight: metricWeight,
+        individualScore: score,
+        weightedScore,
+        targetMet: metric.passed,
+      });
+    }
+  }
+  return factors;
+}
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { ipsId, factorValues, tradeId } = body;
-    
-    if (!ipsId || !factorValues) {
-      return NextResponse.json({ 
-        error: 'Missing required fields: ipsId, factorValues' 
+    const { ipsId, factorValues, tradeDraft, tradeId } = body;
+
+    if (!ipsId || !factorValues || !tradeDraft) {
+      return NextResponse.json({
+        success: false,
+        error: 'Missing required fields: ipsId, factorValues, tradeDraft',
       }, { status: 400 });
     }
 
-    // Get IPS configuration and factors from database (current schema)
     const { data: ips, error: ipsError } = await supabase
       .from('ips_configurations')
       .select('*')
@@ -25,209 +112,190 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (ipsError || !ips) {
-      return NextResponse.json({ 
-        error: 'IPS configuration not found' 
+      return NextResponse.json({
+        success: false,
+        error: 'IPS configuration not found',
       }, { status: 404 });
     }
 
-    // Get IPS factors with weights and targets
-    const { data: ipsFactors, error: factorsError } = await supabase
-      .from('ips_factors')
-      .select(`
-        factor_name,
-        weight,
-        target_value,
-        target_operator,
-        target_value_max,
-        preference_direction,
-        enabled,
-        factor_definitions:factor_definitions(data_type, unit, category)
-      `)
-      .eq('ips_id', ipsId)
-      .eq('enabled', true);
+    const strategy = normaliseStrategy(tradeDraft?.contractType || body?.strategyId);
+    const rubric = await loadStrategyRubric(strategy).catch(() => defaultRubric());
 
-    if (factorsError) {
-      throw new Error(`Failed to fetch IPS factors: ${factorsError.message}`);
-    }
-
-    // Calculate weighted score using actual IPS configuration
-    const factorScores: Array<{
-      factorName: string;
-      value: number;
-      weight: number;
-      individualScore: number;
-      weightedScore: number;
-      targetMet: boolean;
-    }> = [];
-
-    let totalWeight = 0;
-    let weightedSum = 0;
-
-    for (const ipsFactor of ipsFactors || []) {
-    const factorName = ipsFactor.factor_name;
-    const factorValue = factorValues[factorName];
-    
-    if (factorValue === undefined || factorValue === null) {
-        continue; // Skip missing factors
-    }
-
-    const value = typeof factorValue === 'object' ? factorValue.value : factorValue;
-    const weight = ipsFactor.weight;
-    
-    // Fix the factors access - handle array or single object
-    const factorInfo = Array.isArray((ipsFactor as any).factor_definitions)
-      ? (ipsFactor as any).factor_definitions[0]
-      : (ipsFactor as any).factor_definitions;
-    
-    // Operator-based target check with partial credit for closeness
-    let individualScore = 0;
-    let targetMet = false;
-
-    const tv = Number(ipsFactor.target_value);
-    const tvMax = Number(ipsFactor.target_value_max);
-    const val = Number(value);
-
-    switch (ipsFactor.target_operator) {
-      case 'gte':
-        targetMet = !Number.isNaN(tv) ? val >= tv : false;
-        break;
-      case 'lte':
-        targetMet = !Number.isNaN(tv) ? val <= tv : false;
-        break;
-      case 'eq':
-        targetMet = !Number.isNaN(tv) ? Math.abs(val - tv) < 1e-6 : false;
-        break;
-      case 'range':
-        targetMet = !Number.isNaN(tv) && !Number.isNaN(tvMax) ? val >= tv && val <= tvMax : false;
-        break;
-      default:
-        targetMet = true; // informational-only factor
-        break;
-    }
-
-    const clamp = (n:number)=> Math.max(0, Math.min(100, n));
-    if (targetMet) {
-      individualScore = 100;
-    } else {
-      switch (ipsFactor.target_operator) {
-        case 'gte':
-          individualScore = Number.isFinite(tv) && tv !== 0 ? clamp((val / tv) * 100) : 0;
-          break;
-        case 'lte':
-          individualScore = val !== 0 ? clamp((tv / val) * 100) : 0;
-          break;
-        case 'eq': {
-          const denom = Math.abs(tv) > 0 ? Math.abs(tv) : (Math.abs(val) || 1);
-          const relErr = Math.abs(val - tv) / denom;
-          individualScore = clamp((1 - relErr) * 100);
-          break;
-        }
-        case 'range':
-          if (Number.isFinite(tv) && Number.isFinite(tvMax)) {
-            if (val < tv) individualScore = tv !== 0 ? clamp((val / tv) * 100) : 0;
-            else if (val > tvMax) individualScore = val !== 0 ? clamp((tvMax / val) * 100) : 0;
-            else individualScore = 100;
-          } else individualScore = 0;
-          break;
-        default:
-          individualScore = 0;
-      }
-    }
-
-    const weightedScore = (individualScore * weight) / 100;
-    
-    factorScores.push({
-        factorName,
-        value: val,
-        weight,
-        individualScore,
-        weightedScore,
-        targetMet
+    const inputHash = fingerprintForCaching(rubric.rubric_version, {
+      trade: tradeDraft,
+      factors: factorValues,
+      ipsId,
     });
 
-    totalWeight += weight;
-    weightedSum += weightedScore;
+    const cached = await lookupCachedScore(supabase as any, inputHash, rubric.rubric_version);
+    if (cached?.details) {
+      const details = cached.details;
+      const analysis_output = {
+        rubric_version: details.rubric_version ?? rubric.rubric_version,
+        calibration_version: details.calibration_version ?? 'none',
+        raw_score: Number(details.raw_score ?? cached.finalScore),
+        calibrated_success_prob: Number(details.calibrated_success_prob ?? (cached.finalScore / 100)),
+        reasons: details.reasons ?? [],
+        violations: details.violations ?? [],
+        confidence: details.confidence ?? 'medium',
+        ips_id: ipsId,
+        ips_version: details.ips_version ?? ips?.version ?? ips?.ips_version ?? null,
+        input_hash: details.input_hash ?? inputHash,
+      };
+      return NextResponse.json({
+        success: true,
+        cache: true,
+        data: {
+          score: analysis_output.raw_score,
+          scoreId: cached.id,
+          breakdown: {
+            totalWeight: details.total_weight ?? 1,
+            weightedSum: details.weighted_sum ?? analysis_output.raw_score,
+            factorScores: details.factor_scores ?? [],
+            targetsMetCount: details.targets_met ?? 0,
+            targetPercentage: details.target_percentage ?? 0,
+          },
+          timestamp: details.timestamp ?? new Date().toISOString(),
+        },
+        extracted_features: details.extracted_features ?? {},
+        analysis_output,
+        narrative: details.narrative ?? '',
+      });
     }
 
-    // Calculate final score
-    const finalScore = totalWeight > 0 ? (weightedSum / totalWeight) * 100 : 0;
-    const targetsMetCount = factorScores.filter(f => f.targetMet).length;
+    const extraction = extractFeatures(tradeDraft, factorValues);
+    const ipsVersion = ips?.version ?? ips?.ips_version ?? ips?.rubric_version ?? null;
+
+    if (!extraction.ok) {
+      const neutralScore = 50;
+      const violations = [extraction.error, ...extraction.missing.map((m) => `Missing: ${m}`), ...extraction.outOfRange.map((o) => `${o.field}: ${o.message}`)];
+      const analysis_output = {
+        rubric_version: rubric.rubric_version,
+        calibration_version: 'none',
+        raw_score: neutralScore,
+        calibrated_success_prob: 0.5,
+        reasons: ['Unable to score due to incomplete inputs.'],
+        violations,
+        confidence: 'low' as const,
+        ips_id: ipsId,
+        ips_version: ipsVersion,
+        input_hash: inputHash,
+      };
+      const narrative = `Score defaulted to ${neutralScore} because required inputs were missing: ${extraction.missing.join(', ')}.`;
+      return NextResponse.json({
+        success: true,
+        data: {
+          score: neutralScore,
+          scoreId: null,
+          breakdown: {
+            totalWeight: 0,
+            weightedSum: 0,
+            factorScores: [],
+            targetsMetCount: 0,
+            targetPercentage: 0,
+          },
+          timestamp: new Date().toISOString(),
+        },
+        extracted_features: {
+          ...(extraction.features ?? {}),
+          missing_fields: extraction.missing,
+          out_of_range: extraction.outOfRange,
+        },
+        analysis_output,
+        narrative,
+      });
+    }
+
+    const aggregated = scoreFeatures(extraction.features, rubric);
+    const calibration = calibrateScore(aggregated.rawScore);
+    const factorScores = buildFactorScores(aggregated.criterionScores);
+
+    const totalWeight = aggregated.criterionScores.reduce((sum, c) => sum + (c.weight || 0), 0) || 1;
+    const weightedSum = aggregated.criterionScores.reduce((sum, c) => sum + c.score * (c.weight || 0), 0);
+    const targetsMetCount = factorScores.filter((f) => f.targetMet).length;
     const targetPercentage = factorScores.length > 0 ? (targetsMetCount / factorScores.length) * 100 : 0;
 
-    // Save score calculation to database
-    const scoreData = {
+    const reasons = buildReasons(aggregated.criterionScores, aggregated.penaltiesApplied);
+    const confidence = determineConfidence({
+      violations: aggregated.violations,
+      penalties: aggregated.penaltiesApplied,
+      missing: [],
+      outOfRange: 0,
+    });
+
+    const seed = parseInt(inputHash.slice(0, 8), 16) % 2147483647;
+    const narrative = await generateNarrative({
+      score: aggregated.rawScore,
+      calibratedProbability: calibration.calibratedProbability,
+      reasons,
+      confidence,
+      rubricVersion: rubric.rubric_version,
+      calibrationVersion: calibration.calibrationVersion,
+      features: extraction.features,
+      seed: Number.isFinite(seed) ? seed : 0,
+    });
+
+    const analysis_output = {
+      rubric_version: rubric.rubric_version,
+      calibration_version: calibration.calibrationVersion,
+      raw_score: aggregated.rawScore,
+      calibrated_success_prob: calibration.calibratedProbability,
+      reasons,
+      violations: aggregated.violations,
+      confidence,
       ips_id: ipsId,
-      trade_id: tradeId || null,
-      final_score: finalScore,
-      total_weight: totalWeight,
-      factors_used: factorScores.length,
-      targets_met: targetsMetCount,
-      target_percentage: targetPercentage,
-      calculation_details: {
-        factorScores,
-        weightedSum,
-        totalWeight
-      },
-      created_at: new Date().toISOString()
+      ips_version: ipsVersion,
+      input_hash: inputHash,
     };
 
-    const { data: savedScore, error: scoreError } = await supabase
-      .from('ips_score_calculations')
-      .insert(scoreData)
-      .select()
-      .single();
+    const calculationDetails = {
+      ...analysis_output,
+      factor_scores: factorScores,
+      criterion_scores: aggregated.criterionScores,
+      penalties: aggregated.penaltiesApplied,
+      total_weight: totalWeight,
+      weighted_sum: weightedSum,
+      targets_met: targetsMetCount,
+      target_percentage: targetPercentage,
+      extracted_features: extraction.features,
+      narrative,
+      timestamp: new Date().toISOString(),
+    };
 
-    if (scoreError) {
-      console.error('Failed to save score calculation:', scoreError);
-    }
+    await persistScore(supabase as any, {
+      ipsId,
+      tradeId: tradeId ?? null,
+      finalScore: aggregated.rawScore,
+      totalWeight,
+      factorScores,
+      targetsMet: targetsMetCount,
+      targetPercentage,
+      calculationDetails,
+    });
 
-    // Also save individual factor scores
-    const factorScoreInserts = factorScores.map(fs => ({
-      ips_score_calculation_id: savedScore?.id,
-      factor_name: fs.factorName,
-      factor_value: fs.value,
-      weight: fs.weight,
-      individual_score: fs.individualScore,
-      weighted_score: fs.weightedScore,
-      target_met: fs.targetMet,
-      created_at: new Date().toISOString()
-    }));
-
-    if (savedScore?.id && factorScoreInserts.length > 0) {
-      const { error: factorScoreError } = await supabase
-        .from('factor_score_details')
-        .insert(factorScoreInserts);
-
-      if (factorScoreError) {
-        console.error('Failed to save factor score details:', factorScoreError);
-      }
-    }
-    
     return NextResponse.json({
       success: true,
       data: {
-        score: finalScore,
-        scoreId: savedScore?.id,
+        score: aggregated.rawScore,
+        scoreId: null,
         breakdown: {
           totalWeight,
           weightedSum,
           factorScores,
           targetsMetCount,
-          targetPercentage
+          targetPercentage,
         },
-        timestamp: new Date().toISOString()
-      }
+        timestamp: new Date().toISOString(),
+      },
+      extracted_features: extraction.features,
+      analysis_output,
+      narrative,
     });
-
   } catch (error) {
     console.error('Error calculating IPS score:', error);
-    
-    return NextResponse.json(
-      { 
-        error: 'Failed to calculate IPS score', 
-        message: error instanceof Error ? error.message : 'Unknown error' 
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      success: false,
+      error: 'Failed to calculate IPS score',
+    }, { status: 500 });
   }
 }
