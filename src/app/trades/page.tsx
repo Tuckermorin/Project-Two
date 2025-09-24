@@ -198,6 +198,45 @@ function evaluateRule(r: FactorRule, raw: unknown): boolean {
   }
 }
 
+const formatScoreValue = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) return "—";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  const digits = Math.abs(num) >= 100 ? 0 : 1;
+  return `${num.toFixed(digits)}%`;
+};
+
+const formatSigned = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) return "0.0";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "0.0";
+  const digits = Math.abs(num) >= 10 ? 0 : 1;
+  const prefix = num > 0 ? "+" : "";
+  return `${prefix}${num.toFixed(digits)}`;
+};
+
+const formatPercentValue = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) return "—";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  const normalized = Math.abs(num) <= 1 ? num * 100 : num;
+  const digits = Math.abs(normalized) >= 100 ? 0 : Math.abs(normalized) >= 10 ? 1 : 2;
+  return `${normalized.toFixed(digits)}%`;
+};
+
+const currencyFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 2,
+});
+
+const formatCurrencyValue = (value: number | null | undefined): string => {
+  if (value === null || value === undefined) return "—";
+  const num = Number(value);
+  if (!Number.isFinite(num)) return "—";
+  return currencyFormatter.format(num);
+};
+
 // -----------------------------
 // Trade form data
 // -----------------------------
@@ -316,6 +355,8 @@ export default function TradesPage() {
     status?: string;
     full?: any;
     inputs?: any;
+    scoreSources?: { baseline: number | null; ai: number | null };
+    scoring?: any;
   };
   const [aiByTrade, setAiByTrade] = useState<Record<string, AIAnalysis | undefined>>({});
   const [aiOpenRows, setAiOpenRows] = useState<Set<string>>(new Set());
@@ -421,12 +462,21 @@ export default function TradesPage() {
           ipsFactors: {},
           apiFactors: {},
         };
+        const factorValues: Record<string, number | string | boolean | null> = {};
+        if (Array.isArray(row.trade_factors)) {
+          for (const factor of row.trade_factors) {
+            if (!factor?.factor_name) continue;
+            const rawValue = factor?.factor_value ?? factor?.value ?? null;
+            factorValues[factor.factor_name] = rawValue;
+          }
+        }
         return {
           id: row.id,
           ips: { id: row.ips_id, name: row.investment_performance_systems?.name || "IPS" },
           data: base,
           createdAt: row.created_at,
           score: row.ips_score || undefined,
+          factorValues: Object.keys(factorValues).length ? factorValues : undefined,
         } as ProspectiveTrade;
       });
       setProspectiveTrades(mapped);
@@ -833,9 +883,13 @@ export default function TradesPage() {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
+              tradeId: t.id,
+              ipsId: t.ips?.id,
               trade: t.data,
               ipsName: t.ips?.name || t.ips?.id,
               strategyType: t.data.contractType,
+              factorValues: t.factorValues ?? null,
+              score: t.score ?? null,
             }),
           });
           const json = await res.json().catch(() => null);
@@ -1121,6 +1175,62 @@ export default function TradesPage() {
                                           <span className={`inline-block text-xs px-2 py-1 rounded ${categoryClass}`}>{R.category}</span>
                                         </div>
                                       </div>
+                                      {R.scoreSources && (
+                                        <div className="text-xs text-gray-500">
+                                          Baseline {formatScoreValue(R.scoreSources.baseline)} · AI raw {formatScoreValue(R.scoreSources.ai)}
+                                        </div>
+                                      )}
+                                      {R.adjustments && (
+                                        <div className="text-xs text-gray-500">
+                                          Adjustment {formatSigned(R.adjustments.ai_adjustment)}{R.adjustments.reasons?.length ? ` (${R.adjustments.reasons.join(", ")})` : ""}
+                                        </div>
+                                      )}
+                                      {Array.isArray(R.drivers) && R.drivers.length > 0 && (
+                                        <div className="text-xs text-gray-700">
+                                          <div className="text-xs font-semibold text-gray-600 mb-1">Top Drivers</div>
+                                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                            {R.drivers.slice(0, 6).map((driver, idx) => (
+                                              <div key={idx} className="rounded border border-gray-200 bg-white px-2 py-1 flex justify-between gap-2">
+                                                <div>
+                                                  <div className="font-medium">{driver.code}</div>
+                                                  {driver.short_text && <div className="text-[11px] text-gray-500">{driver.short_text}</div>}
+                                                </div>
+                                                <div className="text-right text-[11px] text-gray-600">
+                                                  <div>{driver.direction === "neg" ? "-" : "+"}</div>
+                                                  <div>{driver.evidence_number != null ? Number(driver.evidence_number).toFixed(2) : "—"}</div>
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+                                      {R.benchmarks && (
+                                        <div className="text-xs text-gray-700">
+                                          <div className="text-xs font-semibold text-gray-600 mb-1">Benchmarks</div>
+                                          <div className="flex flex-wrap gap-3">
+                                            <span>Win rate: {formatPercentValue(R.benchmarks.win_rate)}</span>
+                                            <span>Median P/L: {formatCurrencyValue(R.benchmarks.median_pl)}</span>
+                                            <span>Sample: {R.benchmarks.sample_size}</span>
+                                          </div>
+                                        </div>
+                                      )}
+                                      {R.playbook?.entries?.length ? (
+                                        <div className="text-xs text-gray-700">
+                                          <div className="text-xs font-semibold text-gray-600 mb-1">Playbook</div>
+                                          <div className="space-y-1">
+                                            {R.playbook.entries.slice(0, 4).map((entry, idx) => (
+                                              <div key={idx} className="border border-blue-200 bg-blue-50 rounded px-2 py-1">
+                                                <div className="font-medium">{entry.trigger}</div>
+                                                {entry.condition && <div>Condition: {entry.condition}</div>}
+                                                {entry.action && <div>Action: {entry.action}</div>}
+                                                {entry.exit_if && <div>Exit: {entry.exit_if}</div>}
+                                                <div>Confidence: {formatPercentValue(entry.confidence)}</div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      ) : null}
+
                                       {Array.isArray(R.suggestions) && R.suggestions.length > 0 && (
                                         <div className="text-sm text-gray-700">
                                           <div className="font-medium text-sm mb-1">Suggestions</div>

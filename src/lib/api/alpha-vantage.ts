@@ -263,38 +263,38 @@ export class AlphaVantageClient {
 
   async getCompleteFundamentalData(symbol: string): Promise<FundamentalData> {
     console.log(`Fetching complete fundamental data for ${symbol}`);
-    
-    try {
-      // Make requests with minimal delays. Account now supports 150 rpm.
-      // Keep a tiny throttle to avoid burst errors; configurable via env.
-      const throttle = Number(process.env.ALPHA_VANTAGE_MIN_DELAY_MS || process.env.ALPHA_VANTAGE_THROTTLE_MS || 100);
-      const overview = await this.getCompanyOverview(symbol);
-      if (throttle > 0) await this.delay(throttle);
-      
-      const incomeStatement = await this.getIncomeStatement(symbol);
-      if (throttle > 0) await this.delay(throttle);
-      
-      const balanceSheet = await this.getBalanceSheet(symbol);
-      if (throttle > 0) await this.delay(throttle);
-      
-      const cashFlow = await this.getCashFlow(symbol);
-      if (throttle > 0) await this.delay(throttle);
-      
-      const earnings = await this.getEarnings(symbol);
+    const throttle = Number(process.env.ALPHA_VANTAGE_MIN_DELAY_MS || process.env.ALPHA_VANTAGE_THROTTLE_MS || 100);
 
-      return {
-        symbol: symbol.toUpperCase(),
-        overview,
-        incomeStatement,
-        balanceSheet,
-        cashFlow,
-        earnings
-      };
-    } catch (error) {
-      console.error(`Error fetching fundamental data for ${symbol}:`, error);
-      throw error;
-    }
+    const fetchSafe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
+      try {
+        const value = await fn();
+        return value;
+      } catch (error) {
+        console.warn(`Alpha Vantage ${label} fetch failed for ${symbol}`, error);
+        return null;
+      } finally {
+        if (throttle > 0) {
+          await this.delay(throttle);
+        }
+      }
+    };
+
+    const overview = await fetchSafe('overview', () => this.getCompanyOverview(symbol));
+    const incomeStatement = await fetchSafe('income statement', () => this.getIncomeStatement(symbol));
+    const balanceSheet = await fetchSafe('balance sheet', () => this.getBalanceSheet(symbol));
+    const cashFlow = await fetchSafe('cash flow', () => this.getCashFlow(symbol));
+    const earnings = await fetchSafe('earnings', () => this.getEarnings(symbol));
+
+    return {
+      symbol: symbol.toUpperCase(),
+      overview,
+      incomeStatement,
+      balanceSheet,
+      cashFlow,
+      earnings,
+    };
   }
+
 
   private delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -413,6 +413,19 @@ export class AlphaVantageClient {
     const data = await this.makeRequest<any>({ function: 'TREASURY_YIELD', maturity: '10year', interval: 'daily' });
     return this.latestFromDataSeries(data);
   }
+  async getDailyAdjustedSeries(symbol: string, outputsize: 'compact' | 'full' = 'compact') {
+    const data = await this.makeRequest<any>({
+      function: 'TIME_SERIES_DAILY_ADJUSTED',
+      symbol: symbol.toUpperCase(),
+      outputsize
+    });
+    const series = data?.['Time Series (Daily)'];
+    if (!series || typeof series !== 'object') {
+      throw new AlphaVantageError('TIME_SERIES_DAILY_ADJUSTED response missing data');
+    }
+    return series as Record<string, { [key: string]: string }>;
+  }
+
 }
 
 // Singleton instance
