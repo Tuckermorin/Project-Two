@@ -10,8 +10,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { AlertCircle, Loader2, RefreshCw, Trash2 } from 'lucide-react'
+import { AlertCircle, Loader2, RefreshCw, Trash2, MoreVertical } from 'lucide-react'
 import { dispatchTradesUpdated, TRADES_UPDATED_EVENT } from '@/lib/events'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 interface ActionTrade {
   id: string
@@ -348,7 +354,8 @@ export function ActionNeededTradesPanel() {
               <table className="w-full border-collapse border border-gray-200 text-sm">
                 <thead>
                   <tr className="bg-gray-50">
-                    <th className="border border-gray-200 px-3 py-2 text-left">Name</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Status</th>
+                    <th className="border border-gray-200 px-3 py-2 text-left">Trade</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">Symbol</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">IPS</th>
                     <th className="border border-gray-200 px-3 py-2 text-left">Contract</th>
@@ -368,6 +375,11 @@ export function ActionNeededTradesPanel() {
                     const reasonLabel = closeMethods.find(m => m.key === meta.reason)?.label || meta.reason || 'Not set'
                     return (
                       <tr key={trade.id} className="hover:bg-gray-50">
+                        <td className="border border-gray-200 px-3 py-2">
+                          <Badge className={`${String(trade.status || '').toLowerCase() === 'active' ? 'bg-green-100 text-green-800 border-green-200' : String(trade.status || '').toLowerCase() === 'closed' ? 'bg-gray-200 text-gray-700 border-gray-300' : 'bg-yellow-100 text-yellow-800 border-yellow-200'} border uppercase`}>
+                            {String(trade.status || 'unknown').toUpperCase()}
+                          </Badge>
+                        </td>
                         <td className="border border-gray-200 px-3 py-2">
                           <div className="font-medium">{trade.name}</div>
                           <div className="text-xs text-gray-500">{trade.createdAt ? new Date(trade.createdAt).toLocaleDateString() : ''}</div>
@@ -394,41 +406,45 @@ export function ActionNeededTradesPanel() {
                           ) : '—'}
                         </td>
                         <td className="border border-gray-200 px-3 py-2">
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              size="sm"
-                              className="h-7"
-                              onClick={() => setClosingDialog(prev => ({
-                                ...prev,
-                                open: true,
-                                trade,
-                                closeDate: trade.closeMeta?.date || new Date().toISOString().slice(0, 10),
-                                closeMethod: trade.closeMeta?.reason || 'manual_close',
-                                costToClosePerSpread: trade.closeMeta?.costToClose != null ? String(trade.closeMeta.costToClose) : '',
-                                saving: false,
-                                error: null,
-                              }))}
-                            >
-                              Enter Close Details
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              className="h-7"
-                              onClick={() => handleBackToActive(trade.id)}
-                            >
-                              Back to Active
-                            </Button>
-                            <Button
-                              variant="destructive"
-                              size="sm"
-                              className="h-7 flex items-center gap-1"
-                              onClick={() => setDeleteDialog({ open: true, trade })}
-                              aria-label={`Delete ${trade.name}`}
-                            >
-                              <Trash2 className="h-3 w-3" />
-                            </Button>
-                          </div>
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
+                                aria-label={`Actions for ${trade.name}`}
+                              >
+                                <MoreVertical className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-56">
+                              <DropdownMenuItem
+                                onSelect={() => setClosingDialog(prev => ({
+                                  ...prev,
+                                  open: true,
+                                  trade,
+                                  closeDate: trade.closeMeta?.date || new Date().toISOString().slice(0, 10),
+                                  closeMethod: trade.closeMeta?.reason || 'manual_close',
+                                  costToClosePerSpread: trade.closeMeta?.costToClose != null ? String(trade.closeMeta.costToClose) : '',
+                                  saving: false,
+                                  error: null,
+                                }))}
+                              >
+                                Enter Close Details
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onSelect={() => handleBackToActive(trade.id)}>
+                                Back to Active
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                className="text-red-600 focus:text-red-600"
+                                onSelect={() => setDeleteDialog({ open: true, trade })}
+                                title="Delete"
+                              >
+                                <Trash2 className="mr-2 h-4 w-4" />
+                                <span className="sr-only">Delete</span>
+                              </DropdownMenuItem>
+                            </DropdownMenuContent>
+                          </DropdownMenu>
                         </td>
                       </tr>
                     )

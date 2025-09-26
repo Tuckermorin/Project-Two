@@ -11,8 +11,14 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, Trash2 } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2 } from 'lucide-react'
 import { dispatchTradesUpdated } from '@/lib/events'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 // Trade data type
 interface Trade {
@@ -57,6 +63,7 @@ interface Column {
 
 // All available columns
 const allColumns: Column[] = [
+  { key: 'status', label: 'Status' },
   { key: 'name', label: 'Name' },
   { key: 'placed', label: 'Date Placed' },
   { key: 'currentPrice', label: 'Current Price' },
@@ -76,7 +83,6 @@ const allColumns: Column[] = [
   { key: 'vega', label: 'Vega' },
   { key: 'ivAtEntry', label: 'IV at Entry' },
   { key: 'sector', label: 'Sector' },
-  { key: 'status', label: 'Status' },
   { key: 'ipsScore', label: 'IPS Score' },
   { key: 'dateClosed', label: 'Date Closed' },
   { key: 'costToClose', label: 'Cost to close' },
@@ -89,14 +95,14 @@ const allColumns: Column[] = [
 
 // Default visible columns
 const defaultColumns = [
-  'name', 'placed', 'currentPrice', 'expDate', 'dte', 'contractType', 
+  'status', 'name', 'placed', 'currentPrice', 'expDate', 'dte', 'contractType', 
   'contracts', 'shortStrike', 'longStrike', 'creditReceived', 'spreadWidth',
   'maxGain', 'maxLoss', 'percentCurrentToShort', 'deltaShortLeg', 
   'theta', 'vega', 'ivAtEntry', 'sector'
 ]
 
 // Simple view columns
-const simpleColumns = ['name', 'contractType', 'expDate', 'dte', 'maxGain', 'maxLoss', 'percentCurrentToShort', 'ipsScore', 'status']
+const simpleColumns = ['status', 'name', 'contractType', 'expDate', 'dte', 'maxGain', 'maxLoss', 'percentCurrentToShort', 'ipsScore']
 
 export default function ExcelStyleTradesDashboard() {
   // State
@@ -383,7 +389,13 @@ export default function ExcelStyleTradesDashboard() {
     }
     
     const baseColumns = viewMode === 'simple' ? simpleColumns : Array.from(visibleColumns)
-    return allColumns.filter(col => baseColumns.includes(col.key))
+    const filtered = allColumns.filter(col => baseColumns.includes(col.key))
+    const statusIndex = filtered.findIndex(col => col.key === 'status')
+    if (statusIndex > 0) {
+      const [statusColumn] = filtered.splice(statusIndex, 1)
+      filtered.unshift(statusColumn)
+    }
+    return filtered
   }, [viewMode, showIPS, hasActiveIPS, activeIPSFactors, visibleColumns])
 
   if (loading && trades.length === 0) {
@@ -540,38 +552,43 @@ export default function ExcelStyleTradesDashboard() {
                   })}
                   {!showIPS && (
                     <td className="border border-gray-200 px-3 py-2">
-                      <div className="flex gap-1">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 px-2 text-xs"
-                          onClick={() => (window.location.href = `/trades?edit=${trade.id}`)}
-                        >
-                          Edit
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-6 px-2 text-xs"
-                          onClick={() => setClosing({
-                            open: true,
-                            trade,
-                            costToClose: '',
-                            reason: 'manual close',
-                            date: new Date().toISOString().slice(0,10),
-                            moveToActionNeeded: false,
-                          })}
-                        >Close</Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          className="h-6 px-2 text-xs flex items-center gap-1"
-                          onClick={() => setDeleteDialog({ open: true, trade })}
-                          aria-label={`Delete ${trade.name}`}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label={`Actions for ${trade.name}`}
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-44">
+                          <DropdownMenuItem onClick={() => (window.location.href = `/trades?edit=${trade.id}`)}>
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            onClick={() => setClosing({
+                              open: true,
+                              trade,
+                              costToClose: '',
+                              reason: 'manual close',
+                              date: new Date().toISOString().slice(0, 10),
+                              moveToActionNeeded: false,
+                            })}
+                          >
+                            Close
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-red-600 focus:text-red-600"
+                            onClick={() => setDeleteDialog({ open: true, trade })}
+                            title="Delete"
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            <span className="sr-only">Delete</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   )}
                 </tr>

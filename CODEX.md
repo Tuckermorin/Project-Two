@@ -31,6 +31,7 @@ https://www.alphavantage.co/query?function=SMA&symbol=IBM&interval=5min&time_per
   - 
   - 
 ---
+
 ## Authentication Setup
 
 - Provision Supabase (or NextAuth) credentials and add the secrets to `.env` (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`).

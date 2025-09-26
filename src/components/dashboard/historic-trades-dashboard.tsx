@@ -9,8 +9,14 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { ArrowUpDown, ArrowUp, ArrowDown, Filter, Eye, EyeOff, Settings2, AlertCircle, History, Trash2, RefreshCw, Loader2 } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, Filter, Eye, EyeOff, Settings2, AlertCircle, History, Trash2, RefreshCw, Loader2, MoreVertical } from 'lucide-react'
 import { dispatchTradesUpdated, TRADES_UPDATED_EVENT } from '@/lib/events'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
 
 // Historic trade data type
 interface HistoricTrade {
@@ -600,20 +606,31 @@ export default function HistoricTradesDashboard() {
                   })}
                   {!showIPS && (
                     <td className="border border-gray-200 px-3 py-2">
-                      <div className="flex gap-1">
-                        <Button variant="outline" size="sm" className="h-6 px-2 text-xs">
-                          View Details
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          className="h-6 px-2 text-xs flex items-center gap-1"
-                          onClick={() => setDeleteDialog({ open: true, trade })}
-                          aria-label={`Delete ${trade.name}`}
-                        >
-                          <Trash2 className="h-3 w-3" />
-                        </Button>
-                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            aria-label={`Actions for ${trade.name}`}
+                          >
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-40">
+                          <DropdownMenuItem>
+                            View Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            className="text-red-600 focus:text-red-600"
+                            onSelect={() => setDeleteDialog({ open: true, trade })}
+                            title="Delete"
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            <span className="sr-only">Delete</span>
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </td>
                   )}
                 </tr>
