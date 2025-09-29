@@ -6,6 +6,7 @@ import { computeTradeFeatures } from "@/lib/services/trade-features-service";
 import { getBenchmarks } from "@/lib/services/trade-benchmarks-service";
 import { computeIpsScore, type ScoreComputationResult } from "@/lib/services/trade-scoring-service";
 
+import { runTradeAgent } from "@/lib/ai/tradeAgent";
 type FactorValue = number | string | boolean | null;
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -52,19 +53,10 @@ interface AnalyzeRequestBody {
   model?: string | null;
 }
 
-type OllamaMessage = {
+type AgentMessage = {
   role: string;
   content: string;
   name?: string;
-};
-
-type ToolSchema = {
-  type: "function";
-  function: {
-    name: string;
-    description: string;
-    parameters: Record<string, any>;
-  };
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -204,125 +196,6 @@ const categoryFromScore = (score: number | null): "Strong" | "Moderate" | "Weak"
   if (score >= 80) return "Strong";
   if (score >= 60) return "Moderate";
   return "Weak";
-};
-
-const buildToolSchemas = (): ToolSchema[] => [
-  {
-    type: "function",
-    function: {
-      name: "search_symbols",
-      description: "Search ticker symbols by keyword using Alpha Vantage.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: { type: "string", description: "Company name or ticker" },
-          limit: { type: "integer", minimum: 1, maximum: 25, default: 10 },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_quote",
-      description: "Get latest quote for a symbol using Alpha Vantage.",
-      parameters: {
-        type: "object",
-        properties: { symbol: { type: "string" } },
-        required: ["symbol"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "get_api_factors",
-      description: "Fetch API factor snapshot for a symbol.",
-      parameters: {
-        type: "object",
-        properties: { symbol: { type: "string" }, ipsId: { type: "string" } },
-        required: ["symbol"],
-      },
-    },
-  },
-];
-
-const runTool = async (name: string, rawArgs: any) => {
-  try {
-    switch (name) {
-      case "search_symbols": {
-        const query = String(rawArgs?.query ?? "").slice(0, 64);
-        const limit = Math.min(25, Math.max(1, Number(rawArgs?.limit ?? 10)));
-        if (!query.trim()) return [];
-        const alpha = getAlphaVantageClient();
-        const results = await alpha.searchSymbols(query);
-        return results.slice(0, limit);
-      }
-      case "get_quote": {
-        const sym = String(rawArgs?.symbol ?? "").toUpperCase();
-        if (!sym) return { error: "Missing symbol" };
-        const market = getMarketDataService();
-        return market.getUnifiedStockData(sym, false);
-      }
-      case "get_api_factors": {
-        const sym = String(rawArgs?.symbol ?? "").toUpperCase();
-        if (!sym) return { error: "Missing symbol" };
-        const market = getMarketDataService();
-        const stock = await market.getUnifiedStockData(sym, true);
-        return {
-          symbol: sym,
-          factors: {
-            pe_ratio:
-              stock.fundamentals?.eps && stock.currentPrice
-                ? stock.currentPrice / stock.fundamentals.eps
-                : null,
-            beta: stock.beta ?? null,
-            market_cap: stock.marketCap ?? null,
-            revenue_growth: stock.fundamentals?.revenueGrowth ?? null,
-            roe: stock.fundamentals?.roe ?? null,
-            roa: stock.fundamentals?.roa ?? null,
-            eps: stock.fundamentals?.eps ?? null,
-          },
-          lastUpdated: new Date().toISOString(),
-        };
-      }
-      default:
-        return { error: "Unknown tool: " + String(name) };
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return { error: message };
-  }
-};
-
-const callOllamaChat = async (
-  chatUrl: string,
-  model: string,
-  messages: OllamaMessage[],
-  options: Record<string, unknown>,
-  tools: ToolSchema[]
-) =>
-  fetch(chatUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ model, stream: false, messages, options, tools }),
-  });
-
-const listInstalledModels = async (baseOrigin: string): Promise<string[]> => {
-  try {
-    const res = await fetch(baseOrigin + "/api/tags");
-    if (!res.ok) return [];
-    const json = await res.json();
-    const models = Array.isArray(json?.models)
-      ? json.models
-          .map((entry: any) => (entry && typeof entry.name === "string" ? entry.name : null))
-          .filter((entry: string | null): entry is string => Boolean(entry))
-      : [];
-    return models;
-  } catch {
-    return [];
-  }
 };
 
 const parseJsonResponse = (content: string, fallbackScore: number | null) => {
@@ -660,89 +533,56 @@ export async function POST(request: NextRequest) {
     "Context (JSON):",
     contextJson,
   ].join("\n");
-  const ollamaUrl = (process.env.OLLAMA_API_URL ?? "http://golem:11434/api/chat").trim();
-  const requestedModel = body.model ? body.model.trim() : null;
-  let model = requestedModel && requestedModel.length ? requestedModel : (process.env.OLLAMA_MODEL ?? "llama4:maverick").trim();
+  const requestedModel = typeof body.model === "string" ? body.model.trim() : "";
+  const recursionLimitEnv = Number(process.env.TRADE_AGENT_MAX_STEPS ?? 0);
+  const recursionLimit =
+    Number.isFinite(recursionLimitEnv) && recursionLimitEnv > 0 ? recursionLimitEnv : undefined;
 
-  let baseOrigin = "";
-  try {
-    const parsed = new URL(ollamaUrl);
-    baseOrigin = parsed.origin;
-  } catch {
-    baseOrigin = "http://golem:11434";
-  }
-
-  const messages: OllamaMessage[] = [
+  const messages: AgentMessage[] = [
     { role: "system", content: "You are an options and equity trading analyst. Use supplied fundamentals only." },
     { role: "user", content: finalPrompt },
   ];
-  const options = { temperature: 0.1, top_p: 0.9, seed: 42 };
-  const tools = buildToolSchemas();
 
-  let response = await callOllamaChat(ollamaUrl, model, messages, options, tools);
-  if (response.status === 404) {
-    const installed = await listInstalledModels(baseOrigin);
-    const preferred = [
-      "gpt-oss:120b",
-      "llama4:maverick",
-      "llama3.2:latest",
-      "llama3.1:latest",
-      "llama3:latest",
-      "mistral:latest",
-      "qwen2.5:latest",
-    ];
-    const fallback = preferred.find((entry) => installed.includes(entry)) ?? installed[0];
-    if (fallback) {
-      model = fallback;
-      response = await callOllamaChat(ollamaUrl, model, messages, options, tools);
-    }
-  }
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => "");
+  let agentOutcome;
+  try {
+    agentOutcome = await runTradeAgent({
+      messages,
+      model: requestedModel || undefined,
+      temperature: 0.1,
+      recursionLimit,
+      baseUrl: process.env.OLLAMA_API_URL ?? process.env.OLLAMA_HOST ?? undefined,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json(
       {
         success: false,
-        error: "Ollama error: " + String(response.status) + " " + errorText,
-        hint: "Ensure the requested model is installed (ollama pull <model>).",
+        error: "Agent invocation failed: " + message,
       },
       { status: 502 }
     );
   }
 
-  let data: any = await response.json();
-  for (let round = 0; round < 2; round += 1) {
-    const toolCalls = data?.message?.tool_calls || data?.tool_calls || [];
-    if (!Array.isArray(toolCalls) || toolCalls.length === 0) break;
+  const model = agentOutcome.model;
+  const rawContent = agentOutcome.message.content as unknown;
+  const content =
+    typeof rawContent === "string"
+      ? rawContent
+      : Array.isArray(rawContent)
+        ? rawContent
+            .map((chunk: any) =>
+              typeof chunk === "string"
+                ? chunk
+                : typeof chunk?.text === "string"
+                  ? chunk.text
+                  : ""
+            )
+            .join("\n")
+        : String(rawContent ?? "");
 
-    for (const call of toolCalls) {
-      const name = call?.function?.name || call?.name;
-      if (!name) continue;
-      const rawArgs = call?.function?.arguments || call?.arguments || {};
-      let parsedArgs: any = {};
-      try {
-        parsedArgs = typeof rawArgs === "string" && rawArgs.trim() ? JSON.parse(rawArgs) : rawArgs;
-      } catch {
-        parsedArgs = rawArgs;
-      }
-      const result = await runTool(String(name), parsedArgs);
-      messages.push({ role: "tool", name: String(name), content: JSON.stringify(result) });
-    }
-
-    response = await callOllamaChat(ollamaUrl, model, messages, options, tools);
-    if (!response.ok) {
-      break;
-    }
-    data = await response.json();
-  }
-
-  const contentCandidate = Array.isArray(data?.messages) && data.messages.length
-    ? data.messages[data.messages.length - 1]?.content
-    : undefined;
-  const content = data?.message?.content || contentCandidate;
-  if (!content || typeof content !== "string") {
+  if (!content.trim()) {
     return NextResponse.json(
-      { success: false, error: "Invalid model response" },
+      { success: false, error: "Agent returned an empty response." },
       { status: 502 }
     );
   }
