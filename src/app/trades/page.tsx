@@ -33,6 +33,7 @@ import {
 import { ipsDataService, type IPSConfiguration } from "@/lib/services/ips-data-service";
 import type { FactorValueMap } from "@/lib/types";
 import { NewTradeEntryForm } from "@/components/trades/NewTradeEntryForm";
+import { AgentSection } from "@/components/trades/AgentSection";
 import { dispatchTradesUpdated } from "@/lib/events";
 
 // -----------------------------
@@ -702,6 +703,47 @@ export default function TradesPage() {
             </Button>
           </div>
         </div>
+
+        {/* AI Agent Section */}
+        {activeIPSs.length > 0 && (
+          <AgentSection
+            onAddToProspective={(candidate, ipsId) => {
+              // Convert agent candidate to prospective trade format
+              const ips = activeIPSs.find((i: any) => i.id === ipsId);
+              if (!ips) {
+                console.error("IPS not found for candidate");
+                return;
+              }
+
+              // Convert candidate to TradeFormData
+              const tradeData: TradeFormData = {
+                name: `AI: ${candidate.symbol} ${candidate.strategy.replace(/_/g, " ")}`,
+                symbol: candidate.symbol,
+                contractType: "put-credit-spread",
+                expirationDate: candidate.contract_legs[0]?.expiry,
+                numberOfContracts: 1,
+                shortPutStrike: candidate.contract_legs.find((l) => l.type === "SELL")?.strike,
+                longPutStrike: candidate.contract_legs.find((l) => l.type === "BUY")?.strike,
+                creditReceived: candidate.entry_mid,
+                ipsFactors: {},
+                apiFactors: {},
+              };
+
+              // Create prospective trade
+              const prospectiveTrade: ProspectiveTrade = {
+                id: candidate.id,
+                ips: { id: ips.id, name: ips.name },
+                data: tradeData,
+                createdAt: new Date().toISOString(),
+                score: candidate.score,
+              };
+
+              setProspectiveTrades((prev) => [prospectiveTrade, ...prev]);
+              setCurrentView("prospective");
+            }}
+            availableIPSs={activeIPSs.map((ips: any) => ({ id: ips.id, name: ips.name }))}
+          />
+        )}
 
         {activeIPSs.length === 0 ? (
           <Card>

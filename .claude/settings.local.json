@@ -3,7 +3,10 @@
     "allow": [
       "WebFetch(domain:www.alphavantage.co)",
       "Bash(cd:*)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Read(//mnt/c/Users/tucker.morin/OneDrive/**)",
+      "Bash(npm run build:*)",
+      "Bash(npx tsc:*)"
     ],
     "deny": [],
     "ask": []
