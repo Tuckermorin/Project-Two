@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getMarketDataService } from '@/lib/services/market-data-service';
+import type { OptionsRequestContext } from '@/lib/types/market-data';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -81,16 +82,108 @@ export async function GET(request: NextRequest) {
     const marketDataService = getMarketDataService();
     const stockData = await marketDataService.getUnifiedStockData(symbol, true);
     
+    type OptionLeg = OptionsRequestContext['legs'][number];
+
+    const optionFactorNames = new Set<string>([
+      'Implied Volatility',
+      'Delta',
+      'Gamma',
+      'Theta',
+      'Vega',
+      'Rho',
+      'Option Volume',
+      'Open Interest',
+      'Bid-Ask Spread',
+      'Time Value',
+      'Intrinsic Value'
+    ]);
+
+    const optionsParam = searchParams.get('options');
+    let optionsContext: OptionsRequestContext | undefined;
+    if (optionsParam) {
+      try {
+        optionsContext = JSON.parse(optionsParam) as OptionsRequestContext;
+      } catch (err) {
+        console.warn('Invalid options context payload', err);
+      }
+    }
+
+    const needsOptionData = apiFactors.some((factor: any) => optionFactorNames.has(factor.factor_name));
+    const optionLegs: OptionLeg[] = needsOptionData && Array.isArray(optionsContext?.legs)
+      ? (optionsContext!.legs as OptionLeg[]).filter((leg) =>
+          leg &&
+          (leg.type === 'call' || leg.type === 'put') &&
+          typeof leg.strike === 'number' &&
+          !Number.isNaN(leg.strike)
+        )
+      : [];
+
+    const optionDataByKey = new Map<string, any>();
+    const optionLegMeta: Array<{ leg: OptionLeg; key: string; expiration: string; data?: any }> = [];
+
+    const buildLegKey = (leg: OptionLeg, expiration: string) => {
+      const base = leg.id ? String(leg.id) : `${leg.type}_${leg.strike}`;
+      return `${base}_${expiration}`;
+    };
+
+    if (needsOptionData && optionLegs.length > 0) {
+      for (const leg of optionLegs) {
+        const expirationForLeg = leg.expiration || optionsContext?.expiration;
+        if (!expirationForLeg) {
+          continue;
+        }
+
+        const key = buildLegKey(leg, expirationForLeg);
+        try {
+          const optionData = await marketDataService.getOptionsData(
+            symbol,
+            leg.strike,
+            expirationForLeg,
+            leg.type,
+          );
+          if (optionData) {
+            optionDataByKey.set(key, optionData);
+            optionLegMeta.push({ leg, key, expiration: expirationForLeg, data: optionData });
+          }
+        } catch (err) {
+          console.warn('Failed to load option leg data', leg, err);
+        }
+      }
+    }
+
+    const selectOptionData = (preferredType?: 'call' | 'put') => {
+      if (optionLegMeta.length === 0) return undefined;
+      const available = optionLegMeta.filter((entry) => entry.data);
+      if (available.length === 0) return undefined;
+
+      const primaryMatch = available.find((entry) => entry.leg.primary && (!preferredType || entry.leg.type === preferredType));
+      if (primaryMatch) return primaryMatch.data;
+
+      if (preferredType) {
+        const typeMatch = available.find((entry) => entry.leg.type === preferredType);
+        if (typeMatch) return typeMatch.data;
+      }
+
+      const shortMatch = available.find((entry) => entry.leg.role === 'short');
+      if (shortMatch) return shortMatch.data;
+
+      return available[0].data;
+    };
+
+    const toNumber = (input: number | null | undefined): number | undefined =>
+      typeof input === 'number' && Number.isFinite(input) ? input : undefined;
     // Map API factors to actual data and save to database
     const factorResults: Record<string, any> = {};
     const failedFactors: string[] = [];
 
     for (const ipsFactor of apiFactors) {
       const factorName = ipsFactor.factor_name;
+      const isOptionsFactor = optionFactorNames.has(factorName);
       
       try {
         let value: number | undefined;
         let confidence = 0.95;
+        const factorSource = isOptionsFactor ? 'alpha_vantage_options' : 'alpha_vantage';
         
         switch (factorName) {
           case 'P/E Ratio':
@@ -143,6 +236,62 @@ export async function GET(request: NextRequest) {
           case 'Gross Profit TTM':
             value = stockData.fundamentals?.grossMargin;
             break;
+          case 'Implied Volatility': {
+            const optionData = selectOptionData();
+            const iv = optionData?.greeks?.impliedVolatility;
+            value = typeof iv === 'number' ? iv * 100 : undefined;
+            break;
+          }
+          case 'Delta': {
+            const optionData = selectOptionData();
+            value = toNumber(optionData?.greeks?.delta);
+            break;
+          }
+          case 'Gamma': {
+            const optionData = selectOptionData();
+            value = toNumber(optionData?.greeks?.gamma);
+            break;
+          }
+          case 'Theta': {
+            const optionData = selectOptionData();
+            value = toNumber(optionData?.greeks?.theta);
+            break;
+          }
+          case 'Vega': {
+            const optionData = selectOptionData();
+            value = toNumber(optionData?.greeks?.vega);
+            break;
+          }
+          case 'Rho': {
+            const optionData = selectOptionData();
+            value = toNumber(optionData?.greeks?.rho);
+            break;
+          }
+          case 'Option Volume': {
+            const optionData = selectOptionData();
+            value = toNumber(optionData?.volume);
+            break;
+          }
+          case 'Open Interest': {
+            const optionData = selectOptionData();
+            value = toNumber(optionData?.openInterest);
+            break;
+          }
+          case 'Bid-Ask Spread': {
+            const optionData = selectOptionData();
+            value = toNumber(optionData?.bidAskSpread);
+            break;
+          }
+          case 'Time Value': {
+            const optionData = selectOptionData();
+            value = toNumber(optionData?.timeValue);
+            break;
+          }
+          case 'Intrinsic Value': {
+            const optionData = selectOptionData();
+            value = toNumber(optionData?.intrinsicValue);
+            break;
+          }
           default:
             console.warn(`Unmapped factor: ${factorName}`);
             failedFactors.push(factorName);
@@ -157,7 +306,7 @@ export async function GET(request: NextRequest) {
               symbol,
               factor_name: factorName,
               value,
-              source: 'alpha_vantage',
+              source: factorSource,
               confidence,
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString()
@@ -171,7 +320,7 @@ export async function GET(request: NextRequest) {
 
           factorResults[factorName] = {
             value,
-            source: 'alpha_vantage',
+            source: factorSource,
             confidence,
             weight: ipsFactor.weight,
             lastUpdated: new Date().toISOString()
@@ -309,3 +458,10 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+
+
+
+
+
+

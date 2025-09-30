@@ -145,8 +145,9 @@ export function IPSFactorSelector({
 
   // Enhanced source badge - simplified without API indicators
   const getSourceBadge = (factor: FactorDefinition) => {
-    if (factor.source === 'alpha_vantage') {
-      return <Badge variant="outline" className="text-xs bg-green-50 text-green-700">Alpha Vantage</Badge>;
+    if (factor.source === 'alpha_vantage' || factor.source === 'alpha_vantage_options') {
+      const label = factor.source === 'alpha_vantage_options' ? 'Alpha Vantage Options' : 'Alpha Vantage';
+      return <Badge variant="outline" className="text-xs bg-green-50 text-green-700">{label}</Badge>;
     }
     return null;
   };

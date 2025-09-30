@@ -1,6 +1,6 @@
 // src/lib/services/market-data-service.ts
 
-import { getAlphaVantageClient, type FundamentalData } from '@/lib/api/alpha-vantage';
+import { getAlphaVantageClient, type FundamentalData, type RealtimeOptionContract } from '@/lib/api/alpha-vantage';
 import { createClient } from '@supabase/supabase-js';
 
 // Unified data types for our application
@@ -49,27 +49,37 @@ interface UnifiedStockData {
 interface UnifiedOptionsData {
   symbol: string;
   underlying: string;
-  strike: number;
+  contractId?: string | null;
+  strike: number | null;
   expiration: string;
   optionType: 'call' | 'put';
-  bid: number;
-  ask: number;
-  last?: number;
-  volume: number;
-  openInterest: number;
-  
-  // Greeks (from Tradier)
+  bid: number | null;
+  ask: number | null;
+  bidSize: number | null;
+  askSize: number | null;
+  last: number | null;
+  mark: number | null;
+  mid: number | null;
+  volume: number | null;
+  openInterest: number | null;
+  intrinsicValue: number | null;
+  timeValue: number | null;
+  bidAskSpread: number | null;
+  dataTimestamp: Date | null;
+
   greeks?: {
-    delta: number;
-    gamma: number;
-    theta: number;
-    vega: number;
-    rho: number;
-    impliedVolatility: number;
+    delta: number | null;
+    gamma: number | null;
+    theta: number | null;
+    vega: number | null;
+    rho: number | null;
+    impliedVolatility: number | null;
   };
-  
+
+  source?: 'alpha_vantage_options';
   lastUpdated: Date;
 }
+
 
 interface TradeSnapshot {
   tradeId: string;
@@ -267,27 +277,136 @@ class MarketDataService {
   /**
    * Get options data for a specific trade
    */
-  async getOptionsData(
+    async getOptionsData(
     symbol: string,
     strike: number,
     expiration: string,
     optionType: 'call' | 'put',
     forceRefresh = false
   ): Promise<UnifiedOptionsData | null> {
-    console.log(`Getting options data for ${symbol} ${strike}${optionType.charAt(0).toUpperCase()} ${expiration}`);
+    const normalizedSymbol = symbol.toUpperCase();
+    const normalizedExpiration = expiration;
+    const cacheKey = option____;
 
-    const cacheKey = `option_${symbol}_${strike}_${expiration}_${optionType}`;
     if (!forceRefresh) {
-      const cached = this.getFromCache<UnifiedOptionsData>(cacheKey);
-      if (cached) return cached;
+      const cached = this.getFromCache<UnifiedOptionsData>(cacheKey, 60 * 1000);
+      if (cached) {
+        return cached;
+      }
     }
 
     try {
-      // Options API not integrated (Tradier removed)
-      console.warn('Options data is not integrated; returning null');
-      return null;
+      const chainCacheKey = `options_chain_${normalizedSymbol}`;
+      let optionsChain = this.getFromCache<RealtimeOptionContract[]>(chainCacheKey, 60 * 1000);
+
+      if (!optionsChain || forceRefresh) {
+        optionsChain = await this.alphaVantage.getRealtimeOptions(normalizedSymbol, {
+          requireGreeks: true,
+        });
+
+        if (optionsChain && optionsChain.length > 0) {
+          this.setCache(chainCacheKey, optionsChain, 60 * 1000);
+        }
+      }
+
+      if (!optionsChain || optionsChain.length === 0) {
+        if (!forceRefresh) {
+          return this.getOptionsData(symbol, strike, expiration, optionType, true);
+        }
+        return null;
+      }
+
+      const strikeTolerance = Math.max(0.01, Math.abs(strike) * 0.0001);
+      const matchingContracts = optionsChain.filter((contract) => {
+        const contractStrike = contract.strike ?? null;
+        if (contract.type !== optionType) return false;
+        if (normalizedExpiration && contract.expiration && contract.expiration !== normalizedExpiration) return false;
+        if (contractStrike === null) return false;
+        return Math.abs(contractStrike - strike) <= strikeTolerance;
+      });
+
+      let contract = matchingContracts[0];
+
+      if (!contract && !forceRefresh) {
+        return this.getOptionsData(symbol, strike, expiration, optionType, true);
+      }
+
+      if (!contract) {
+        return null;
+      }
+
+      const bid = contract.bid ?? null;
+      const ask = contract.ask ?? null;
+      const mark = contract.mark ?? null;
+      const last = contract.last ?? null;
+      const mid = bid != null && ask != null ? (bid + ask) / 2 : null;
+      const optionPrice = mark ?? mid ?? last ?? bid ?? ask ?? null;
+
+      const fallbackBid = bid ?? optionPrice ?? null;
+      const fallbackAsk = ask ?? optionPrice ?? null;
+
+      const stockData = await this.getUnifiedStockData(symbol, false).catch(() => null);
+      const underlyingPrice = stockData?.currentPrice ?? null;
+
+      let intrinsicValue: number | null = null;
+      if (underlyingPrice != null && contract.strike != null) {
+        intrinsicValue = optionType === 'call'
+          ? Math.max(0, underlyingPrice - contract.strike)
+          : Math.max(0, contract.strike - underlyingPrice);
+      }
+
+      let timeValue: number | null = null;
+      if (optionPrice != null && intrinsicValue != null) {
+        timeValue = Math.max(0, optionPrice - intrinsicValue);
+      }
+
+      const bidAskSpread = (fallbackBid != null && fallbackAsk != null)
+        ? fallbackAsk - fallbackBid
+        : null;
+
+      const dataTimestamp = contract.date ? new Date(contract.date) : null;
+
+      const unified: UnifiedOptionsData = {
+        symbol: normalizedSymbol,
+        underlying: normalizedSymbol,
+        contractId: contract.contractId ?? null,
+        strike: contract.strike ?? strike ?? null,
+        expiration: normalizedExpiration,
+        optionType,
+        bid: fallbackBid,
+        ask: fallbackAsk,
+        bidSize: contract.bidSize ?? null,
+        askSize: contract.askSize ?? null,
+        last: last ?? null,
+        mark: mark ?? optionPrice ?? null,
+        mid,
+        volume: contract.volume ?? null,
+        openInterest: contract.openInterest ?? null,
+        intrinsicValue,
+        timeValue,
+        bidAskSpread,
+        dataTimestamp,
+        greeks: (contract.delta ?? contract.gamma ?? contract.theta ?? contract.vega ?? contract.rho ?? contract.impliedVolatility) !== undefined
+          ? {
+              delta: contract.delta ?? null,
+              gamma: contract.gamma ?? null,
+              theta: contract.theta ?? null,
+              vega: contract.vega ?? null,
+              rho: contract.rho ?? null,
+              impliedVolatility: contract.impliedVolatility ?? null,
+            }
+          : undefined,
+        source: 'alpha_vantage_options',
+        lastUpdated: new Date(),
+      };
+
+      this.setCache(cacheKey, unified, 60 * 1000);
+      return unified;
     } catch (error) {
-      console.error(`Error fetching options data:`, error);
+      console.error(`Error fetching options data for ${symbol}:`, error);
+      if (!forceRefresh) {
+        return this.getOptionsData(symbol, strike, expiration, optionType, true);
+      }
       return null;
     }
   }
@@ -621,3 +740,6 @@ export type {
   UnifiedOptionsData,
   TradeSnapshot
 };
+
+
+

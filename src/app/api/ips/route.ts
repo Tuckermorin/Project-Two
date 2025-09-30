@@ -110,6 +110,29 @@ async function resolveFactorIds(
     });
   }
 
+  if (rows.length > 0) {
+    const factorIds = rows.map((row) => row.factor_id);
+    const { data: definitionRows, error: defErr } = await supabase
+      .from('factor_definitions')
+      .select('id, source')
+      .in('id', factorIds as any);
+
+    const sourceMap = new Map<string, string | null>();
+    if (!defErr && Array.isArray(definitionRows)) {
+      for (const def of definitionRows) {
+        sourceMap.set(def.id, def.source ?? null);
+      }
+    }
+
+    rows = rows.map((row) => {
+      const lowerName = String(row.factor_name || '').toLowerCase();
+      const source = sourceMap.get(row.factor_id) ?? null;
+      const isOptionFactor = row.factor_id.startsWith('opt-') || lowerName.includes('implied volatility') || lowerName.includes('delta') || lowerName.includes('gamma') || lowerName.includes('theta') || lowerName.includes('vega') || lowerName.includes('rho') || lowerName.includes('open interest') || lowerName.includes('bid-ask') || lowerName.includes('time value') || lowerName.includes('intrinsic value');
+      const collectionMethod = (source === 'alpha_vantage' || source === 'alpha_vantage_options' || isOptionFactor) ? 'api' : 'manual';
+      return { ...row, collection_method: collectionMethod };
+    });
+  }
+
   // If unresolved remain, try normalized matching against full catalog
   if (unresolved.length > 0) {
     const { data: allDefs, error: allErr } = await supabase

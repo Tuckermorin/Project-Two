@@ -1,3 +1,4 @@
+import type { OptionsRequestContext } from '@/lib/types/market-data';
 // src/lib/services/factor-data-service.ts
 
 interface FactorValue {
@@ -42,22 +43,28 @@ class FactorDataService {
    */
   async fetchAPIFactors(
     symbol: string, 
-    ipsId: string
+    ipsId: string,
+    optionsContext?: OptionsRequestContext
   ): Promise<APIFactorResponse> {
     try {
       console.log(`Fetching API factors for ${symbol} using IPS ${ipsId}`);
       
       // Try to get cached data first
-      const cacheKey = `api_factors_${symbol}_${ipsId}`;
-      const cached = this.getFromCache<APIFactorResponse>(cacheKey, 5 * 60 * 1000); // 5 minute TTL
-      
-      if (cached && Date.now() - cached.timestamp.getTime() < (5 * 60 * 1000)) {
+      const contextSignature = optionsContext ? JSON.stringify(optionsContext) : 'default';
+      const cacheKey = `api_factors_${symbol}_${ipsId}_${contextSignature}`;
+      const cached = this.getFromCache<APIFactorResponse>(cacheKey, 5 * 60 * 1000);
+
+      if (cached) {
         console.log('Using cached API factor data');
         return cached;
       }
 
       // Use the real API endpoint
-      const response = await fetch(`/api/trades/factors?symbol=${symbol}&ipsId=${ipsId}`);
+      const params = new URLSearchParams({ symbol, ipsId });
+      if (optionsContext) {
+        params.set('options', JSON.stringify(optionsContext));
+      }
+      const response = await fetch(`/api/trades/factors?${params.toString()}`);
       const data = await response.json();
 
       if (data.success) {
@@ -333,7 +340,7 @@ class FactorDataService {
     const apiFactorNames = [
       'P/E Ratio', 'Beta', 'Revenue Growth YoY', 'Return on Equity',
       'Debt to Equity', 'Dividend Yield', 'Market Cap', 'Volume',
-      'Implied Volatility', 'Delta', 'Theta', 'Vega', 'Gamma'
+      'Implied Volatility', 'Delta', 'Theta', 'Vega', 'Gamma', 'Rho', 'Option Volume', 'Open Interest', 'Bid-Ask Spread', 'Time Value', 'Intrinsic Value'
     ];
     return apiFactorNames.includes(factorName);
   }
@@ -413,3 +420,7 @@ export function getFactorDataService(): FactorDataService {
 }
 
 export type { FactorValue, APIFactorResponse, TradeFactorData };
+
+
+
+

@@ -100,6 +100,64 @@ interface QuoteData {
   '10. change percent': string;
 }
 
+
+interface RealtimeOptionsApiEntry {
+  contractID?: string;
+  contractId?: string;
+  symbol?: string;
+  expiration?: string;
+  strike?: string | number;
+  type?: string;
+  last?: string | number;
+  mark?: string | number;
+  bid?: string | number;
+  bid_size?: string | number;
+  bidSize?: string | number;
+  ask?: string | number;
+  ask_size?: string | number;
+  askSize?: string | number;
+  volume?: string | number;
+  open_interest?: string | number;
+  openInterest?: string | number;
+  date?: string;
+  implied_volatility?: string | number;
+  impliedVolatility?: string | number;
+  delta?: string | number;
+  gamma?: string | number;
+  theta?: string | number;
+  vega?: string | number;
+  rho?: string | number;
+}
+
+interface RealtimeOptionsResponse {
+  endpoint?: string;
+  message?: string;
+  data?: RealtimeOptionsApiEntry[];
+}
+
+export interface RealtimeOptionContract {
+  contractId: string;
+  symbol: string;
+  expiration: string;
+  strike: number | null;
+  type: 'call' | 'put';
+  last: number | null;
+  mark: number | null;
+  bid: number | null;
+  ask: number | null;
+  bidSize: number | null;
+  askSize: number | null;
+  volume: number | null;
+  openInterest: number | null;
+  date: string | null;
+  impliedVolatility: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  rho: number | null;
+}
+
 class AlphaVantageError extends Error {
   constructor(message: string, public statusCode?: number) {
     super(message);
@@ -165,6 +223,24 @@ export class AlphaVantageClient {
       );
     }
   }
+  private parseNumber(value: any): number | null {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number') {
+      return Number.isFinite(value) ? value : null;
+    }
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      const lowered = trimmed.toLowerCase();
+      if (!trimmed || lowered === 'none' || lowered === 'null' || lowered === 'na' || lowered === 'n/a') {
+        return null;
+      }
+      const parsed = Number(trimmed);
+      return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+  }
+
+
 
   /**
    * Alpha Vantage SYMBOL_SEARCH helper
@@ -326,6 +402,58 @@ export class AlphaVantageClient {
     
     return results;
   }
+  async getRealtimeOptions(
+    symbol: string,
+    opts: { requireGreeks?: boolean; contract?: string } = {}
+  ): Promise<RealtimeOptionContract[]> {
+    const params: Record<string, string> = {
+      function: 'REALTIME_OPTIONS',
+      symbol: symbol.toUpperCase(),
+    };
+
+    if (opts.contract) {
+      params.contract = opts.contract;
+    }
+
+    if (opts.requireGreeks) {
+      params.require_greeks = 'true';
+    }
+
+    const response = await this.makeRequest<RealtimeOptionsResponse>(params);
+    const rows = Array.isArray(response?.data) ? response.data : [];
+
+    return rows
+      .filter((row) => !!row)
+      .map((row) => {
+        const rowData = row as any;
+        const typeValue = String(rowData?.type ?? '').toLowerCase();
+        const normalisedType: 'call' | 'put' = typeValue === 'put' ? 'put' : 'call';
+
+        return {
+          contractId: String(rowData?.contractID ?? rowData?.contractId ?? ''),
+          symbol: String(rowData?.symbol ?? symbol).toUpperCase(),
+          expiration: String(rowData?.expiration ?? ''),
+          strike: this.parseNumber(rowData?.strike),
+          type: normalisedType,
+          last: this.parseNumber(rowData?.last),
+          mark: this.parseNumber(rowData?.mark),
+          bid: this.parseNumber(rowData?.bid),
+          ask: this.parseNumber(rowData?.ask),
+          bidSize: this.parseNumber(rowData?.bidSize ?? rowData?.bid_size),
+          askSize: this.parseNumber(rowData?.askSize ?? rowData?.ask_size),
+          volume: this.parseNumber(rowData?.volume),
+          openInterest: this.parseNumber(rowData?.openInterest ?? rowData?.open_interest),
+          date: rowData?.date ?? null,
+          impliedVolatility: this.parseNumber(rowData?.impliedVolatility ?? rowData?.implied_volatility),
+          delta: this.parseNumber(rowData?.delta),
+          gamma: this.parseNumber(rowData?.gamma),
+          theta: this.parseNumber(rowData?.theta),
+          vega: this.parseNumber(rowData?.vega),
+          rho: this.parseNumber(rowData?.rho),
+        } satisfies RealtimeOptionContract;
+      });
+  }
+
 
   // ---------- Technical Indicators ----------
   private extractLatestFromTA(obj: any, key: string) {

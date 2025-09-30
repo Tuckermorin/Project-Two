@@ -1,7 +1,8 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { LoadedIPSFactors, FactorValueMap } from "@/lib/types";
+import type { OptionsRequestContext } from "@/lib/types/market-data";
 import type { IPSConfiguration } from "@/lib/services/ips-data-service";
 import { loadIPSFactors, fetchApiFactorValues } from "@/lib/factor-loader";
 import { ApiFactorsPanel, ManualFactorsPanel } from "@/components/trades/FactorPanels";
@@ -113,18 +114,35 @@ export function NewTradeEntryForm({
   const [searchResults, setSearchResults] = useState<Array<{symbol:string; name:string; region?:string; type?:string; currency?:string}>>([]);
   const [searchTimer, setSearchTimer] = useState<any>(null);
 
+  const hasOptionApiFactors = useMemo(() =>
+    factors.api.some((factor) => factor.key?.startsWith('opt-'))
+  , [factors.api]);
+  const lastApiRequestRef = useRef<{ symbol: string; contextSignature: string | null } | null>(null);
+
   useEffect(() => {
     loadIPSFactors((selectedIPS as any).ips_id || selectedIPS.id)
-      .then(setFactors)
+      .then((loaded) => {
+        setFactors(loaded);
+        lastApiRequestRef.current = null;
+      })
       .catch((err) => console.error("Failed loading IPS factors", err));
   }, [selectedIPS]);
 
-  async function refreshApiValues(sym: string) {
-    if (!sym || factors.api.length === 0) return;
+  async function refreshApiValues(sym: string, optionsContext?: OptionsRequestContext) {
+    const normalizedSym = sym.trim().toUpperCase();
+    if (!normalizedSym || factors.api.length === 0) return;
+
+    if (hasOptionApiFactors) {
+      const hasLegs = optionsContext && Array.isArray(optionsContext.legs) && optionsContext.legs.length > 0;
+      if (!hasLegs) {
+        return;
+      }
+    }
+
     try {
       setApiBusy(true);
       const ipsId = (selectedIPS as any).ips_id || (selectedIPS as any).id;
-      const values = await fetchApiFactorValues(sym, factors.api, ipsId);
+      const values = await fetchApiFactorValues(normalizedSym, factors.api, ipsId, optionsContext);
       setApiValues(values);
     } catch (e) {
       console.error("API factor fetch error", e);
@@ -132,10 +150,92 @@ export function NewTradeEntryForm({
       setApiBusy(false);
     }
   }
+  }
+
+  const buildOptionsContext = (): OptionsRequestContext | undefined => {
+    const expiration = (formData.expirationDate || '').trim();
+    if (!expiration) return undefined;
+
+    const legs: OptionsRequestContext['legs'] = [];
+    const pushLeg = (leg: OptionsRequestContext['legs'][number]) => {
+      legs.push(leg);
+    };
+
+    const addShortLeg = (id: string, type: 'call' | 'put', strike: number | undefined) => {
+      if (typeof strike === 'number' && !Number.isNaN(strike)) {
+        pushLeg({ id, type, strike, role: 'short', primary: true });
+      }
+    };
+
+    const addLongLeg = (id: string, type: 'call' | 'put', strike: number | undefined) => {
+      if (typeof strike === 'number' && !Number.isNaN(strike)) {
+        pushLeg({ id, type, strike, role: 'long' });
+      }
+    };
+
+    switch (formData.contractType) {
+      case 'put-credit-spread':
+        addShortLeg('short_put', 'put', formData.shortPutStrike);
+        addLongLeg('long_put', 'put', formData.longPutStrike);
+        break;
+      case 'call-credit-spread':
+        addShortLeg('short_call', 'call', formData.shortCallStrike);
+        addLongLeg('long_call', 'call', formData.longCallStrike);
+        break;
+      case 'iron-condor':
+        addShortLeg('short_put', 'put', formData.shortPutStrike);
+        addLongLeg('long_put', 'put', formData.longPutStrike);
+        addShortLeg('short_call', 'call', formData.shortCallStrike);
+        addLongLeg('long_call', 'call', formData.longCallStrike);
+        break;
+      case 'long-call':
+        addLongLeg('long_call', 'call', formData.optionStrike);
+        break;
+      case 'long-put':
+        addLongLeg('long_put', 'put', formData.optionStrike);
+        break;
+      case 'covered-call':
+        addShortLeg('covered_call', 'call', formData.callStrike);
+        break;
+      default:
+        break;
+    }
+
+    return legs.length > 0 ? { expiration, legs } : undefined;
+  };
 
   useEffect(() => {
-    refreshApiValues(formData.symbol);
-  }, [formData.symbol, factors.api.length]);
+    const sym = (formData.symbol || '').trim().toUpperCase();
+    if (!sym || factors.api.length === 0) {
+      return;
+    }
+
+    const optionsContext = buildOptionsContext();
+    if (hasOptionApiFactors && (!optionsContext || optionsContext.legs.length === 0)) {
+      return;
+    }
+
+    const contextSignature = optionsContext ? JSON.stringify(optionsContext) : null;
+    const lastRequest = lastApiRequestRef.current;
+    if (lastRequest && lastRequest.symbol === sym && lastRequest.contextSignature === contextSignature) {
+      return;
+    }
+
+    lastApiRequestRef.current = { symbol: sym, contextSignature };
+    refreshApiValues(sym, optionsContext);
+  }, [
+    formData.symbol,
+    formData.expirationDate,
+    formData.shortPutStrike,
+    formData.longPutStrike,
+    formData.shortCallStrike,
+    formData.longCallStrike,
+    formData.optionStrike,
+    formData.callStrike,
+    formData.contractType,
+    factors.api.length,
+    hasOptionApiFactors,
+  ]);
 
   // Load market snapshot (price, 52w range)
   useEffect(() => {
@@ -211,8 +311,7 @@ export function NewTradeEntryForm({
       router.push("/trades/score");
     } catch (e) {
       console.error("Failed to queue trade for scoring", e);
-    }
-  };
+    };
 
   return (
     <div className="space-y-6">
@@ -258,7 +357,10 @@ export function NewTradeEntryForm({
                         setSearchQuery("");
                         setSearchResults([]);
                         // trigger factor refresh explicitly
-                        refreshApiValues(r.symbol.toUpperCase());
+                        const context = buildOptionsContext();
+                        const upperSymbol = r.symbol.toUpperCase();
+                        lastApiRequestRef.current = { symbol: upperSymbol, contextSignature: context ? JSON.stringify(context) : null };
+                        refreshApiValues(upperSymbol, context);
                       }}
                     >
                       <div className="text-sm font-medium">{r.symbol} <span className="text-muted-foreground">• {r.name}</span></div>
@@ -441,7 +543,7 @@ export function NewTradeEntryForm({
           factors={factors.api}
           values={apiValues}
           isConnected={!apiBusy}
-          onRefresh={() => refreshApiValues(formData.symbol)}
+          onRefresh={() => refreshApiValues((formData.symbol || '').trim().toUpperCase(), buildOptionsContext())}
           editable
           onChange={(key, value) => setApiValues((prev)=> ({ ...prev, [key]: value }))}
         />
@@ -467,3 +569,16 @@ export function NewTradeEntryForm({
     </div>
   );
 }
+
+
+
+
+
+
+
+
+
+
+
+
+

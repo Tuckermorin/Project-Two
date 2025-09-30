@@ -1,11 +1,11 @@
 import type { LoadedIPSFactors, IPSFactor, FactorValueMap } from "@/lib/types";
+import type { OptionsRequestContext } from "@/lib/types/market-data";
 import { ipsDataService } from "@/lib/services/ips-data-service";
 import { getFactorDataService } from "@/lib/services/factor-data-service";
 import { getMarketDataService } from "@/lib/services/market-data-service";
 
 /**
  * Get the IPS's selected factors already split into API vs Manual.
- * This assumes your ipsDataService can return a factor list for an IPS id.
  */
 export async function loadIPSFactors(ipsId: string): Promise<LoadedIPSFactors> {
   const selected: IPSFactor[] = await ipsDataService.getIPSFactors(ipsId);
@@ -17,50 +17,55 @@ export async function loadIPSFactors(ipsId: string): Promise<LoadedIPSFactors> {
 
 /**
  * Batch-fetch API factor values for a symbol. Falls back to nulls on errors.
- * You can implement smarter batching inside marketDataService/factorDataService.
  */
 export async function fetchApiFactorValues(
   symbol: string,
   apiFactors: IPSFactor[],
-  ipsId: string
+  ipsId: string,
+  optionsContext?: OptionsRequestContext
 ): Promise<FactorValueMap> {
   const out: FactorValueMap = {};
   const factorService = getFactorDataService();
   const marketService = getMarketDataService();
 
   try {
-    // Fetch in one call using the real ipsId (drives which API factors are relevant)
-    const response = await factorService.fetchAPIFactors(symbol, ipsId);
+    const response = await factorService.fetchAPIFactors(symbol, ipsId, optionsContext);
+    const factorsByName = response.factors as Record<string, { value?: number | string | boolean | null } | undefined>;
 
-    // The API returns an object keyed by human factor name (e.g., 'P/E Ratio').
-    // Map each configured factor to our internal key.
-    for (const f of apiFactors) {
-      const byName = (response.factors as any)[f.name]?.value;
-      const byKey = (response.factors as any)[f.key]?.value;
-      if (byName !== undefined) {
-        out[f.key] = byName as number;
+    for (const factor of apiFactors) {
+      const keyed = factorsByName[factor.key];
+      const named = factorsByName[factor.name];
+      const resolved = keyed ?? named;
+
+      if (resolved?.value !== undefined) {
+        out[factor.key] = resolved.value as number | string | boolean;
         continue;
       }
-      if (byKey !== undefined) {
-        out[f.key] = byKey as number;
+
+      if (isOptionsFactor(factor)) {
+        out[factor.key] = null;
         continue;
       }
-      // Fallback to local mapping from market data
+
       try {
         const stockData = await marketService.getUnifiedStockData(symbol, true);
-        out[f.key] = mapFactorToStockData(f.key, stockData) ?? null;
+        out[factor.key] = mapFactorToStockData(factor.key, stockData) ?? null;
       } catch {
-        out[f.key] = null;
+        out[factor.key] = null;
       }
     }
   } catch {
-    // Total failure: best-effort fallback per factor
-    for (const f of apiFactors) {
+    for (const factor of apiFactors) {
+      if (isOptionsFactor(factor)) {
+        out[factor.key] = null;
+        continue;
+      }
+
       try {
         const stockData = await marketService.getUnifiedStockData(symbol, true);
-        out[f.key] = mapFactorToStockData(f.key, stockData) ?? null;
+        out[factor.key] = mapFactorToStockData(factor.key, stockData) ?? null;
       } catch {
-        out[f.key] = null;
+        out[factor.key] = null;
       }
     }
   }
@@ -68,21 +73,38 @@ export async function fetchApiFactorValues(
   return out;
 }
 
-// Helper function to map factor keys to stock data properties
+function isOptionsFactor(factor: IPSFactor): boolean {
+  if (factor.key?.startsWith("opt-")) return true;
+  const lowerName = factor.name.toLowerCase();
+  return (
+    lowerName.includes("implied volatility") ||
+    lowerName.includes("delta") ||
+    lowerName.includes("gamma") ||
+    lowerName.includes("theta") ||
+    lowerName.includes("vega") ||
+    lowerName.includes("rho") ||
+    lowerName.includes("open interest") ||
+    lowerName.includes("bid-ask") ||
+    lowerName.includes("time value") ||
+    lowerName.includes("intrinsic value")
+  );
+}
+
 function mapFactorToStockData(factorKey: string, stockData: any): number | string | null {
   switch (factorKey.toLowerCase()) {
-    case 'pe_ratio':
-    case 'p_e_ratio':
+    case "pe_ratio":
+    case "p_e_ratio":
       return stockData.fundamentals?.eps && stockData.currentPrice
         ? stockData.currentPrice / stockData.fundamentals.eps
         : null;
-    case 'beta':
+    case "beta":
       return stockData.beta || null;
-    case 'market_cap':
+    case "market_cap":
       return stockData.marketCap || null;
-    case 'revenue_growth':
+    case "revenue_growth":
       return stockData.fundamentals?.revenueGrowth || null;
     default:
       return null;
   }
 }
+
