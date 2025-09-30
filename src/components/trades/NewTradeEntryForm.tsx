@@ -1,7 +1,7 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import type { LoadedIPSFactors, FactorValueMap } from "@/lib/types";
+import type { LoadedIPSFactors, FactorValueMap, IPSFactor } from "@/lib/types";
 import type { OptionsRequestContext } from "@/lib/types/market-data";
 import type { IPSConfiguration } from "@/lib/services/ips-data-service";
 import { loadIPSFactors, fetchApiFactorValues } from "@/lib/factor-loader";
@@ -114,6 +114,13 @@ export function NewTradeEntryForm({
   const [searchResults, setSearchResults] = useState<Array<{symbol:string; name:string; region?:string; type?:string; currency?:string}>>([]);
   const [searchTimer, setSearchTimer] = useState<any>(null);
 
+  // Options chain state
+  const [expirationDates, setExpirationDates] = useState<string[]>([]);
+  const [expandedExpiration, setExpandedExpiration] = useState<string | null>(null);
+  const [optionsChain, setOptionsChain] = useState<any[]>([]);
+  const [loadingOptions, setLoadingOptions] = useState(false);
+  const [loadingExpirations, setLoadingExpirations] = useState(false);
+
   const hasOptionApiFactors = useMemo(() =>
     factors.api.some((factor) => factor.key?.startsWith('opt-'))
   , [factors.api]);
@@ -149,7 +156,6 @@ export function NewTradeEntryForm({
     } finally {
       setApiBusy(false);
     }
-  }
   }
 
   const buildOptionsContext = (): OptionsRequestContext | undefined => {
@@ -291,6 +297,91 @@ export function NewTradeEntryForm({
     return () => clearTimeout(t);
   }, [searchQuery, searchOpen]);
 
+  // Fetch expiration dates when symbol is selected
+  useEffect(() => {
+    const sym = (formData.symbol || '').trim().toUpperCase();
+    if (!sym) {
+      setExpirationDates([]);
+      setExpandedExpiration(null);
+      setOptionsChain([]);
+      return;
+    }
+
+    let ignore = false;
+    (async () => {
+      try {
+        setLoadingExpirations(true);
+        const res = await fetch(`/api/market-data/options/expirations?symbol=${encodeURIComponent(sym)}`, { cache: 'no-store' });
+        const data = await res.json();
+        if (!ignore && data?.success) {
+          setExpirationDates(data.data || []);
+        }
+      } catch (err) {
+        console.error("Failed to fetch expiration dates", err);
+        if (!ignore) setExpirationDates([]);
+      } finally {
+        if (!ignore) setLoadingExpirations(false);
+      }
+    })();
+    return () => { ignore = true; };
+  }, [formData.symbol]);
+
+  // Fetch options chain when expiration is expanded
+  const fetchOptionsChain = async (expiration: string) => {
+    const sym = (formData.symbol || '').trim().toUpperCase();
+    if (!sym || !expiration) return;
+
+    try {
+      setLoadingOptions(true);
+      const res = await fetch(`/api/market-data/options/chain?symbol=${encodeURIComponent(sym)}&expiration=${encodeURIComponent(expiration)}`, { cache: 'no-store' });
+      const data = await res.json();
+      if (data?.success) {
+        setOptionsChain(data.data || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch options chain", err);
+      setOptionsChain([]);
+    } finally {
+      setLoadingOptions(false);
+    }
+  };
+
+  const handleExpirationClick = (expiration: string) => {
+    if (expandedExpiration === expiration) {
+      setExpandedExpiration(null);
+      setOptionsChain([]);
+    } else {
+      setExpandedExpiration(expiration);
+      fetchOptionsChain(expiration);
+    }
+  };
+
+  const handlePutCreditSpreadSelect = (shortPut: any, longPut: any) => {
+    // Calculate credit as the difference between short and long mid prices
+    const shortMid = (shortPut.bid + shortPut.ask) / 2;
+    const longMid = (longPut.bid + longPut.ask) / 2;
+    const credit = (shortMid - longMid).toFixed(2);
+    setFormData((p) => ({
+      ...p,
+      expirationDate: shortPut.expiration_date,
+      shortPutStrike: shortPut.strike,
+      longPutStrike: longPut.strike,
+      creditReceived: parseFloat(credit),
+    }));
+    setTextValues((prev) => ({
+      ...prev,
+      shortPutStrike: String(shortPut.strike),
+      longPutStrike: String(longPut.strike),
+      creditReceived: credit,
+    }));
+
+    // Trigger API factor refresh
+    const context = buildOptionsContext();
+    const upperSymbol = formData.symbol.toUpperCase();
+    lastApiRequestRef.current = { symbol: upperSymbol, contextSignature: context ? JSON.stringify(context) : null };
+    refreshApiValues(upperSymbol, context);
+  };
+
   const handleScore = () => {
     try {
       const payload = {
@@ -311,7 +402,8 @@ export function NewTradeEntryForm({
       router.push("/trades/score");
     } catch (e) {
       console.error("Failed to queue trade for scoring", e);
-    };
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -373,15 +465,6 @@ export function NewTradeEntryForm({
             <div>
               <Label>Strategy</Label>
               <Input value={strategyLabel} readOnly className="bg-muted/40" />
-            </div>
-            <div>
-              <Label htmlFor="expirationDate">Expiration Date</Label>
-              <Input
-                id="expirationDate"
-                type="date"
-                value={formData.expirationDate}
-                onChange={(e) => setFormData((p) => ({ ...p, expirationDate: e.target.value }))}
-              />
             </div>
             {/* Strategy-specific fields */}
             {(() => {
@@ -452,9 +535,6 @@ export function NewTradeEntryForm({
                   return (
                     <>
                       {renderC({ id: "numberOfContracts", label: "Contracts", placeholder: "1" })}
-                      {renderN({ id: "shortPutStrike", label: "Short Put Strike", placeholder: "145.00" })}
-                      {renderN({ id: "longPutStrike", label: "Long Put Strike", placeholder: "140.00" })}
-                      {renderN({ id: "creditReceived", label: "Net Credit (per spread)", placeholder: "1.25" })}
                     </>
                   );
                 case "call-credit-spread":
@@ -538,6 +618,219 @@ export function NewTradeEntryForm({
         </Card>
       )}
 
+      {formData.symbol && formData.contractType === 'put-credit-spread' && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-base">Options Chain</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {loadingExpirations && <div className="text-sm text-muted-foreground">Loading expiration dates…</div>}
+            {!loadingExpirations && expirationDates.length === 0 && (
+              <div className="text-sm text-muted-foreground">No options available for this symbol</div>
+            )}
+            {!loadingExpirations && expirationDates.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-sm text-muted-foreground mb-2">Select an expiration date to view options</div>
+                <div className="flex flex-wrap gap-2">
+                  {expirationDates.slice(0, 12).map((expiration) => {
+                    // Add timezone offset to display the correct date (options expire on Fridays)
+                    const date = new Date(expiration + 'T12:00:00');
+                    return (
+                      <Button
+                        key={expiration}
+                        variant={expandedExpiration === expiration ? "default" : "outline"}
+                        size="sm"
+                        onClick={() => handleExpirationClick(expiration)}
+                        className="text-xs"
+                      >
+                        {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                      </Button>
+                    );
+                  })}
+                </div>
+
+                {expandedExpiration && (
+                  <div className="mt-4 border-t pt-4">
+                    {loadingOptions && <div className="text-sm text-muted-foreground">Loading options chain…</div>}
+                    {!loadingOptions && optionsChain.length === 0 && (
+                      <div className="text-sm text-muted-foreground">No options available for this expiration</div>
+                    )}
+                    {!loadingOptions && optionsChain.length > 0 && (() => {
+                      const puts = optionsChain.filter((opt: any) => opt.option_type === 'put').sort((a: any, b: any) => b.strike - a.strike);
+                      const currentPrice = marketSnap?.price || 0;
+
+                      // Get API factors that can be displayed in the options chain
+                      const displayableApiFactors = factors.api.filter((f) => {
+                        const key = f.key.toLowerCase();
+                        return key.includes('delta') || key.includes('gamma') || key.includes('theta') ||
+                               key.includes('vega') || key.includes('rho') || key.includes('iv') ||
+                               key.includes('implied') || key.includes('open_interest') || key.includes('openinterest');
+                      });
+
+                      return (
+                        <div className="space-y-3">
+                          <div className="text-sm font-medium">Put Options (click two puts to create a credit spread)</div>
+                          <div className="max-h-96 overflow-y-auto">
+                            <table className="w-full text-xs">
+                              <thead className="sticky top-0 bg-background border-b">
+                                <tr>
+                                  <th className="text-left p-2">Strike</th>
+                                  <th className="text-right p-2">Bid</th>
+                                  <th className="text-right p-2">Ask</th>
+                                  <th className="text-right p-2">Mid</th>
+                                  {displayableApiFactors.map((factor) => (
+                                    <th key={factor.key} className="text-right p-2">{factor.name}</th>
+                                  ))}
+                                  {displayableApiFactors.length === 0 && (
+                                    <>
+                                      <th className="text-right p-2">IV</th>
+                                      <th className="text-right p-2">OI</th>
+                                      <th className="text-right p-2">Delta</th>
+                                    </>
+                                  )}
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {puts.map((put: any) => {
+                                  const isITM = put.strike > currentPrice;
+                                  const isSelected = formData.shortPutStrike === put.strike || formData.longPutStrike === put.strike;
+
+                                  const getFactorValue = (factor: IPSFactor) => {
+                                    const key = factor.key.toLowerCase();
+                                    if (key.includes('delta')) return put.greeks?.delta?.toFixed(3) || '-';
+                                    if (key.includes('gamma')) return put.greeks?.gamma?.toFixed(4) || '-';
+                                    if (key.includes('theta')) return put.greeks?.theta?.toFixed(3) || '-';
+                                    if (key.includes('vega')) return put.greeks?.vega?.toFixed(3) || '-';
+                                    if (key.includes('rho')) return put.greeks?.rho?.toFixed(3) || '-';
+                                    if (key.includes('iv') || key.includes('implied')) {
+                                      return put.greeks?.mid_iv ? `${(put.greeks.mid_iv * 100).toFixed(1)}%` : '-';
+                                    }
+                                    if (key.includes('open_interest') || key.includes('openinterest')) {
+                                      return put.open_interest || 0;
+                                    }
+                                    return '-';
+                                  };
+
+                                  return (
+                                    <tr
+                                      key={put.symbol}
+                                      className={`cursor-pointer hover:bg-muted/40 border-b ${isSelected ? 'bg-blue-100 dark:bg-blue-900/20' : ''} ${isITM ? 'bg-yellow-50 dark:bg-yellow-900/10' : ''}`}
+                                      onClick={() => {
+                                        // If clicking the same option that's already selected, deselect it
+                                        if (formData.shortPutStrike === put.strike && !formData.longPutStrike) {
+                                          // Deselect short put
+                                          setFormData((p) => ({ ...p, shortPutStrike: undefined }));
+                                          setTextValues((prev) => ({ ...prev, shortPutStrike: '' }));
+                                        } else if (formData.longPutStrike === put.strike) {
+                                          // Deselect long put
+                                          setFormData((p) => ({ ...p, longPutStrike: undefined, creditReceived: undefined }));
+                                          setTextValues((prev) => ({ ...prev, longPutStrike: '', creditReceived: '' }));
+                                        } else if (!formData.shortPutStrike) {
+                                          // First selection - set as short put
+                                          setFormData((p) => ({ ...p, shortPutStrike: put.strike }));
+                                          setTextValues((prev) => ({ ...prev, shortPutStrike: String(put.strike) }));
+                                        } else if (!formData.longPutStrike && put.strike < formData.shortPutStrike) {
+                                          // Second selection - set as long put (must be lower strike)
+                                          handlePutCreditSpreadSelect(
+                                            puts.find((p: any) => p.strike === formData.shortPutStrike),
+                                            put
+                                          );
+                                        } else {
+                                          // Reset and start over
+                                          setFormData((p) => ({ ...p, shortPutStrike: put.strike, longPutStrike: undefined, creditReceived: undefined }));
+                                          setTextValues((prev) => ({ ...prev, shortPutStrike: String(put.strike), longPutStrike: '', creditReceived: '' }));
+                                        }
+                                      }}
+                                    >
+                                      <td className="p-2 font-medium">${put.strike.toFixed(2)}</td>
+                                      <td className="p-2 text-right">${put.bid?.toFixed(2) || '-'}</td>
+                                      <td className="p-2 text-right">${put.ask?.toFixed(2) || '-'}</td>
+                                      <td className="p-2 text-right">${((put.bid + put.ask) / 2).toFixed(2)}</td>
+                                      {displayableApiFactors.map((factor) => (
+                                        <td key={factor.key} className="p-2 text-right">{getFactorValue(factor)}</td>
+                                      ))}
+                                      {displayableApiFactors.length === 0 && (
+                                        <>
+                                          <td className="p-2 text-right">{put.greeks?.mid_iv ? `${(put.greeks.mid_iv * 100).toFixed(1)}%` : '-'}</td>
+                                          <td className="p-2 text-right">{put.open_interest || 0}</td>
+                                          <td className="p-2 text-right">{put.greeks?.delta?.toFixed(3) || '-'}</td>
+                                        </>
+                                      )}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                          {formData.shortPutStrike && !formData.longPutStrike && (
+                            <div className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
+                              Short put selected at ${formData.shortPutStrike}. Now select a lower strike for the long put.
+                            </div>
+                          )}
+                          {formData.shortPutStrike && formData.longPutStrike && (() => {
+                            const shortPut = puts.find((p: any) => p.strike === formData.shortPutStrike);
+                            const longPut = puts.find((p: any) => p.strike === formData.longPutStrike);
+
+                            return (
+                              <div className="text-xs bg-green-50 dark:bg-green-900/20 p-3 rounded space-y-3">
+                                <div className="font-medium text-sm">Put Credit Spread Selected</div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                  {/* Short Put Details */}
+                                  <div className="space-y-1">
+                                    <div className="font-medium text-green-700 dark:text-green-300">Short Put: ${formData.shortPutStrike}</div>
+                                    <div className="space-y-0.5 text-[10px]">
+                                      <div>Bid: ${shortPut?.bid?.toFixed(2) || '-'} / Ask: ${shortPut?.ask?.toFixed(2) || '-'}</div>
+                                      <div>Mid: ${shortPut ? ((shortPut.bid + shortPut.ask) / 2).toFixed(2) : '-'}</div>
+                                      {shortPut?.greeks?.mid_iv && <div>IV: {(shortPut.greeks.mid_iv * 100).toFixed(1)}%</div>}
+                                      {shortPut?.greeks?.delta && <div>Delta: {shortPut.greeks.delta.toFixed(3)}</div>}
+                                      {shortPut?.greeks?.gamma && <div>Gamma: {shortPut.greeks.gamma.toFixed(4)}</div>}
+                                      {shortPut?.greeks?.theta && <div>Theta: {shortPut.greeks.theta.toFixed(3)}</div>}
+                                      {shortPut?.greeks?.vega && <div>Vega: {shortPut.greeks.vega.toFixed(3)}</div>}
+                                      {shortPut?.greeks?.rho && <div>Rho: {shortPut.greeks.rho.toFixed(3)}</div>}
+                                      {shortPut?.open_interest !== undefined && <div>OI: {shortPut.open_interest}</div>}
+                                    </div>
+                                  </div>
+
+                                  {/* Long Put Details */}
+                                  <div className="space-y-1">
+                                    <div className="font-medium text-red-700 dark:text-red-300">Long Put: ${formData.longPutStrike}</div>
+                                    <div className="space-y-0.5 text-[10px]">
+                                      <div>Bid: ${longPut?.bid?.toFixed(2) || '-'} / Ask: ${longPut?.ask?.toFixed(2) || '-'}</div>
+                                      <div>Mid: ${longPut ? ((longPut.bid + longPut.ask) / 2).toFixed(2) : '-'}</div>
+                                      {longPut?.greeks?.mid_iv && <div>IV: {(longPut.greeks.mid_iv * 100).toFixed(1)}%</div>}
+                                      {longPut?.greeks?.delta && <div>Delta: {longPut.greeks.delta.toFixed(3)}</div>}
+                                      {longPut?.greeks?.gamma && <div>Gamma: {longPut.greeks.gamma.toFixed(4)}</div>}
+                                      {longPut?.greeks?.theta && <div>Theta: {longPut.greeks.theta.toFixed(3)}</div>}
+                                      {longPut?.greeks?.vega && <div>Vega: {longPut.greeks.vega.toFixed(3)}</div>}
+                                      {longPut?.greeks?.rho && <div>Rho: {longPut.greeks.rho.toFixed(3)}</div>}
+                                      {longPut?.open_interest !== undefined && <div>OI: {longPut.open_interest}</div>}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Spread Summary */}
+                                <div className="pt-2 border-t border-green-200 dark:border-green-800 space-y-0.5">
+                                  <div className="font-medium">Spread Summary:</div>
+                                  <div>Width: ${(formData.shortPutStrike - formData.longPutStrike).toFixed(2)}</div>
+                                  <div>Net Credit: ${formData.creditReceived?.toFixed(2)}</div>
+                                  <div>Max Profit: ${formData.creditReceived?.toFixed(2)} (per spread)</div>
+                                  <div>Max Loss: ${((formData.shortPutStrike - formData.longPutStrike) - (formData.creditReceived || 0)).toFixed(2)} (per spread)</div>
+                                </div>
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <ApiFactorsPanel
           factors={factors.api}
@@ -569,16 +862,3 @@ export function NewTradeEntryForm({
     </div>
   );
 }
-
-
-
-
-
-
-
-
-
-
-
-
-

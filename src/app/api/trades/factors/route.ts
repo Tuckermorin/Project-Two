@@ -13,16 +13,20 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const symbol = searchParams.get('symbol');
     const ipsId = searchParams.get('ipsId');
-    
+
+    console.log('Factors API called with:', { symbol, ipsId });
+
     if (!symbol) {
-      return NextResponse.json({ 
-        error: 'Missing required parameter: symbol' 
+      return NextResponse.json({
+        error: 'Missing required parameter: symbol'
       }, { status: 400 });
     }
 
     if (!ipsId || ipsId === 'temp') {
+      console.log('No valid IPS ID provided');
       return NextResponse.json({
         success: false,
+        error: 'No valid IPS ID provided',
         data: {
           factors: {},
           apiStatus: 'disconnected',
@@ -39,8 +43,10 @@ export async function GET(request: NextRequest) {
       .single();
 
     if (ipsError || !ips) {
-      return NextResponse.json({ 
-        error: 'IPS configuration not found' 
+      console.error('IPS configuration not found:', ipsError);
+      return NextResponse.json({
+        error: 'IPS configuration not found',
+        message: ipsError?.message || 'IPS does not exist'
       }, { status: 404 });
     }
 
@@ -61,19 +67,26 @@ export async function GET(request: NextRequest) {
       .eq('enabled', true);
 
     if (factorsError) {
+      console.error('Failed to fetch IPS factors:', factorsError);
       throw new Error(`Failed to fetch IPS factors: ${factorsError.message}`);
     }
+
+    console.log(`Found ${ipsFactors?.length || 0} total factors for IPS`);
 
     // Filter for API factors only using collection_method
     const apiFactors = (ipsFactors || []).filter((f: any) => (f.collection_method || 'manual') === 'api');
 
+    console.log(`Found ${apiFactors.length} API factors:`, apiFactors.map((f: any) => f.factor_name));
+
     if (apiFactors.length === 0) {
+      console.log('No API factors configured for this IPS, returning empty factors');
       return NextResponse.json({
         success: true,
         data: {
           factors: {},
           apiStatus: 'connected',
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
+          message: 'No API factors configured for this IPS'
         }
       });
     }
@@ -152,21 +165,37 @@ export async function GET(request: NextRequest) {
     }
 
     const selectOptionData = (preferredType?: 'call' | 'put') => {
-      if (optionLegMeta.length === 0) return undefined;
+      if (optionLegMeta.length === 0) {
+        console.log('No option leg metadata available');
+        return undefined;
+      }
       const available = optionLegMeta.filter((entry) => entry.data);
-      if (available.length === 0) return undefined;
+      if (available.length === 0) {
+        console.log('No option data available in leg metadata');
+        return undefined;
+      }
 
       const primaryMatch = available.find((entry) => entry.leg.primary && (!preferredType || entry.leg.type === preferredType));
-      if (primaryMatch) return primaryMatch.data;
+      if (primaryMatch) {
+        console.log('Using primary leg for option data:', primaryMatch.leg);
+        return primaryMatch.data;
+      }
 
       if (preferredType) {
         const typeMatch = available.find((entry) => entry.leg.type === preferredType);
-        if (typeMatch) return typeMatch.data;
+        if (typeMatch) {
+          console.log('Using type-matched leg for option data:', typeMatch.leg);
+          return typeMatch.data;
+        }
       }
 
       const shortMatch = available.find((entry) => entry.leg.role === 'short');
-      if (shortMatch) return shortMatch.data;
+      if (shortMatch) {
+        console.log('Using short leg for option data:', shortMatch.leg);
+        return shortMatch.data;
+      }
 
+      console.log('Using first available leg for option data:', available[0].leg);
       return available[0].data;
     };
 
@@ -299,25 +328,7 @@ export async function GET(request: NextRequest) {
         }
 
         if (value !== undefined && value !== null && !isNaN(value)) {
-          // Save to factor_values table
-          const { error: insertError } = await supabase
-            .from('factor_values')
-            .upsert({
-              symbol,
-              factor_name: factorName,
-              value,
-              source: factorSource,
-              confidence,
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            }, {
-              onConflict: 'symbol,factor_name'
-            });
-
-          if (insertError) {
-            console.error(`Failed to save factor ${factorName}:`, insertError);
-          }
-
+          // Return factor value (no need to save to database for display purposes)
           factorResults[factorName] = {
             value,
             source: factorSource,
@@ -333,19 +344,6 @@ export async function GET(request: NextRequest) {
         failedFactors.push(factorName);
       }
     }
-
-    // Log API sync status
-    await supabase
-      .from('api_sync_log')
-      .insert({
-        data_type: 'stock_factors',
-        symbol,
-        status: failedFactors.length === 0 ? 'success' : 
-                Object.keys(factorResults).length === 0 ? 'error' : 'partial',
-        records_processed: Object.keys(factorResults).length,
-        error_message: failedFactors.length > 0 ? `Failed factors: ${failedFactors.join(', ')}` : null,
-        created_at: new Date().toISOString()
-      });
 
     const apiStatus = failedFactors.length === 0 ? 'connected' : 
                      Object.keys(factorResults).length === 0 ? 'disconnected' : 'partial';
@@ -365,26 +363,11 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error('Error fetching factors:', error);
-    
-    // Fix the searchParams reference
-    const { searchParams } = new URL(request.url);
-    
-    // Log the error
-    await supabase
-      .from('api_sync_log')
-      .insert({
-        data_type: 'stock_factors',
-        symbol: searchParams.get('symbol'),
-        status: 'error',
-        records_processed: 0,
-        error_message: error instanceof Error ? error.message : 'Unknown error',
-        created_at: new Date().toISOString()
-      });
-    
+
     return NextResponse.json(
-      { 
-        error: 'Failed to fetch factors', 
-        message: error instanceof Error ? error.message : 'Unknown error' 
+      {
+        error: 'Failed to fetch factors',
+        message: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }
     );

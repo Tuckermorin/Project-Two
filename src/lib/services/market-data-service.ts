@@ -286,7 +286,7 @@ class MarketDataService {
   ): Promise<UnifiedOptionsData | null> {
     const normalizedSymbol = symbol.toUpperCase();
     const normalizedExpiration = expiration;
-    const cacheKey = option____;
+    const cacheKey = `option_${normalizedSymbol}_${strike}_${normalizedExpiration}_${optionType}`;
 
     if (!forceRefresh) {
       const cached = this.getFromCache<UnifiedOptionsData>(cacheKey, 60 * 1000);

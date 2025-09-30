@@ -561,8 +561,12 @@ let alphaVantageClient: AlphaVantageClient;
 
 export const getAlphaVantageClient = (): AlphaVantageClient => {
   if (!alphaVantageClient) {
+    const apiKey = process.env.ALPHA_VANTAGE_API_KEY || process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY;
+    if (!apiKey) {
+      throw new Error('Alpha Vantage API key is not configured. Please set ALPHA_VANTAGE_API_KEY or NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY in your environment.');
+    }
     alphaVantageClient = new AlphaVantageClient({
-      apiKey: process.env.ALPHA_VANTAGE_API_KEY!
+      apiKey
     });
   }
   return alphaVantageClient;

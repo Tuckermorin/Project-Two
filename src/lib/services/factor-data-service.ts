@@ -64,8 +64,14 @@ class FactorDataService {
       if (optionsContext) {
         params.set('options', JSON.stringify(optionsContext));
       }
-      const response = await fetch(`/api/trades/factors?${params.toString()}`);
+      const url = `/api/trades/factors?${params.toString()}`;
+      console.log('Fetching from URL:', url);
+
+      const response = await fetch(url);
+      console.log('Response status:', response.status);
+
       const data = await response.json();
+      console.log('Response data:', data);
 
       if (data.success) {
         const apiResponse: APIFactorResponse = {
@@ -78,8 +84,19 @@ class FactorDataService {
         // Cache successful response
         this.setCache(cacheKey, apiResponse, 5 * 60 * 1000); // 5 minute TTL
         return apiResponse;
+      } else if (data.success === false && data.data) {
+        // Handle the case where success is false but data is present (e.g., no IPS ID)
+        console.warn('API returned success: false:', data.error || data.message);
+        const apiResponse: APIFactorResponse = {
+          success: false,
+          factors: data.data.factors || {},
+          apiStatus: (data.data.apiStatus as 'connected' | 'disconnected' | 'partial') || 'disconnected',
+          timestamp: new Date(data.data.timestamp || new Date())
+        };
+        return apiResponse;
       } else {
-        throw new Error(data.error || 'API request failed');
+        console.error('API request failed:', data.error, data.message);
+        throw new Error(data.error || data.message || 'API request failed');
       }
 
     } catch (error) {

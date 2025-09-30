@@ -2,7 +2,6 @@ import type { LoadedIPSFactors, IPSFactor, FactorValueMap } from "@/lib/types";
 import type { OptionsRequestContext } from "@/lib/types/market-data";
 import { ipsDataService } from "@/lib/services/ips-data-service";
 import { getFactorDataService } from "@/lib/services/factor-data-service";
-import { getMarketDataService } from "@/lib/services/market-data-service";
 
 /**
  * Get the IPS's selected factors already split into API vs Manual.
@@ -26,7 +25,6 @@ export async function fetchApiFactorValues(
 ): Promise<FactorValueMap> {
   const out: FactorValueMap = {};
   const factorService = getFactorDataService();
-  const marketService = getMarketDataService();
 
   try {
     const response = await factorService.fetchAPIFactors(symbol, ipsId, optionsContext);
@@ -39,34 +37,16 @@ export async function fetchApiFactorValues(
 
       if (resolved?.value !== undefined) {
         out[factor.key] = resolved.value as number | string | boolean;
-        continue;
-      }
-
-      if (isOptionsFactor(factor)) {
-        out[factor.key] = null;
-        continue;
-      }
-
-      try {
-        const stockData = await marketService.getUnifiedStockData(symbol, true);
-        out[factor.key] = mapFactorToStockData(factor.key, stockData) ?? null;
-      } catch {
+      } else {
+        // If not found in API response, set to null (don't try to fetch directly from browser)
         out[factor.key] = null;
       }
     }
-  } catch {
+  } catch (error) {
+    console.error('Failed to fetch API factors:', error);
+    // On error, set all factors to null
     for (const factor of apiFactors) {
-      if (isOptionsFactor(factor)) {
-        out[factor.key] = null;
-        continue;
-      }
-
-      try {
-        const stockData = await marketService.getUnifiedStockData(symbol, true);
-        out[factor.key] = mapFactorToStockData(factor.key, stockData) ?? null;
-      } catch {
-        out[factor.key] = null;
-      }
+      out[factor.key] = null;
     }
   }
 
@@ -89,22 +69,3 @@ function isOptionsFactor(factor: IPSFactor): boolean {
     lowerName.includes("intrinsic value")
   );
 }
-
-function mapFactorToStockData(factorKey: string, stockData: any): number | string | null {
-  switch (factorKey.toLowerCase()) {
-    case "pe_ratio":
-    case "p_e_ratio":
-      return stockData.fundamentals?.eps && stockData.currentPrice
-        ? stockData.currentPrice / stockData.fundamentals.eps
-        : null;
-    case "beta":
-      return stockData.beta || null;
-    case "market_cap":
-      return stockData.marketCap || null;
-    case "revenue_growth":
-      return stockData.fundamentals?.revenueGrowth || null;
-    default:
-      return null;
-  }
-}
-
