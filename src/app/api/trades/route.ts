@@ -187,26 +187,22 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status') || 'prospective';
     const id = searchParams.get('id');
+    const userId = user.id;
+
+    console.log('[Trades API GET] Fetching trades for userId:', userId, 'status:', status);
 
     // RLS automatically filters by user_id
     let query = supabase
       .from('trades')
       .select(`
         *,
-        ips_configurations(name, description),
+        ips_configurations!ips_id(name, description),
         trade_factors(
           factor_name,
           factor_value,
           source,
           confidence
-        ),
-        ips_score_calculations(
-          final_score,
-          factors_used,
-          targets_met,
-          target_percentage
-        ),
-        trade_closures(*)
+        )
       `)
       .order('created_at', { ascending: false });
 
@@ -280,6 +276,8 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const supabase = await createClient();
+
     // Get authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -292,11 +290,11 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: 'ids[] required' }, { status: 400 });
     }
 
+    // RLS automatically enforces user ownership
     const { error } = await supabase
       .from('trades')
       .delete()
-      .in('id', ids)
-      .eq('user_id', user.id);
+      .in('id', ids);
 
     if (error) throw new Error(error.message);
 

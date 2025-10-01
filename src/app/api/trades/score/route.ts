@@ -1,20 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/server-client';
 import { computeIpsScore } from '@/lib/services/trade-scoring-service';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-);
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createClient();
+
     // Get authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -30,12 +21,11 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
 
-    // Get IPS configuration and verify user ownership
+    // RLS automatically enforces user ownership
     const { data: ips, error: ipsError } = await supabase
       .from('ips_configurations')
       .select('*')
       .eq('id', ipsId)
-      .eq('user_id', user.id)
       .single();
 
     if (ipsError || !ips) {

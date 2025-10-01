@@ -1,16 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-);
+import { createClient } from '@/lib/supabase/server-client';
 
 /**
  * POST /api/trades/close
@@ -33,6 +22,8 @@ const supabase = createClient(
  */
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createClient();
+
     // Get authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -61,12 +52,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'tradeId, closeMethod, closeDate are required' }, { status: 400 });
     }
 
-    // Load trade to infer strategy + entry economics (and verify user ownership)
+    // RLS automatically enforces user ownership
     const { data: trade, error: tradeError } = await supabase
       .from('trades')
       .select('*')
       .eq('id', tradeId)
-      .eq('user_id', user.id)
       .single();
     if (tradeError || !trade) {
       return NextResponse.json({ error: 'Trade not found or unauthorized' }, { status: 404 });

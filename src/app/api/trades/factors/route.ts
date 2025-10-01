@@ -1,21 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from '@/lib/supabase/server-client';
 import { getMarketDataService } from '@/lib/services/market-data-service';
 import type { OptionsRequestContext } from '@/lib/types/market-data';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-);
-
 export async function GET(request: NextRequest) {
   try {
+    const supabase = await createClient();
+
     // Get authenticated user
     const { data: { user }, error: authError } = await supabase.auth.getUser();
     if (authError || !user) {
@@ -47,12 +38,11 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Get IPS configuration and verify user ownership
+    // RLS automatically enforces user ownership
     const { data: ips, error: ipsError } = await supabase
       .from('ips_configurations')
       .select('*')
       .eq('id', ipsId)
-      .eq('user_id', user.id)
       .single();
 
     if (ipsError || !ips) {
@@ -389,12 +379,20 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createClient();
+
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { tradeId, factorName, value, source, symbol } = body;
-    
+
     if (!factorName || value === undefined || !symbol) {
-      return NextResponse.json({ 
-        error: 'Missing required fields: factorName, value, symbol' 
+      return NextResponse.json({
+        error: 'Missing required fields: factorName, value, symbol'
       }, { status: 400 });
     }
 

@@ -1,20 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-// Use service role key for admin operations
-const supabase = createClient(
-  process.env.SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false
-    }
-  }
-);
+import { createClient } from '@/lib/supabase/server-client';
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = await createClient();
     const { data: { user } } = await supabase.auth.getUser()
 
     if (!user) {
@@ -24,10 +13,10 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    // RLS automatically filters by user_id
     const { data, error } = await supabase
       .from('watchlist_items')
       .select('*')
-      .eq('user_id', user.id)
       .order('created_at', { ascending: false });
 
     if (error) throw error;
@@ -44,6 +33,7 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createClient();
     const body = await request.json();
     const { data: { user } } = await supabase.auth.getUser()
 
@@ -94,6 +84,16 @@ export async function POST(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    const supabase = await createClient();
+    const { data: { user } } = await supabase.auth.getUser()
+
+    if (!user) {
+      return NextResponse.json(
+        { success: false, error: 'Unauthorized' },
+        { status: 401 }
+      );
+    }
+
     const { searchParams } = new URL(request.url);
     const id = searchParams.get('id');
 
@@ -104,6 +104,7 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
+    // RLS automatically enforces user ownership
     const { error } = await supabase
       .from('watchlist_items')
       .delete()

@@ -33,6 +33,7 @@ import {
 import { ipsDataService, type IPSConfiguration } from "@/lib/services/ips-data-service";
 import type { FactorValueMap } from "@/lib/types";
 import { NewTradeEntryForm } from "@/components/trades/NewTradeEntryForm";
+import { AgentSection } from "@/components/trades/AgentSection";
 import { dispatchTradesUpdated } from "@/lib/events";
 
 // -----------------------------
@@ -475,7 +476,10 @@ export default function TradesPage() {
         }
         return {
           id: row.id,
-          ips: { id: row.ips_id, name: row.investment_performance_systems?.name || "IPS" },
+          ips: {
+            id: row.ips_id,
+            name: row.ips_configurations?.name || row.investment_performance_systems?.name || "IPS"
+          },
           data: base,
           createdAt: row.created_at,
           score: row.ips_score || undefined,
@@ -705,6 +709,48 @@ export default function TradesPage() {
             </Button>
           </div>
         </div>
+
+        {/* AI Agent Section */}
+        {activeIPSs.length > 0 && (
+          <AgentSection
+            onAddToProspective={(candidate, ipsId) => {
+              // Convert agent candidate to prospective trade format
+              const ips = activeIPSs.find((i: any) => i.id === ipsId);
+              if (!ips) {
+                console.error("IPS not found for candidate");
+                return;
+              }
+
+              // Convert candidate to TradeFormData
+              const tradeData: TradeFormData = {
+                name: `AI: ${candidate.symbol} ${candidate.strategy.replace(/_/g, " ")}`,
+                symbol: candidate.symbol,
+                contractType: "put-credit-spread",
+                expirationDate: candidate.contract_legs[0]?.expiry,
+                numberOfContracts: 1,
+                shortPutStrike: candidate.contract_legs.find((l) => l.type === "SELL")?.strike,
+                longPutStrike: candidate.contract_legs.find((l) => l.type === "BUY")?.strike,
+                creditReceived: candidate.entry_mid,
+                ipsFactors: {},
+                apiFactors: {},
+              };
+
+              // Create prospective trade
+              const prospectiveTrade: ProspectiveTrade = {
+                id: candidate.id,
+                ips: { id: ips.id, name: ips.name },
+                data: tradeData,
+                createdAt: new Date().toISOString(),
+                score: candidate.score,
+              };
+
+              setProspectiveTrades((prev) => [prospectiveTrade, ...prev]);
+              setCurrentView("prospective");
+            }}
+            availableIPSs={activeIPSs.map((ips: any) => ({ id: ips.id, name: ips.name }))}
+            userId={userId}
+          />
+        )}
 
         {activeIPSs.length === 0 ? (
           <Card>
