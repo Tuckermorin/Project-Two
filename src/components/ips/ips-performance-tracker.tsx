@@ -25,8 +25,6 @@ type IpsStats = {
   totalPL: number
 }
 
-const userId = 'user-123'
-
 const currencyFormatter = new Intl.NumberFormat('en-US', {
   style: 'currency',
   currency: 'USD',
@@ -54,7 +52,7 @@ export function IPSPerformanceTracker() {
 
       const [ipsRes, tradesRes] = await Promise.all([
         fetch('/api/ips', { cache: 'no-store' }),
-        fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=closed`, { cache: 'no-store' }),
+        fetch(`/api/trades?status=closed`, { cache: 'no-store' }),
       ])
 
       const ipsJson = await ipsRes.json()

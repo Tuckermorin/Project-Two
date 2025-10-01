@@ -61,7 +61,6 @@ const closeMethods = [
   { key: 'other', label: 'Other' },
 ]
 
-const userId = 'user-123'
 const LOCAL_CLOSURE_KEY = 'tenxiv:trade-closures'
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -100,7 +99,7 @@ export function ActionNeededTradesPanel() {
     try {
       setLoading(true)
       setError(null)
-      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=active`, { cache: 'no-store' })
+      const res = await fetch(`/api/trades?status=active`, { cache: 'no-store' })
       const json = await res.json()
       if (!res.ok) {
         throw new Error(json?.error || 'Failed to load trades that need action')

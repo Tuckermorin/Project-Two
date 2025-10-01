@@ -1,10 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
-// Service role key required server-side to update trades + closures
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
 );
 
 /**
@@ -28,6 +33,12 @@ const supabase = createClient(
  */
 export async function POST(request: NextRequest) {
   try {
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const {
       tradeId,
@@ -50,14 +61,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'tradeId, closeMethod, closeDate are required' }, { status: 400 });
     }
 
-    // Load trade to infer strategy + entry economics
+    // Load trade to infer strategy + entry economics (and verify user ownership)
     const { data: trade, error: tradeError } = await supabase
       .from('trades')
       .select('*')
       .eq('id', tradeId)
+      .eq('user_id', user.id)
       .single();
     if (tradeError || !trade) {
-      return NextResponse.json({ error: 'Trade not found' }, { status: 404 });
+      return NextResponse.json({ error: 'Trade not found or unauthorized' }, { status: 404 });
     }
 
     const contractType = String(trade.contract_type || trade.strategy_type || '').toLowerCase();

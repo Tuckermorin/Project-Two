@@ -4,30 +4,43 @@ import { computeIpsScore } from '@/lib/services/trade-scoring-service';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
 );
 
 export async function POST(request: NextRequest) {
   try {
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { ipsId, factorValues, tradeId } = body;
-    
+
     if (!ipsId || !factorValues) {
-      return NextResponse.json({ 
-        error: 'Missing required fields: ipsId, factorValues' 
+      return NextResponse.json({
+        error: 'Missing required fields: ipsId, factorValues'
       }, { status: 400 });
     }
 
-    // Get IPS configuration and factors from database (current schema)
+    // Get IPS configuration and verify user ownership
     const { data: ips, error: ipsError } = await supabase
       .from('ips_configurations')
       .select('*')
       .eq('id', ipsId)
+      .eq('user_id', user.id)
       .single();
 
     if (ipsError || !ips) {
-      return NextResponse.json({ 
-        error: 'IPS configuration not found' 
+      return NextResponse.json({
+        error: 'IPS configuration not found or unauthorized'
       }, { status: 404 });
     }
 
@@ -41,6 +54,7 @@ export async function POST(request: NextRequest) {
 
     // Save score calculation to database
     const scoreData = {
+      user_id: user.id,
       ips_id: ipsId,
       trade_id: tradeId || null,
       final_score: finalScore,

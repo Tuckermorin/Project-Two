@@ -38,12 +38,10 @@ export default function ProspectiveTradesPage() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
 
-  const userId = "user-123"; // TODO wire auth
-
   async function fetchProspective() {
     try {
       setLoading(true);
-      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=prospective`, { cache: "no-store" });
+      const res = await fetch(`/api/trades?status=prospective`, { cache: "no-store" });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Failed to load trades");
       setRows(json?.data || []);

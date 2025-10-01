@@ -5,11 +5,23 @@ import type { OptionsRequestContext } from '@/lib/types/market-data';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+  {
+    auth: {
+      autoRefreshToken: false,
+      persistSession: false
+    }
+  }
 );
 
 export async function GET(request: NextRequest) {
   try {
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { searchParams } = new URL(request.url);
     const symbol = searchParams.get('symbol');
     const ipsId = searchParams.get('ipsId');
@@ -35,18 +47,19 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    // Get IPS configuration from database (correct table)
+    // Get IPS configuration and verify user ownership
     const { data: ips, error: ipsError } = await supabase
       .from('ips_configurations')
       .select('*')
       .eq('id', ipsId)
+      .eq('user_id', user.id)
       .single();
 
     if (ipsError || !ips) {
-      console.error('IPS configuration not found:', ipsError);
+      console.error('IPS configuration not found or unauthorized:', ipsError);
       return NextResponse.json({
-        error: 'IPS configuration not found',
-        message: ipsError?.message || 'IPS does not exist'
+        error: 'IPS configuration not found or unauthorized',
+        message: ipsError?.message || 'IPS does not exist or you do not have access'
       }, { status: 404 });
     }
 

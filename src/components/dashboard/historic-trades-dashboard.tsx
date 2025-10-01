@@ -125,7 +125,6 @@ export default function HistoricTradesDashboard() {
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; trade: HistoricTrade | null }>({ open: false, trade: null })
   const [ipsFilter, setIpsFilter] = useState<string>('all')
   const [error, setError] = useState<string | null>(null)
-  const userId = 'user-123'
   const hasActiveIPS = false
   const activeIPSFactors: string[] = []
 
@@ -133,7 +132,7 @@ export default function HistoricTradesDashboard() {
     try {
       setLoading(true)
       setError(null)
-      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=closed`, { cache: 'no-store' })
+      const res = await fetch(`/api/trades?status=closed`, { cache: 'no-store' })
       const json = await res.json()
       if (!res.ok) throw new Error(json?.error || 'Failed to load closed trades')
       const rows = (json?.data || []) as any[]

@@ -1,40 +1,144 @@
-15-minute Delayed US Stock Market Data: Enabled
+Got it—here’s a single Postgres/Supabase-safe migration you can paste into Claude. It adds a `user_id` column to every listed table **iff it’s missing**, backfills with a default, makes it `NOT NULL`, and creates an index.
 
-To access 15-minute delayed US stock market data, please append entitlement=delayed to the data request. For example:
-https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=IBM&interval=5min&entitlement=delayed&apikey=XF0H4EC893MP2ATJ
+> **Note:** You’ve used `text` + default `'default-user'` in `trades`, so I matched that. If you’d rather use the Supabase-native pattern (`uuid` default `auth.uid()` referencing `auth.users`), I included an alternate snippet below.
 
-https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&entitlement=delayed&apikey=XF0H4EC893MP2ATJ
+### Migration (matches your existing pattern: `text NOT NULL DEFAULT 'default-user'`)
 
-https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=IBM&outputsize=full&entitlement=delayed&apikey=XF0H4EC893MP2ATJ
+```sql
+DO $$
+DECLARE
+  t text;
+  tables text[] := ARRAY[
+    'agent_runs',
+    'ai_trade_analyses',
+    'datausa_series',
+    'factor_definitions',
+    'factor_score_details',
+    'features_snapshot',
+    'ips_configurations',
+    'ips_factors',
+    'ips_score_calculations',
+    'journal_entries',
+    'macro_series',
+    'option_chains_raw',
+    'option_contracts',
+    'scores',
+    'tool_invocations',
+    'trade_candidates',
+    'trade_closures',
+    'trade_factors',
+    'trade_outcomes',
+    'trades',
+    'vol_regime_daily',
+    'watchlist_items'
+  ];
+BEGIN
+  FOREACH t IN ARRAY tables LOOP
+    -- add column if missing
+    IF NOT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name   = t
+        AND column_name  = 'user_id'
+    ) THEN
+      EXECUTE format('ALTER TABLE public.%I ADD COLUMN user_id text DEFAULT %L;', t, 'default-user');
+      EXECUTE format('ALTER TABLE public.%I ALTER COLUMN user_id SET NOT NULL;', t);
+    END IF;
 
-💡Tip: you can also access 15-minute delayed technical indicators with similar URL configurations:
-https://www.alphavantage.co/query?function=SMA&symbol=IBM&interval=5min&time_period=10&series_type=close&entitlement=delayed&apikey=XF0H4EC893MP2ATJ
+    -- create index if missing
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname  = t || ''_user_id_idx''
+    ) THEN
+      EXECUTE format('CREATE INDEX %I ON public.%I (user_id);', t || '_user_id_idx', t);
+    END IF;
+  END LOOP;
+END
+$$;
+```
+
+### (Recommended) Supabase-native variant (`uuid` + default `auth.uid()` + FK)
+
+If you want to standardize on the usual Supabase approach going forward:
+
+```sql
+DO $$
+DECLARE
+  t text;
+  tables text[] := ARRAY[
+    'agent_runs',
+    'ai_trade_analyses',
+    'datausa_series',
+    'factor_definitions',
+    'factor_score_details',
+    'features_snapshot',
+    'ips_configurations',
+    'ips_factors',
+    'ips_score_calculations',
+    'journal_entries',
+    'macro_series',
+    'option_chains_raw',
+    'option_contracts',
+    'scores',
+    'tool_invocations',
+    'trade_candidates',
+    'trade_closures',
+    'trade_factors',
+    'trade_outcomes',
+    'trades',
+    'vol_regime_daily',
+    'watchlist_items'
+  ];
+BEGIN
+  FOREACH t IN ARRAY tables LOOP
+    -- add column if missing
+    IF NOT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name   = t
+        AND column_name  = 'user_id'
+    ) THEN
+      EXECUTE format('ALTER TABLE public.%I ADD COLUMN user_id uuid DEFAULT auth.uid();', t);
+      EXECUTE format('ALTER TABLE public.%I ALTER COLUMN user_id SET NOT NULL;', t);
+      -- add FK to auth.users if not present
+      EXECUTE format(
+        'ALTER TABLE public.%I
+           ADD CONSTRAINT %I
+           FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE;',
+        t, t || '_user_id_fkey'
+      );
+    END IF;
+
+    -- create index if missing
+    IF NOT EXISTS (
+      SELECT 1
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname  = t || ''_user_id_idx''
+    ) THEN
+      EXECUTE format('CREATE INDEX %I ON public.%I (user_id);', t || '_user_id_idx', t);
+    END IF;
+  END LOOP;
+END
+$$;
+```
+
+**Optional next step (when you’re ready for RLS):**
+
+* Enable RLS on each table and add policies like:
+
+```sql
+ALTER TABLE public.trades ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "Users can manage their rows"
+ON public.trades
+FOR ALL
+USING (user_id = auth.uid())
+WITH CHECK (user_id = auth.uid());
+```
 
 
-Realtime US Stock Market Data: Enabled
-
-To access realtime US stock market data, please append entitlement=realtime to the data request. For example:
-https://www.alphavantage.co/query?function=TIME_SERIES_INTRADAY&symbol=IBM&interval=5min&entitlement=realtime&apikey=XF0H4EC893MP2ATJ
-
-https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=IBM&entitlement=realtime&apikey=XF0H4EC893MP2ATJ
-
-https://www.alphavantage.co/query?function=TIME_SERIES_DAILY_ADJUSTED&symbol=IBM&outputsize=full&entitlement=realtime&apikey=XF0H4EC893MP2ATJ
-
-💡Tip: you can also access realtime technical indicators with similar URL configurations:
-https://www.alphavantage.co/query?function=SMA&symbol=IBM&interval=5min&time_period=10&series_type=close&entitlement=realtime&apikey=XF0H4EC893MP2ATJ
-
-❗IMPORTANT: if your subscription plan is also eligible for realtime US options data, please set up your options data entitlements here.
----
-## Next Auth Steps
-
-- Provision Supabase project (or NextAuth provider) and set environment variables in :
-  - 
-  - 
----
-
-## Authentication Setup
-
-- Provision Supabase (or NextAuth) credentials and add the secrets to `.env` (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY`).
-- Wrap the app in a session provider inside `src/app/layout.tsx` once auth is enabled.
-- Replace the disabled submit actions in `src/app/login/page.tsx` and `src/app/account/page.tsx` with real API calls when sessions are available.
-- Update `src/components/navigation.tsx` to show the signed-in user dropdown after wiring authentication.

@@ -1,14 +1,8 @@
 // Fixed src/app/api/ips/route.ts
-// Use the same environment variables as the frontend
+// Use SSR client with user context for RLS
 
 import { NextRequest } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-// Use the same environment variables as the frontend
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { createClient } from '@/lib/supabase/server-client';
 
 type NewFactor = { 
   factor_id: string; 
@@ -180,10 +174,17 @@ async function resolveFactorIds(
 export async function POST(req: NextRequest) {
   console.log('API Route: Received IPS creation request');
   try {
+    const supabase = await createClient();
+
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    }
+
     const body = await req.json();
     console.log('API Route: Request body:', JSON.stringify(body, null, 2));
     const {
-      user_id = 'test-user-123', // until you wire auth
       name,
       description,
       is_active = true,
@@ -194,6 +195,8 @@ export async function POST(req: NextRequest) {
     if (!name || !Array.isArray(factors)) {
       return new Response(JSON.stringify({ error: 'name and factors[] required' }), { status: 400 });
     }
+
+    const user_id = user.id;
 
     // simple validation (allow resolving by name if id missing)
     for (const f of factors) {
@@ -284,8 +287,20 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET() {
-  // 1) Fetch IPS rows
- const { data: ipsRows } = await supabase.from('ips_configurations').select('*').order('created_at', { ascending: false });
+  try {
+    const supabase = await createClient();
+
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    }
+
+    // RLS automatically filters by user_id - no need for .eq('user_id', user.id)
+    const { data: ipsRows } = await supabase
+      .from('ips_configurations')
+      .select('*')
+      .order('created_at', { ascending: false });
 
 const { data: facRows } = await supabase
   .from('ips_factors')
@@ -317,11 +332,23 @@ const out = (ipsRows ?? []).map((row: any) => {
   };
 });
 
-return new Response(JSON.stringify(out), { status: 200 });
+    return new Response(JSON.stringify(out), { status: 200 });
+  } catch (e: any) {
+    console.error('API Route: Unexpected error in GET:', e);
+    return new Response(JSON.stringify({ error: e.message }), { status: 500 });
+  }
 }
 
 export async function PUT(req: NextRequest) {
   try {
+    const supabase = await createClient();
+
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return new Response(JSON.stringify({ error: 'Unauthorized' }), { status: 401 });
+    }
+
     const body = await req.json();
     const {
       id,
@@ -336,7 +363,7 @@ export async function PUT(req: NextRequest) {
       return new Response(JSON.stringify({ error: 'id required' }), { status: 400 });
     }
 
-    // Update IPS configuration
+    // RLS automatically enforces user ownership - no need for .eq('user_id', user.id)
     const { error: ipsErr } = await supabase
       .from('ips_configurations')
       .update({ name, description, is_active, strategies })

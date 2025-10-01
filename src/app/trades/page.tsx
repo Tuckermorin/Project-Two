@@ -363,8 +363,6 @@ export default function TradesPage() {
   const [aiBatchRunning, setAiBatchRunning] = useState(false);
   const [aiBatchMsg, setAiBatchMsg] = useState<string | null>(null);
 
-  const userId = "user-123"; // TODO: replace with auth
-
   // Map of strategy id to human-readable name for display
   const strategyMap = useMemo(() => {
     const map = new Map<string, string>();
@@ -383,8 +381,13 @@ export default function TradesPage() {
     const loadIPSData = async () => {
       try {
         setIsLoading(true);
-        const userIPSs = await ipsDataService.getAllUserIPSs(userId);
-        const activeOnly = userIPSs.filter((ips) => ips.is_active === true);
+        // Fetch IPS configurations from API (auth handled server-side)
+        const response = await fetch('/api/ips', { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error('Failed to fetch IPS data');
+        }
+        const userIPSs = await response.json();
+        const activeOnly = userIPSs.filter((ips: any) => ips.is_active === true);
         setActiveIPSs(activeOnly);
       } catch (e) {
         console.error("Error loading IPS data:", e);
@@ -393,7 +396,7 @@ export default function TradesPage() {
       }
     };
     loadIPSData();
-  }, [userId]);
+  }, []);
 
   function handleIPSSelection(ips: IPSConfiguration) {
     setSelectedIPS(ips);
@@ -432,7 +435,7 @@ export default function TradesPage() {
   async function fetchProspectiveTrades() {
     try {
       setLoadingProspective(true);
-      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=prospective`);
+      const res = await fetch(`/api/trades?status=prospective`);
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || "Failed to load prospective trades");
       const rows = (json?.data || []) as any[];
@@ -499,7 +502,7 @@ export default function TradesPage() {
   // Fetch active trades
   async function fetchActiveTrades() {
     try {
-      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=active`, { cache: 'no-store' });
+      const res = await fetch(`/api/trades?status=active`, { cache: 'no-store' });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to load active trades');
       setActiveTrades(json?.data || []);
@@ -517,7 +520,7 @@ export default function TradesPage() {
   // Fetch action needed trades
   async function fetchActionNeededTrades() {
     try {
-      const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=pending`, { cache: 'no-store' });
+      const res = await fetch(`/api/trades?status=pending`, { cache: 'no-store' });
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to load trades needing action');
       setActionNeededTrades(json?.data || []);
@@ -603,7 +606,7 @@ export default function TradesPage() {
     if (!editId) return;
     (async () => {
       try {
-        const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&id=${encodeURIComponent(editId)}`);
+        const res = await fetch(`/api/trades?id=${encodeURIComponent(editId)}`);
         const json = await res.json();
         const row = (json?.data || [])[0];
         if (!row) return;

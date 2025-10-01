@@ -199,7 +199,6 @@ export default function ScoreTradePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          userId: "user-123",
           ipsId: draft.ipsId,
           ipsName: draft.ipsName,
           strategyType,

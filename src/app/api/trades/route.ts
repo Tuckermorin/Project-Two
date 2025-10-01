@@ -1,30 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { createClient } from '@/lib/supabase/server-client';
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createClient();
+
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
-    const { 
-      userId, 
-      ipsId, 
+    const {
+      ipsId,
       ipsName,
       strategyType,
-      tradeData, 
-      factorValues, 
+      tradeData,
+      factorValues,
       ipsScore,
-      scoreId 
+      scoreId
     } = body;
-    
-    if (!userId || !ipsId || !tradeData) {
-      return NextResponse.json({ 
-        error: 'Missing required fields: userId, ipsId, tradeData' 
+
+    if (!ipsId || !tradeData) {
+      return NextResponse.json({
+        error: 'Missing required fields: ipsId, tradeData'
       }, { status: 400 });
     }
+
+    const userId = user.id;
 
     // Pre-compute safe numeric fields (avoid NaN inserts)
     const credit = typeof tradeData?.creditReceived === 'number' ? tradeData.creditReceived : null;
@@ -96,8 +100,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Update trade analytics
-    await updateTradeAnalytics(userId, ipsId);
-    
+    await updateTradeAnalytics(supabase, userId, ipsId);
+
     return NextResponse.json({
       success: true,
       data: {
@@ -111,24 +115,23 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     console.error('Error creating trade:', error);
-    
+
     return NextResponse.json(
-      { 
-        error: 'Failed to create trade', 
-        message: error instanceof Error ? error.message : 'Unknown error' 
+      {
+        error: 'Failed to create trade',
+        message: error instanceof Error ? error.message : 'Unknown error'
       },
       { status: 500 }
     );
   }
 }
 
-async function updateTradeAnalytics(userId: string, ipsId: string) {
+async function updateTradeAnalytics(supabase: any, userId: string, ipsId: string) {
   try {
-    // Update user trade statistics
+    // RLS automatically filters by user_id
     const { data: userStats } = await supabase
       .from('trades')
-      .select('status, ips_score')
-      .eq('user_id', userId);
+      .select('status, ips_score');
 
     if (userStats) {
       const totalTrades = userStats.length;
@@ -173,17 +176,19 @@ async function updateTradeAnalytics(userId: string, ipsId: string) {
 
 export async function GET(request: NextRequest) {
   try {
-    const { searchParams } = new URL(request.url);
-    const userId = searchParams.get('userId');
-    const status = searchParams.get('status') || 'prospective';
-    const id = searchParams.get('id');
-    
-    if (!userId) {
-      return NextResponse.json({ 
-        error: 'Missing userId parameter' 
-      }, { status: 400 });
+    const supabase = await createClient();
+
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const { searchParams } = new URL(request.url);
+    const status = searchParams.get('status') || 'prospective';
+    const id = searchParams.get('id');
+
+    // RLS automatically filters by user_id
     let query = supabase
       .from('trades')
       .select(`
@@ -203,7 +208,6 @@ export async function GET(request: NextRequest) {
         ),
         trade_closures(*)
       `)
-      .eq('user_id', userId)
       .order('created_at', { ascending: false });
 
     if (id) {
@@ -238,8 +242,16 @@ export async function GET(request: NextRequest) {
 
 export async function PATCH(request: NextRequest) {
   try {
+    const supabase = await createClient();
+
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
-    const { ids, status, userId } = body as { ids: string[]; status: 'prospective'|'active'|'pending'|'closed'|'expired'|'cancelled'|'action_needed'; userId?: string };
+    const { ids, status } = body as { ids: string[]; status: 'prospective'|'active'|'pending'|'closed'|'expired'|'cancelled'|'action_needed' };
     if (!Array.isArray(ids) || ids.length === 0 || !status) {
       return NextResponse.json({ error: 'ids[] and status required' }, { status: 400 });
     }
@@ -251,6 +263,7 @@ export async function PATCH(request: NextRequest) {
     if (targetStatus === 'active') updatePayload.entry_date = new Date().toISOString();
     if (targetStatus === 'closed') updatePayload.closed_at = new Date().toISOString();
 
+    // RLS automatically enforces user ownership
     const { error } = await supabase
       .from('trades')
       .update(updatePayload)
@@ -267,13 +280,24 @@ export async function PATCH(request: NextRequest) {
 
 export async function DELETE(request: NextRequest) {
   try {
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { ids } = body as { ids: string[] };
     if (!Array.isArray(ids) || ids.length === 0) {
       return NextResponse.json({ error: 'ids[] required' }, { status: 400 });
     }
 
-    const { error } = await supabase.from('trades').delete().in('id', ids);
+    const { error } = await supabase
+      .from('trades')
+      .delete()
+      .in('id', ids)
+      .eq('user_id', user.id);
+
     if (error) throw new Error(error.message);
 
     return NextResponse.json({ success: true });

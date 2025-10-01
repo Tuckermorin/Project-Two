@@ -1,12 +1,6 @@
 // src/app/api/ips/[id]/factors/route.ts
 import { NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
-
-// Use public credentials for read-only operations
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+import { createClient } from '@/lib/supabase/server-client';
 
 function normalizeKey(name: string): string {
   return String(name || '')
@@ -17,9 +11,28 @@ function normalizeKey(name: string): string {
 
 export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) {
   try {
+    const supabase = await createClient();
+
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const { id: ipsId } = await ctx.params;
     if (!ipsId) {
       return NextResponse.json({ error: 'Missing IPS id' }, { status: 400 });
+    }
+
+    // RLS automatically enforces user ownership
+    const { data: ipsData, error: ipsError } = await supabase
+      .from('ips_configurations')
+      .select('user_id')
+      .eq('id', ipsId)
+      .single();
+
+    if (ipsError || !ipsData) {
+      return NextResponse.json({ error: 'IPS not found' }, { status: 403 });
     }
 
     // Pull factors configured for this IPS with factor metadata

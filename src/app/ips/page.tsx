@@ -256,28 +256,26 @@ export default function IPSPage() {
   const [description, setDescription] = useState("");
   const [ipsList, setIpsList] = useState<any[]>([]);
 
-  const userId = "user-123"; // TODO: replace with real auth user id
-
-  // Fetch IPSs from database
+  // Fetch IPSs from database using API
   async function fetchIPS() {
     try {
-      const { data, error } = await supabase
-        .from("ips_configurations")
-        .select("*")
-        .order("created_at", { ascending: false });
-
-      if (error) {
+      const response = await fetch('/api/ips', { cache: 'no-store' });
+      if (!response.ok) {
+        const error = await response.json();
         console.error("Error fetching IPS list:", error);
-      } else {
-        setIpsList(data || []); // raw for easy rendering if needed
-        setAllIPSs(normalizeIpsRows(data || [])); // typed, safe
+        toast.error("Failed to fetch IPS list");
+        return;
       }
+      const data = await response.json();
+      setIpsList(data || []);
+      setAllIPSs(normalizeIpsRows(data || []));
     } catch (err) {
       console.error("Unexpected error fetching IPSs:", err);
+      toast.error("Failed to fetch IPS list");
     }
   }
 
-// Save new IPS (quick create)
+  // Save new IPS (quick create) using API
   async function saveIPS() {
     if (!name.trim()) {
       toast.error("Please enter an IPS name");
@@ -285,45 +283,34 @@ export default function IPSPage() {
     }
 
     try {
-      const { data, error } = await supabase
-        .from("ips_configurations")
-        .insert([
-          {
-            user_id: userId,
-            name: name.trim(),
-            description: description.trim(),
-            is_active: true,
-            strategies: [],
-            total_factors: 0,
-            active_factors: 0,
-            total_weight: 0,
-            avg_weight: 0,
-            win_rate: 0,
-            avg_roi: 0,
-            total_trades: 0,
-          },
-        ])
-        .select("*");
+      const response = await fetch('/api/ips', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: name.trim(),
+          description: description.trim(),
+          is_active: true,
+          strategies: [],
+          factors: [], // No factors in quick create
+        }),
+      });
 
-      if (error) {
-        console.error("Error inserting IPS:", error);
-        toast.error("Failed to save IPS: " + error.message);
+      if (!response.ok) {
+        const error = await response.json();
+        console.error("Error creating IPS:", error);
+        toast.error("Failed to create IPS: " + (error.error || "Unknown error"));
+        return;
+      }
+
+      const result = await response.json();
+      setName("");
+      setDescription("");
+      await fetchIPS();
+
+      if (result?.data?.name) {
+        toast.success(`IPS "${result.data.name}" created`);
       } else {
-        setName("");
-        setDescription("");
-        await fetchIPS();
-        
-        // Fixed: Proper type checking for the inserted data
-        if (data && Array.isArray(data) && data.length > 0) {
-          const inserted = data[0] as any; // Type assertion since we know the structure
-          if (inserted?.name) {
-            toast.success(`IPS "${inserted.name}" created`);
-          } else {
-            toast.success("IPS created");
-          }
-        } else {
-          toast.success("IPS created");
-        }
+        toast.success("IPS created");
       }
     } catch (err) {
       console.error("Unexpected error saving IPS:", err);
@@ -667,8 +654,8 @@ const handleSaveIPS = async (ipsData: any) => {
       ipsConfig = await ipsDataService.updateIPS(state.currentIPSId, completeIPSData);
       setAllIPSs((prev) => prev.map((ips) => (ips.id === state.currentIPSId ? ipsConfig : ips)));
     } else {
-      // Create new IPS
-      ipsConfig = await ipsDataService.createIPS(userId, completeIPSData);
+      // Create new IPS (userId will be determined from auth on server)
+      ipsConfig = await ipsDataService.createIPS('', completeIPSData);
       setAllIPSs((prev) => [...prev, ipsConfig]);
     }
     

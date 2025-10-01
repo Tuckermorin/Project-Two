@@ -629,10 +629,13 @@ class MarketDataService {
    */
   private extractFundamentals(data: FundamentalData): any {
     if (!data.overview) return {};
-    
+
     const overview = data.overview;
-    
+
     return {
+      name: overview.Name,
+      sector: overview.Sector,
+      industry: overview.Industry,
       revenue: this.parseFinancialValue(overview.RevenueTTM),
       grossMargin: this.parsePercentage((overview as any).GrossMargin || ''),
       operatingMargin: this.parsePercentage(overview.OperatingMarginTTM),
@@ -652,6 +655,8 @@ class MarketDataService {
       week52High: this.parseFinancialValue((overview as any)['52WeekHigh']),
       week52Low: this.parseFinancialValue((overview as any)['52WeekLow']),
       dividendYield: this.parseFinancialValue(overview.DividendYield),
+      analystTargetPrice: this.parseFinancialValue(overview.AnalystTargetPrice),
+      currency: (overview as any).Currency || 'USD',
       revenuePerShareTTM: this.parseFinancialValue(overview.RevenuePerShareTTM)
     };
   }

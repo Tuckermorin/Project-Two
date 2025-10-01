@@ -114,7 +114,6 @@ export default function ExcelStyleTradesDashboard() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [trades, setTrades] = useState<Trade[]>([])
   const [loading, setLoading] = useState<boolean>(false)
-  const userId = 'user-123'
   const LOCAL_CLOSURE_KEY = 'tenxiv:trade-closures'
 
   // Close/action-needed dialog state (local UI helper)
@@ -195,7 +194,7 @@ export default function ExcelStyleTradesDashboard() {
     const load = async () => {
       try {
         setLoading(true)
-        const res = await fetch(`/api/trades?userId=${encodeURIComponent(userId)}&status=active`, { cache: 'no-store' })
+        const res = await fetch(`/api/trades?status=active`, { cache: 'no-store' })
         const json = await res.json()
         if (!res.ok) throw new Error(json?.error || 'Failed to load active trades')
         const rows = (json?.data || []) as any[]
