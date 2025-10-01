@@ -44,10 +44,9 @@ type Candidate = {
 interface AgentSectionProps {
   onAddToProspective?: (candidate: Candidate, ipsId: string) => void;
   availableIPSs?: Array<{ id: string; name: string }>;
-  userId?: string;
 }
 
-export function AgentSection({ onAddToProspective, availableIPSs = [], userId = "user-123" }: AgentSectionProps) {
+export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSectionProps) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);

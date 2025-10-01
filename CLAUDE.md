@@ -264,3 +264,314 @@ create table public.ips_configurations (
 create trigger update_ips_configurations_last_modified BEFORE
 update on ips_configurations for EACH row
 execute FUNCTION update_last_modified_column ();
+
+create table public.agent_runs (
+  run_id uuid not null,
+  started_at timestamp with time zone not null,
+  finished_at timestamp with time zone null,
+  mode text not null,
+  watchlist jsonb null,
+  data_hash text null,
+  outcome jsonb null,
+  user_id uuid not null default auth.uid (),
+  constraint agent_runs_pkey primary key (run_id),
+  constraint agent_runs_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE,
+  constraint agent_runs_mode_check check (
+    (
+      mode = any (
+        array['backtest'::text, 'paper'::text, 'live'::text]
+      )
+    )
+  )
+) TABLESPACE pg_default;
+
+create index IF not exists agent_runs_user_id_idx on public.agent_runs using btree (user_id) TABLESPACE pg_default;
+
+create table public.ai_trade_analyses (
+  id uuid not null default gen_random_uuid (),
+  trade_id uuid null,
+  ips_score_calculation_id uuid null,
+  baseline_score numeric null,
+  ai_raw_score numeric null,
+  final_score numeric null,
+  ai_adjustment numeric null,
+  drivers jsonb not null default '[]'::jsonb,
+  features jsonb not null default '{}'::jsonb,
+  benchmarks jsonb null,
+  playbook jsonb null,
+  model text null,
+  prompt_version text null,
+  created_at timestamp with time zone not null default now(),
+  constraint ai_trade_analyses_pkey primary key (id),
+  constraint ai_trade_analyses_ips_score_calculation_id_fkey foreign KEY (ips_score_calculation_id) references ips_score_calculations (id) on delete set null,
+  constraint ai_trade_analyses_trade_id_fkey foreign KEY (trade_id) references trades (id) on delete set null
+) TABLESPACE pg_default;
+
+create index IF not exists ai_trade_analyses_trade_id_idx on public.ai_trade_analyses using btree (trade_id) TABLESPACE pg_default;
+
+create table public.datausa_series (
+  key text not null,
+  metric text not null,
+  period date not null,
+  value numeric not null,
+  user_id uuid null,
+  constraint datausa_series_pkey primary key (key, metric, period)
+) TABLESPACE pg_default;
+
+create index IF not exists datausa_series_user_id_idx on public.datausa_series using btree (user_id) TABLESPACE pg_default;
+
+create table public.factor_definitions (
+  id text not null,
+  name text not null,
+  type text not null,
+  category text not null,
+  data_type text not null,
+  unit text not null,
+  source text null,
+  description text null,
+  is_active boolean null default true,
+  created_at timestamp with time zone null default now(),
+  user_id uuid null,
+  constraint factor_definitions_pkey primary key (id),
+  constraint factor_definitions_data_type_check check (
+    (
+      data_type = any (
+        array[
+          'numeric'::text,
+          'percentage'::text,
+          'currency'::text,
+          'rating'::text,
+          'boolean'::text
+        ]
+      )
+    )
+  ),
+  constraint factor_definitions_type_check check (
+    (
+      type = any (
+        array[
+          'quantitative'::text,
+          'qualitative'::text,
+          'options'::text
+        ]
+      )
+    )
+  )
+) TABLESPACE pg_default;
+
+create index IF not exists factor_definitions_user_id_idx on public.factor_definitions using btree (user_id) TABLESPACE pg_default;
+
+create table public.factor_score_details (
+  id uuid not null default gen_random_uuid (),
+  ips_score_calculation_id uuid not null,
+  factor_name text not null,
+  factor_value numeric null,
+  weight integer null,
+  individual_score numeric null,
+  weighted_score numeric null,
+  target_met boolean null,
+  created_at timestamp with time zone not null default now(),
+  user_id uuid not null default auth.uid (),
+  constraint factor_score_details_pkey primary key (id),
+  constraint factor_score_details_ips_score_calculation_id_fkey foreign KEY (ips_score_calculation_id) references ips_score_calculations (id) on delete CASCADE,
+  constraint factor_score_details_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_factor_score_calc on public.factor_score_details using btree (ips_score_calculation_id) TABLESPACE pg_default;
+
+create index IF not exists factor_score_details_user_id_idx on public.factor_score_details using btree (user_id) TABLESPACE pg_default;
+
+create table public.features_snapshot (
+  id bigserial not null,
+  run_id uuid not null,
+  symbol text not null,
+  asof timestamp with time zone not null,
+  dte integer null,
+  iv_rank numeric null,
+  term_slope numeric null,
+  put_skew numeric null,
+  volume_oi_ratio numeric null,
+  macro_regime text null,
+  custom jsonb null,
+  user_id uuid not null default auth.uid (),
+  constraint features_snapshot_pkey primary key (id),
+  constraint features_snapshot_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_features_symbol_asof on public.features_snapshot using btree (symbol, asof desc) TABLESPACE pg_default;
+
+create index IF not exists features_snapshot_user_id_idx on public.features_snapshot using btree (user_id) TABLESPACE pg_default;
+
+create table public.ips_score_calculations (
+  id uuid not null default gen_random_uuid (),
+  ips_id uuid not null,
+  trade_id uuid null,
+  final_score numeric not null,
+  total_weight numeric not null,
+  factors_used integer not null,
+  targets_met integer not null,
+  target_percentage numeric not null,
+  calculation_details jsonb null,
+  created_at timestamp with time zone not null default now(),
+  constraint ips_score_calculations_pkey primary key (id),
+  constraint ips_score_calculations_ips_id_fkey foreign KEY (ips_id) references ips_configurations (id) on delete CASCADE,
+  constraint ips_score_calculations_trade_id_fkey foreign KEY (trade_id) references trades (id) on delete set null
+) TABLESPACE pg_default;
+
+create index IF not exists idx_ips_score_calc_ips on public.ips_score_calculations using btree (ips_id) TABLESPACE pg_default;
+
+create table public.journal_entries (
+  id uuid not null default gen_random_uuid (),
+  user_id uuid not null,
+  title text not null,
+  content text not null,
+  week_of date null,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  constraint journal_entries_pkey primary key (id),
+  constraint journal_entries_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists journal_entries_user_id_idx on public.journal_entries using btree (user_id) TABLESPACE pg_default;
+
+create trigger trg_journal_updated_at BEFORE
+update on journal_entries for EACH row
+execute FUNCTION update_watchlist_updated_at ();
+
+create table public.macro_series (
+  series_id text not null,
+  asof date not null,
+  value numeric not null,
+  user_id uuid null,
+  constraint macro_series_pkey primary key (series_id, asof)
+) TABLESPACE pg_default;
+
+create index IF not exists macro_series_user_id_idx on public.macro_series using btree (user_id) TABLESPACE pg_default;
+
+create table public.option_chains_raw (
+  id bigserial not null,
+  symbol text not null,
+  asof timestamp with time zone not null,
+  payload jsonb not null,
+  provider text not null default 'alpha_vantage'::text,
+  user_id uuid not null default auth.uid (),
+  constraint option_chains_raw_pkey primary key (id),
+  constraint option_chains_raw_symbol_asof_provider_key unique (symbol, asof, provider),
+  constraint option_chains_raw_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists option_chains_raw_user_id_idx on public.option_chains_raw using btree (user_id) TABLESPACE pg_default;
+
+create table public.option_contracts (
+  id bigserial not null,
+  symbol text not null,
+  expiry date not null,
+  strike numeric not null,
+  option_type text not null,
+  bid numeric null,
+  ask numeric null,
+  last numeric null,
+  iv numeric null,
+  delta numeric null,
+  gamma numeric null,
+  theta numeric null,
+  vega numeric null,
+  oi numeric null,
+  volume numeric null,
+  asof timestamp with time zone not null,
+  user_id uuid not null default auth.uid (),
+  constraint option_contracts_pkey primary key (id),
+  constraint option_contracts_symbol_expiry_strike_option_type_asof_key unique (symbol, expiry, strike, option_type, asof),
+  constraint option_contracts_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE,
+  constraint option_contracts_option_type_check check ((option_type = any (array['C'::text, 'P'::text])))
+) TABLESPACE pg_default;
+
+create index IF not exists idx_option_contracts_symbol_asof on public.option_contracts using btree (symbol, asof desc) TABLESPACE pg_default;
+
+create index IF not exists idx_option_contracts_liquidity on public.option_contracts using btree (symbol, expiry, option_type, oi, volume) TABLESPACE pg_default;
+
+create index IF not exists option_contracts_user_id_idx on public.option_contracts using btree (user_id) TABLESPACE pg_default;
+
+create table public.scores (
+  id bigserial not null,
+  run_id uuid not null,
+  symbol text not null,
+  strategy text not null,
+  score numeric not null,
+  breakdown jsonb not null,
+  version text not null,
+  user_id uuid not null default auth.uid (),
+  constraint scores_pkey primary key (id),
+  constraint scores_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists idx_scores_runid on public.scores using btree (run_id) TABLESPACE pg_default;
+
+create index IF not exists scores_user_id_idx on public.scores using btree (user_id) TABLESPACE pg_default;
+
+create table public.tool_invocations (
+  id bigserial not null,
+  run_id uuid not null,
+  tool text not null,
+  input jsonb not null,
+  output_summary jsonb null,
+  latency_ms integer null,
+  error text null,
+  created_at timestamp with time zone null default now(),
+  user_id uuid not null default auth.uid (),
+  constraint tool_invocations_pkey primary key (id),
+  constraint tool_invocations_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create index IF not exists tool_invocations_user_id_idx on public.tool_invocations using btree (user_id) TABLESPACE pg_default;
+
+create table public.vol_regime_daily (
+  symbol text not null,
+  as_of_date date not null,
+  hv30 double precision null,
+  hv30_rank double precision null,
+  atr14 double precision null,
+  atr_pct double precision null,
+  atr_pct_rank double precision null,
+  iv_atm_30d double precision null,
+  iv_rank double precision null,
+  provider text not null default 'proxy'::text,
+  created_at timestamp with time zone not null default now(),
+  user_id uuid null,
+  constraint vol_regime_daily_pkey primary key (symbol, as_of_date)
+) TABLESPACE pg_default;
+
+create index IF not exists vol_regime_daily_symbol_date_desc_idx on public.vol_regime_daily using btree (symbol, as_of_date desc) TABLESPACE pg_default;
+
+create index IF not exists vol_regime_daily_user_id_idx on public.vol_regime_daily using btree (user_id) TABLESPACE pg_default;
+
+create table public.watchlist_items (
+  id uuid not null default gen_random_uuid (),
+  user_id uuid not null,
+  symbol text not null,
+  company_name text null,
+  sector text null,
+  notes text null,
+  current_price numeric null,
+  change numeric null,
+  change_percent numeric null,
+  market_cap numeric null,
+  pe_ratio numeric null,
+  dividend_yield numeric null,
+  beta numeric null,
+  analyst_target_price numeric null,
+  eps numeric null,
+  volume numeric null,
+  currency text null,
+  week52_high numeric null,
+  week52_low numeric null,
+  last_refreshed timestamp with time zone null,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  constraint watchlist_items_pkey primary key (id),
+  constraint watchlist_items_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
+
+create trigger trg_watchlist_updated_at BEFORE
+update on watchlist_items for EACH row
+execute FUNCTION update_watchlist_updated_at ();

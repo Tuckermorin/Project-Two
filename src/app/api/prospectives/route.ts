@@ -1,17 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/server-client";
 import { v4 as uuidv4 } from "uuid";
 import { mapAgentToTradesStrategy } from "@/lib/trades/strategyMap";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-const DEFAULT_USER_ID = process.env.NEXT_PUBLIC_DEFAULT_USER_ID || "user-123";
-
 export async function POST(req: NextRequest) {
   try {
+    const supabase = await createClient();
+
+    // Get authenticated user
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const userId = user.id;
     const body = await req.json();
     console.log("[Prospectives API] Received payload:", { symbol: body.symbol, strategy: body.strategy, ips_id: body.ips_id });
 
@@ -63,26 +65,24 @@ export async function POST(req: NextRequest) {
       max_profit: max_gain,
       rationale: evaluation_notes,
       guardrail_flags: body.guardrail_flags ?? {},
-      // Don't include user_id if it doesn't exist in auth.users
-      // The table has a default: auth.uid() which will handle it
     };
 
-    // Only add user_id if we have a valid one
-    const userId = body.user_id || body.userId || DEFAULT_USER_ID;
-
-    // Try inserting to trade_candidates (may fail due to FK constraint)
+    // Insert to trade_candidates with authenticated user_id
     try {
-      await supabase.from("trade_candidates").insert(candidatePayload);
+      await supabase.from("trade_candidates").insert({
+        ...candidatePayload,
+        user_id: userId
+      });
       console.log("[Prospectives API] Successfully inserted to trade_candidates");
     } catch (candidateError: any) {
-      console.warn("[Prospectives API] Candidate insert skipped (user not in auth.users):", candidateError?.message);
+      console.warn("[Prospectives API] Candidate insert failed:", candidateError?.message);
       // Continue - this is optional tracking
     }
 
     // 2. Insert to trades table for prospective trades page
     const insertRow = {
       id,
-      user_id: userId, // Use the same userId we defined above
+      user_id: userId, // Use authenticated user
       ips_id,
       symbol,
       strategy_type,
