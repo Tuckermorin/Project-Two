@@ -45,6 +45,7 @@ import {
 import { IPSStrategySelector } from "@/components/ips/ips-strategy-selector";
 import { IPSFactorSelector } from "@/components/ips/ips-factor-selector";
 import { IPSFactorConfiguration } from "@/components/ips/ips-factor-configuration";
+import { IPSExitWatchConfig } from "@/components/ips/ips-exit-watch-config";
 import { IPSSummary } from "@/components/ips/ips-summary";
 import { TradeScoreDisplay } from "@/components/ips/trade-score-display";
 
@@ -191,10 +192,12 @@ function normalizeIpsRows(rows: unknown): IPSConfiguration[] {
 // Page State
 // -------------------------------
 interface IPSFlowState {
-  step: "list" | "strategies" | "selection" | "configuration" | "summary" | "scoring";
+  step: "list" | "strategies" | "selection" | "configuration" | "exit_watch" | "summary" | "scoring";
   selectedStrategies: string[];
   selectedFactors: Set<string>;
   factorConfigurations: Record<string, any>;
+  exitStrategies?: any;
+  watchCriteria?: any;
   currentIPSId: string | null;
   isLoading: boolean;
 }
@@ -642,6 +645,8 @@ const handleSaveIPS = async (ipsData: any) => {
       factors: factors, // Now these are proper factor objects, not just strings
       total_factors: factors.length,
       active_factors: factors.filter((f: any) => f.enabled !== false).length,
+      exit_strategies: state.exitStrategies,
+      watch_criteria: state.watchCriteria,
       created_at: new Date().toISOString(),
     };
 
@@ -727,6 +732,7 @@ const handleSaveIPS = async (ipsData: any) => {
       { id: "strategies", name: "Strategies", icon: (Layers as any) },
       { id: "selection", name: "Factor Selection", icon: (Target as any) },
       { id: "configuration", name: "Configuration", icon: (Settings as any) },
+      { id: "exit_watch", name: "Exit & Watch", icon: (Eye as any) },
       { id: "summary", name: "Summary", icon: (CheckCircle as any) },
       { id: "scoring", name: "Scoring", icon: (BarChart3 as any) },
     ];
@@ -797,9 +803,51 @@ const handleSaveIPS = async (ipsData: any) => {
             factorConfigurations={state.factorConfigurations}
             onConfigurationChange={handleFactorConfiguration}
             onBack={() => handleStepNavigation("selection")}
-            onNext={() => handleStepNavigation("summary")}
+            onNext={() => handleStepNavigation("exit_watch")}
             factorDefinitions={factorDefinitions}
           />
+        )}
+
+        {state.step === "exit_watch" && (
+          <div className="max-w-4xl mx-auto">
+            <div className="mb-6">
+              <h2 className="text-2xl font-bold">Exit Strategies & Watch Criteria</h2>
+              <p className="text-gray-600 mt-1">
+                Define when to exit your positions and what conditions should trigger alerts
+              </p>
+            </div>
+            <IPSExitWatchConfig
+              exitStrategies={state.exitStrategies}
+              watchCriteria={state.watchCriteria}
+              availableFactors={Array.from(state.selectedFactors).map(factorId => {
+                const factor = factorDefinitions?.factors?.find((f: any) => f.id === factorId);
+                return {
+                  id: factorId,
+                  name: factor?.name || factorId
+                };
+              })}
+              onChange={(exitStrategies, watchCriteria) => {
+                setState(prev => ({
+                  ...prev,
+                  exitStrategies,
+                  watchCriteria
+                }));
+              }}
+            />
+            <div className="flex justify-between mt-6">
+              <Button
+                variant="outline"
+                onClick={() => handleStepNavigation("configuration")}
+              >
+                Back
+              </Button>
+              <Button
+                onClick={() => handleStepNavigation("summary")}
+              >
+                Continue to Summary
+              </Button>
+            </div>
+          </div>
         )}
 
         {state.step === "summary" && factorDefinitions && (() => {
@@ -809,7 +857,7 @@ const handleSaveIPS = async (ipsData: any) => {
               selectedFactors={state.selectedFactors}
               factorConfigurations={state.factorConfigurations}
               onSave={handleSaveIPS}
-              onBack={() => handleStepNavigation("configuration")}
+              onBack={() => handleStepNavigation("exit_watch")}
               factorDefinitions={factorDefinitions}
               isEditing={!!state.currentIPSId}
               initialName={current?.name}

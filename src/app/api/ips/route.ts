@@ -213,9 +213,12 @@ export async function POST(req: NextRequest) {
     }
 
     // 1) create IPS config - Use the same table as the frontend
+    const exit_strategies = (body as any).exit_strategies || null;
+    const watch_criteria = (body as any).watch_criteria || null;
+
     const { data: ipsRows, error: ipsErr } = await supabase
       .from('ips_configurations')
-      .insert([{ user_id, name, description, is_active, strategies }])
+      .insert([{ user_id, name, description, is_active, strategies, exit_strategies, watch_criteria }])
       .select('id')
       .single();
 
@@ -357,6 +360,8 @@ export async function PUT(req: NextRequest) {
       is_active = true,
       strategies = [] as string[],
       factors = [] as NewFactor[],
+      exit_strategies = null,
+      watch_criteria = null,
     } = body || {};
 
     if (!id) {
@@ -366,7 +371,7 @@ export async function PUT(req: NextRequest) {
     // RLS automatically enforces user ownership - no need for .eq('user_id', user.id)
     const { error: ipsErr } = await supabase
       .from('ips_configurations')
-      .update({ name, description, is_active, strategies })
+      .update({ name, description, is_active, strategies, exit_strategies, watch_criteria })
       .eq('id', id);
 
     if (ipsErr) {

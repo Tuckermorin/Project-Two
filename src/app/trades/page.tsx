@@ -35,6 +35,7 @@ import type { FactorValueMap } from "@/lib/types";
 import { NewTradeEntryForm } from "@/components/trades/NewTradeEntryForm";
 import { AgentSection } from "@/components/trades/AgentSection";
 import { dispatchTradesUpdated } from "@/lib/events";
+import { useAuth } from "@/components/auth/auth-provider";
 
 // -----------------------------
 // Local types + normalizer (builder-driven IPS)
@@ -291,6 +292,9 @@ interface ProspectiveTrade {
 // -----------------------------
 
 export default function TradesPage() {
+  const { user } = useAuth();
+  const userId = user?.id;
+
   const [currentView, setCurrentView] = useState<ViewType>("selection");
   const [selectedIPS, setSelectedIPS] = useState<IPSConfiguration | null>(null);
   const [activeIPSs, setActiveIPSs] = useState<IPSConfiguration[]>([]);

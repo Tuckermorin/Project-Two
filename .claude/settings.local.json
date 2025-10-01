@@ -8,7 +8,9 @@
       "Bash(npm run build:*)",
       "Bash(npx tsc:*)",
       "Bash(npm install:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Read(//mnt/c/Users/tucker.morin/OneDrive/**)",
+      "Bash(ls:*)"
     ],
     "deny": [],
     "ask": []

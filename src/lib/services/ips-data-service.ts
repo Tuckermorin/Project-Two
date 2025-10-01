@@ -27,6 +27,8 @@ interface IPSConfiguration {
   avg_weight?: number;
   created_at: string;
   last_modified?: string;
+  exit_strategies?: any;
+  watch_criteria?: any;
   performance?: {
     winRate: number;
     avgROI: number;
