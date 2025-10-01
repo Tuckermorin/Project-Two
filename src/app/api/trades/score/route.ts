@@ -102,6 +102,15 @@ export async function POST(request: NextRequest) {
       data: {
         score: finalScore,
         scoreId: savedScore?.id,
+        ips: {
+          id: ips.id,
+          name: ips.name,
+          description: ips.description,
+          scorePct: finalScore,
+          alignPct: targetPercentage,
+          totalFactors: factorScores.length,
+          passingFactors: targetsMetCount
+        },
         breakdown: {
           totalWeight,
           weightedSum,

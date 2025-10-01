@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight } from "lucide-react";
+import { useAuth } from "@/components/auth/auth-provider";
 
 type Candidate = {
   id: string;
@@ -29,12 +30,37 @@ type Candidate = {
   guardrail_flags?: Record<string, boolean>;
   score?: number;
   detailed_analysis?: {
+    ips_name?: string;
     ips_factors?: Array<{
       name: string;
+      factor_key?: string;
       target?: string;
       actual?: string | number;
+      weight?: string;
       status: "pass" | "fail" | "warning";
     }>;
+    api_data?: {
+      company_name?: string;
+      sector?: string;
+      industry?: string;
+      market_cap?: string;
+      pe_ratio?: string;
+      beta?: string;
+      eps?: string;
+      dividend_yield?: string;
+      profit_margin?: string;
+      roe?: string;
+      week52_high?: string;
+      week52_low?: string;
+      analyst_target?: string;
+    } | null;
+    news_results?: Array<{
+      title: string;
+      snippet: string;
+      url: string;
+      published_at?: string | null;
+    }>;
+    tavily_error?: string | null;
     news_summary?: string;
     macro_context?: string;
     out_of_ips_justification?: string;
@@ -48,6 +74,9 @@ interface AgentSectionProps {
 
 export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSectionProps) {
   const router = useRouter();
+  const { user } = useAuth();
+  const userId = user?.id;
+
   const [loading, setLoading] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
   const [cands, setCands] = useState<Candidate[]>([]);
@@ -402,30 +431,155 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
               {selectedCandidate.detailed_analysis?.ips_factors && (
                 <Card>
                   <CardHeader>
-                    <CardTitle className="text-base">IPS Criteria Analysis</CardTitle>
+                    <CardTitle className="text-base">
+                      IPS Criteria Analysis
+                      {selectedCandidate.detailed_analysis.ips_name && (
+                        <span className="text-sm font-normal text-muted-foreground ml-2">
+                          ({selectedCandidate.detailed_analysis.ips_name})
+                        </span>
+                      )}
+                    </CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="space-y-2">
-                      {selectedCandidate.detailed_analysis.ips_factors.map((factor, i) => (
-                        <div key={i} className="flex items-center justify-between p-3 border rounded">
-                          <div className="flex-1">
-                            <div className="font-medium text-sm">{factor.name}</div>
-                            <div className="text-xs text-muted-foreground">
-                              Target: {factor.target || "N/A"} | Actual: {factor.actual ?? "N/A"}
-                            </div>
-                          </div>
-                          <Badge
-                            variant={
-                              factor.status === "pass" ? "default" :
-                              factor.status === "warning" ? "secondary" : "destructive"
-                            }
-                          >
-                            {factor.status === "pass" ? "✓ Pass" :
-                             factor.status === "warning" ? "⚠ Warning" : "✗ Fail"}
-                          </Badge>
-                        </div>
-                      ))}
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b">
+                            <th className="text-left py-2 px-3 font-medium">Factor</th>
+                            <th className="text-left py-2 px-3 font-medium">Target</th>
+                            <th className="text-left py-2 px-3 font-medium">Actual</th>
+                            <th className="text-left py-2 px-3 font-medium">Weight</th>
+                            <th className="text-left py-2 px-3 font-medium">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {selectedCandidate.detailed_analysis.ips_factors.map((factor, i) => (
+                            <tr key={i} className="border-b hover:bg-gray-50 dark:hover:bg-gray-800">
+                              <td className="py-2 px-3 font-medium">{factor.name}</td>
+                              <td className="py-2 px-3 text-muted-foreground">{factor.target || "N/A"}</td>
+                              <td className="py-2 px-3">{factor.actual ?? "N/A"}</td>
+                              <td className="py-2 px-3 text-muted-foreground">{factor.weight || "N/A"}</td>
+                              <td className="py-2 px-3">
+                                <Badge
+                                  variant={
+                                    factor.status === "pass" ? "default" :
+                                    factor.status === "warning" ? "secondary" : "destructive"
+                                  }
+                                >
+                                  {factor.status === "pass" ? "✓ Pass" :
+                                   factor.status === "warning" ? "⚠ Warning" : "✗ Fail"}
+                                </Badge>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Stock Fundamentals */}
+              {selectedCandidate.detailed_analysis?.api_data && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Stock Fundamentals</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <div className="text-xs text-muted-foreground">Company</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.company_name || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Sector</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.sector || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Industry</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.industry || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Market Cap</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.market_cap || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">P/E Ratio</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.pe_ratio || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Beta</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.beta || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">EPS</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.eps || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Dividend Yield</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.dividend_yield || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Profit Margin</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.profit_margin || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">ROE</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.roe || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">52-Week High</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.week52_high || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">52-Week Low</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.week52_low || "N/A"}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Analyst Target</div>
+                        <div className="font-medium">{selectedCandidate.detailed_analysis.api_data.analyst_target || "N/A"}</div>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Recent News */}
+              {(selectedCandidate.detailed_analysis?.news_results || selectedCandidate.detailed_analysis?.tavily_error) && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base">Recent News & Research</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedCandidate.detailed_analysis.tavily_error ? (
+                      <div className="flex items-center gap-2 text-amber-600 text-sm bg-amber-50 dark:bg-amber-900/20 p-3 rounded">
+                        <AlertCircle className="h-4 w-4" />
+                        News search failed: {selectedCandidate.detailed_analysis.tavily_error}
+                      </div>
+                    ) : selectedCandidate.detailed_analysis.news_results && selectedCandidate.detailed_analysis.news_results.length > 0 ? (
+                      <div className="space-y-3">
+                        {selectedCandidate.detailed_analysis.news_results.map((article, i) => (
+                          <div key={i} className="border-l-2 border-blue-500 pl-3 py-2">
+                            <a
+                              href={article.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-medium text-sm hover:text-blue-600 hover:underline"
+                            >
+                              {article.title}
+                            </a>
+                            <p className="text-xs text-muted-foreground mt-1">{article.snippet}</p>
+                            {article.published_at && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                {new Date(article.published_at).toLocaleDateString()}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-sm text-muted-foreground">No recent news found</div>
+                    )}
                   </CardContent>
                 </Card>
               )}

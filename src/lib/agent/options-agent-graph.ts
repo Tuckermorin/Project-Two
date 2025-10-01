@@ -7,6 +7,7 @@ import dayjs from "dayjs";
 
 // Import clients
 import { getOptionsChain, getQuote } from "@/lib/clients/alphaVantage";
+import { getAlphaVantageClient } from "@/lib/api/alpha-vantage";
 import { getSeries } from "@/lib/clients/fred";
 import { tavilySearch } from "@/lib/clients/tavily";
 import { rationaleLLM } from "@/lib/clients/llm";
@@ -22,6 +23,7 @@ interface AgentState {
   ipsConfig?: any;
   asof: string;
   marketData: Record<string, any>;
+  fundamentalData: Record<string, any>; // Company overview data
   macroData: Record<string, any>;
   features: Record<string, any>;
   candidates: any[];
@@ -43,6 +45,7 @@ const queue = new PQueue({ concurrency: 2, interval: 1000, intervalCap: 2 });
 async function fetchMarketData(state: AgentState): Promise<Partial<AgentState>> {
   console.log(`[FetchMarketData] Processing ${state.symbols.length} symbols`);
   const marketData: Record<string, any> = {};
+  const fundamentalData: Record<string, any> = {};
   const errors: string[] = [];
 
   for (const symbol of state.symbols) {
@@ -90,6 +93,21 @@ async function fetchMarketData(state: AgentState): Promise<Partial<AgentState>> 
         asof: result.asof,
       };
 
+      // Fetch company fundamentals
+      try {
+        console.log(`[FetchMarketData] Fetching fundamentals for ${symbol}`);
+        const avClient = getAlphaVantageClient();
+        const overview = await queue.add(() =>
+          pRetry(() => avClient.getCompanyOverview(symbol), { retries: 2 })
+        );
+
+        fundamentalData[symbol] = overview;
+        console.log(`[FetchMarketData] Got fundamentals for ${symbol}: PE=${overview.PERatio}, Beta=${overview.Beta}`);
+      } catch (fundError: any) {
+        console.warn(`[FetchMarketData] Failed to fetch fundamentals for ${symbol}:`, fundError.message);
+        fundamentalData[symbol] = null;
+      }
+
       const latency = Date.now() - start;
       await db.logTool(state.runId, "FetchMarketData", { symbol }, { count: normalized.length }, latency);
     } catch (error: any) {
@@ -98,7 +116,7 @@ async function fetchMarketData(state: AgentState): Promise<Partial<AgentState>> 
     }
   }
 
-  return { marketData, errors: [...state.errors, ...errors] };
+  return { marketData, fundamentalData, errors: [...state.errors, ...errors] };
 }
 
 // Node 2: FetchMacroData
@@ -445,9 +463,92 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
     // Build IPS factors comparison for detailed analysis
     if (!c.detailed_analysis) c.detailed_analysis = {};
     c.detailed_analysis.ips_factors = [];
+    c.detailed_analysis.ips_name = state.ipsConfig?.name || "Unknown IPS";
 
-    // Use reasoning chain compliance data if available
-    if (c.reasoning_chain?.ips_compliance?.factor_scores) {
+    // Add fundamental data from API
+    const fundamentals = state.fundamentalData?.[c.symbol];
+    if (fundamentals) {
+      c.detailed_analysis.api_data = {
+        company_name: fundamentals.Name || c.symbol,
+        sector: fundamentals.Sector || "N/A",
+        industry: fundamentals.Industry || "N/A",
+        market_cap: fundamentals.MarketCapitalization || "N/A",
+        pe_ratio: fundamentals.PERatio || "N/A",
+        beta: fundamentals.Beta || "N/A",
+        eps: fundamentals.EPS || "N/A",
+        dividend_yield: fundamentals.DividendYield || "N/A",
+        profit_margin: fundamentals.ProfitMargin || "N/A",
+        roe: fundamentals.ReturnOnEquityTTM || "N/A",
+        week52_high: fundamentals["52WeekHigh"] || "N/A",
+        week52_low: fundamentals["52WeekLow"] || "N/A",
+        analyst_target: fundamentals.AnalystTargetPrice || "N/A",
+      };
+      console.log(`[ScoreIPS] Added API data for ${c.symbol}: PE=${fundamentals.PERatio}, Beta=${fundamentals.Beta}`);
+    } else {
+      c.detailed_analysis.api_data = null;
+      console.log(`[ScoreIPS] No fundamental data available for ${c.symbol}`);
+    }
+
+    // If we have IPS config, use it to build comprehensive factor comparison
+    if (state.ipsConfig && state.ipsConfig.factors) {
+      const features = state.features[c.symbol] || {};
+
+      for (const ipsFactor of state.ipsConfig.factors) {
+        const factorKey = ipsFactor.factor_key;
+        const factorName = ipsFactor.display_name || factorKey;
+        const weight = ipsFactor.weight;
+        const threshold = ipsFactor.threshold;
+        const direction = ipsFactor.direction;
+
+        // Get actual value from features or reasoning chain
+        let actualValue: any = features[factorKey];
+
+        // Check reasoning chain for more accurate value
+        if (c.reasoning_chain?.ips_compliance?.factor_scores?.[factorKey]) {
+          actualValue = c.reasoning_chain.ips_compliance.factor_scores[factorKey].value;
+        }
+
+        // Determine target display
+        let targetDisplay = "N/A";
+        if (threshold !== null && threshold !== undefined) {
+          const directionSymbol = direction === "gte" ? "≥" : direction === "lte" ? "≤" : "=";
+          targetDisplay = `${directionSymbol} ${threshold}`;
+        }
+
+        // Determine status
+        let status: "pass" | "fail" | "warning" = "warning";
+        if (actualValue !== null && actualValue !== undefined && threshold !== null && threshold !== undefined) {
+          const numValue = typeof actualValue === "number" ? actualValue : parseFloat(actualValue);
+          if (!isNaN(numValue)) {
+            if (direction === "gte") {
+              status = numValue >= threshold ? "pass" : "fail";
+            } else if (direction === "lte") {
+              status = numValue <= threshold ? "pass" : "fail";
+            } else {
+              // No direction specified, just show the value
+              status = "warning";
+            }
+          }
+        }
+
+        // Format actual value
+        const actualDisplay = actualValue !== null && actualValue !== undefined
+          ? (typeof actualValue === "number" ? actualValue.toFixed(2) : String(actualValue))
+          : "N/A";
+
+        c.detailed_analysis.ips_factors.push({
+          name: factorName,
+          factor_key: factorKey,
+          target: targetDisplay,
+          actual: actualDisplay,
+          weight: (weight * 100).toFixed(0) + "%", // Convert 0-1 scale to percentage
+          status,
+        });
+      }
+
+      console.log(`[ScoreIPS] Built ${c.detailed_analysis.ips_factors.length} factor comparisons for ${c.symbol}`);
+    } else if (c.reasoning_chain?.ips_compliance?.factor_scores) {
+      // Use reasoning chain compliance data if IPS config not available
       for (const [factorName, factorData] of Object.entries(c.reasoning_chain.ips_compliance.factor_scores)) {
         if (typeof factorData === "object" && "value" in factorData) {
           c.detailed_analysis.ips_factors.push({
@@ -499,6 +600,24 @@ async function llmRationale(state: AgentState): Promise<Partial<AgentState>> {
         `${c.symbol} company news last 3 days`,
         { time_range: "week", max_results: 3 }
       );
+
+      // Store news results in detailed_analysis
+      if (!c.detailed_analysis) c.detailed_analysis = {};
+
+      if (res.error) {
+        console.warn(`[LLM_Rationale] Tavily search failed for ${c.symbol}: ${res.error}`);
+        c.detailed_analysis.tavily_error = res.error;
+        c.detailed_analysis.news_results = [];
+      } else {
+        c.detailed_analysis.news_results = res.results.map((r: any) => ({
+          title: r.title || "No title",
+          snippet: r.snippet || "",
+          url: r.url || "",
+          published_at: r.publishedAt || null,
+        }));
+        c.detailed_analysis.tavily_error = null;
+        console.log(`[LLM_Rationale] Found ${res.results.length} news articles for ${c.symbol}`);
+      }
 
       const newsContext = res.results
         .map((r: any) => r.snippet)
@@ -715,15 +834,22 @@ export async function runAgentOnce(props: {
   let ipsConfig = null;
   if (props.ipsId) {
     try {
-      const { loadActiveIPS } = await import("@/lib/ips/loader");
+      const { loadIPSById } = await import("@/lib/ips/loader");
       const { assertIPSShape } = await import("@/lib/ips/assert");
 
-      ipsConfig = await loadActiveIPS();
+      ipsConfig = await loadIPSById(props.ipsId);
       assertIPSShape(ipsConfig);
 
       console.log(`[Agent] Loaded IPS config: ${ipsConfig.name} with ${ipsConfig.factors?.length || 0} factors`);
+      console.log(`[Agent] IPS Factors:`, ipsConfig.factors.map(f => ({
+        name: f.display_name,
+        key: f.factor_key,
+        weight: f.weight,
+        threshold: f.threshold,
+        direction: f.direction
+      })));
     } catch (error: any) {
-      console.error("[Agent] Failed to load IPS config:", error.message);
+      console.error("[Agent] Failed to load IPS config:", error.message, error.stack);
     }
   }
 
@@ -740,6 +866,7 @@ export async function runAgentOnce(props: {
       ipsConfig,
       asof,
       marketData: {},
+      fundamentalData: {},
       macroData: {},
       features: {},
       candidates: [],
