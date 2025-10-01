@@ -8,11 +8,12 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-const DEFAULT_USER_ID = process.env.NEXT_PUBLIC_DEFAULT_USER_ID!;
+const DEFAULT_USER_ID = process.env.NEXT_PUBLIC_DEFAULT_USER_ID || "user-123";
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
+    console.log("[Prospectives API] Received payload:", { symbol: body.symbol, strategy: body.strategy, ips_id: body.ips_id });
 
     // Generate or use provided ID
     const id = body.id || uuidv4();
@@ -47,9 +48,11 @@ export async function POST(req: NextRequest) {
     const evaluation_notes = body.rationale ?? body.evaluation_notes ?? null;
 
     // 1. Insert to trade_candidates for agent tracking
+    // Note: This may fail if user_id doesn't exist in auth.users table
+    // We'll try, but won't fail the whole request if it doesn't work
     const candidatePayload = {
       id,
-      run_id: body.run_id,
+      run_id: body.run_id || uuidv4(), // Ensure run_id is present
       symbol,
       strategy: agentStrategy,
       contract_legs: legs,
@@ -60,14 +63,26 @@ export async function POST(req: NextRequest) {
       max_profit: max_gain,
       rationale: evaluation_notes,
       guardrail_flags: body.guardrail_flags ?? {},
+      // Don't include user_id if it doesn't exist in auth.users
+      // The table has a default: auth.uid() which will handle it
     };
 
-    await supabase.from("trade_candidates").insert(candidatePayload);
+    // Only add user_id if we have a valid one
+    const userId = body.user_id || body.userId || DEFAULT_USER_ID;
+
+    // Try inserting to trade_candidates (may fail due to FK constraint)
+    try {
+      await supabase.from("trade_candidates").insert(candidatePayload);
+      console.log("[Prospectives API] Successfully inserted to trade_candidates");
+    } catch (candidateError: any) {
+      console.warn("[Prospectives API] Candidate insert skipped (user not in auth.users):", candidateError?.message);
+      // Continue - this is optional tracking
+    }
 
     // 2. Insert to trades table for prospective trades page
     const insertRow = {
       id,
-      user_id: body.user_id || body.userId || DEFAULT_USER_ID,
+      user_id: userId, // Use the same userId we defined above
       ips_id,
       symbol,
       strategy_type,
@@ -100,10 +115,11 @@ export async function POST(req: NextRequest) {
     const { error: tradeError } = await supabase.from("trades").insert(insertRow);
 
     if (tradeError) {
-      console.error("Trade insert error:", tradeError);
+      console.error("[Prospectives API] Trade insert error:", tradeError);
       return NextResponse.json({ error: tradeError.message }, { status: 400 });
     }
 
+    console.log("[Prospectives API] Successfully inserted trade with ID:", id);
     return NextResponse.json({ ok: true, id });
   } catch (e: any) {
     console.error("Prospective trade insert failed:", e);

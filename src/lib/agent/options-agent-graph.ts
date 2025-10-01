@@ -11,6 +11,7 @@ import { getSeries } from "@/lib/clients/fred";
 import { tavilySearch } from "@/lib/clients/tavily";
 import { rationaleLLM } from "@/lib/clients/llm";
 import * as db from "@/lib/db/agent";
+import { buildReasoningChain } from "./deep-reasoning";
 
 // State interface
 interface AgentState {
@@ -27,6 +28,12 @@ interface AgentState {
   scores: any[];
   selected: any[];
   errors: string[];
+  // Deep reasoning additions
+  reasoningChains: Record<string, any>;
+  ipsCompliance: Record<string, any>;
+  historicalContext: Record<string, any>;
+  researchSynthesis: Record<string, any>;
+  adjustedThresholds: Record<string, any>;
 }
 
 // Rate limiting queue
@@ -306,44 +313,122 @@ async function riskGuardrails(state: AgentState): Promise<Partial<AgentState>> {
   return { candidates };
 }
 
+// Node 5.5: DeepReasoning - Multi-phase analysis with IPS validation and historical context
+async function deepReasoning(state: AgentState): Promise<Partial<AgentState>> {
+  console.log("[DeepReasoning] Running comprehensive analysis on candidates");
+
+  if (!state.ipsConfig) {
+    console.warn("[DeepReasoning] No IPS config loaded, skipping deep analysis");
+    return {};
+  }
+
+  const reasoningChains: Record<string, any> = {};
+  const ipsCompliance: Record<string, any> = {};
+  const historicalContext: Record<string, any> = {};
+  const researchSynthesis: Record<string, any> = {};
+
+  for (const candidate of state.candidates) {
+    try {
+      const features = state.features[candidate.symbol] || {};
+
+      // Build complete reasoning chain for this candidate
+      const chain = await buildReasoningChain(
+        candidate,
+        features,
+        state.ipsConfig,
+        state.macroData
+      );
+
+      // Store in state
+      const key = `${candidate.symbol}_${candidate.strategy}`;
+      reasoningChains[key] = chain;
+      ipsCompliance[key] = chain.ips_compliance;
+      historicalContext[key] = chain.historical_context;
+      researchSynthesis[key] = chain.market_factors;
+
+      // Attach reasoning to candidate for downstream use
+      candidate.reasoning_chain = chain;
+      candidate.ips_baseline_score = chain.ips_baseline_score;
+      candidate.adjusted_score = chain.adjusted_score;
+      candidate.recommendation = chain.recommendation;
+
+      console.log(
+        `[DeepReasoning] ${candidate.symbol}: IPS baseline=${chain.ips_baseline_score.toFixed(1)}, adjusted=${chain.adjusted_score.toFixed(1)}, rec=${chain.recommendation}`
+      );
+    } catch (error: any) {
+      console.error(`[DeepReasoning] Error analyzing ${candidate.symbol}:`, error.message);
+      candidate.reasoning_chain = {
+        error: error.message,
+        ips_baseline_score: 50,
+        adjusted_score: 50,
+        recommendation: "REVIEW",
+      };
+    }
+  }
+
+  return {
+    candidates: state.candidates,
+    reasoningChains,
+    ipsCompliance,
+    historicalContext,
+    researchSynthesis,
+  };
+}
+
 // Node 6: ScoreIPS
 async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
   console.log("[ScoreIPS] Scoring trades with IPS:", state.ipsConfig?.name || "default");
   const scores: any[] = [];
 
-  // Load scorer utility
-  const { scoreAgainstIPS } = await import("@/lib/ips/scorer");
-
   for (const c of state.candidates) {
-    const features = state.features[c.symbol] || {};
-
-    let score = 0.5; // Base score (0-1)
+    // Use adjusted score from DeepReasoning if available, otherwise fallback to simple scoring
+    let scorePercent = 50;
     let breakdown: Record<string, any> = {};
 
-    // If we have IPS configuration, use the scorer
-    if (state.ipsConfig && state.ipsConfig.factors && state.ipsConfig.factors.length > 0) {
-      const result = scoreAgainstIPS(state.ipsConfig, features);
-      score = result.alignment;
-      breakdown = result.breakdown;
+    if (c.reasoning_chain && c.adjusted_score != null) {
+      // Use the comprehensive score from DeepReasoning
+      scorePercent = c.adjusted_score;
+      breakdown = {
+        ips_baseline: c.ips_baseline_score,
+        adjusted: c.adjusted_score,
+        historical_influence: c.reasoning_chain.historical_context?.has_data ? "applied" : "none",
+        market_adjustments: c.reasoning_chain.threshold_adjustments?.length || 0,
+        recommendation: c.recommendation,
+      };
+
+      // Add detailed IPS factor scores
+      if (c.reasoning_chain.ips_compliance?.factor_scores) {
+        breakdown.ips_factors = c.reasoning_chain.ips_compliance.factor_scores;
+      }
     } else {
-      // Fallback to simple heuristics if no IPS config
-      score = ((features.iv_rank || 0.5) * 0.5 + 0.25);
+      // Fallback to old simple scoring if DeepReasoning was skipped
+      const features = state.features[c.symbol] || {};
+      const { scoreAgainstIPS } = await import("@/lib/ips/scorer");
+
+      let score = 0.5;
+      if (state.ipsConfig && state.ipsConfig.factors && state.ipsConfig.factors.length > 0) {
+        const result = scoreAgainstIPS(state.ipsConfig, features);
+        score = result.alignment;
+        breakdown = result.breakdown;
+      } else {
+        score = ((features.iv_rank || 0.5) * 0.5 + 0.25);
+      }
+
+      scorePercent = score * 100;
+
+      // Apply simple adjustments
+      if (c.guardrail_flags?.earnings_risk) scorePercent -= 15;
+      if (c.guardrail_flags?.macro_event) scorePercent -= 10;
+
+      const riskReward = c.max_profit / (c.max_loss || 1);
+      scorePercent += riskReward * 5;
+      scorePercent = Math.max(0, Math.min(100, scorePercent));
+
+      breakdown.risk_reward = riskReward;
+      breakdown.guardrails = c.guardrail_flags;
     }
 
-    // Convert 0-1 alignment to 0-100 percentage
-    let scorePercent = score * 100;
-
-    // Penalize guardrail flags
-    if (c.guardrail_flags.earnings_risk) scorePercent -= 15;
-    if (c.guardrail_flags.macro_event) scorePercent -= 10;
-
-    // Favor good risk/reward
-    const riskReward = c.max_profit / (c.max_loss || 1);
-    scorePercent += riskReward * 5;
-
-    scorePercent = Math.max(0, Math.min(100, scorePercent)); // Clamp to 0-100
-
-    breakdown.risk_reward = riskReward;
+    breakdown.risk_reward = c.max_profit / (c.max_loss || 1);
     breakdown.guardrails = c.guardrail_flags;
 
     const scoreObj = {
@@ -361,17 +446,40 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
     if (!c.detailed_analysis) c.detailed_analysis = {};
     c.detailed_analysis.ips_factors = [];
 
-    for (const [factorName, weightData] of Object.entries(breakdown)) {
-      if (factorName === "risk_reward" || factorName === "guardrails") continue;
-      if (typeof weightData === "object" && weightData.value !== undefined) {
-        const value = weightData.value;
-        const status = value >= 60 ? "pass" : value >= 40 ? "warning" : "fail";
-        c.detailed_analysis.ips_factors.push({
-          name: factorName,
-          target: "> 60 (preferred)",
-          actual: value.toFixed(1),
-          status,
-        });
+    // Use reasoning chain compliance data if available
+    if (c.reasoning_chain?.ips_compliance?.factor_scores) {
+      for (const [factorName, factorData] of Object.entries(c.reasoning_chain.ips_compliance.factor_scores)) {
+        if (typeof factorData === "object" && "value" in factorData) {
+          c.detailed_analysis.ips_factors.push({
+            name: factorName,
+            target: factorData.target || "see IPS",
+            actual: typeof factorData.value === "number" ? factorData.value.toFixed(2) : String(factorData.value),
+            status: factorData.pass ? "pass" : "fail",
+          });
+        }
+      }
+
+      // Add violations and passes summary
+      if (c.reasoning_chain.ips_compliance.violations?.length > 0) {
+        c.detailed_analysis.ips_violations = c.reasoning_chain.ips_compliance.violations;
+      }
+      if (c.reasoning_chain.ips_compliance.passes?.length > 0) {
+        c.detailed_analysis.ips_passes = c.reasoning_chain.ips_compliance.passes;
+      }
+    } else {
+      // Fallback to old format
+      for (const [factorName, weightData] of Object.entries(breakdown)) {
+        if (factorName === "risk_reward" || factorName === "guardrails") continue;
+        if (typeof weightData === "object" && "value" in weightData && weightData.value !== undefined) {
+          const value = weightData.value;
+          const status = value >= 60 ? "pass" : value >= 40 ? "warning" : "fail";
+          c.detailed_analysis.ips_factors.push({
+            name: factorName,
+            target: "> 60 (preferred)",
+            actual: value.toFixed(1),
+            status,
+          });
+        }
       }
     }
   }
@@ -559,6 +667,11 @@ export function buildOptionsAgentGraph() {
       scores: null,
       selected: null,
       errors: null,
+      reasoningChains: null,
+      ipsCompliance: null,
+      historicalContext: null,
+      researchSynthesis: null,
+      adjustedThresholds: null,
     },
   });
 
@@ -567,17 +680,19 @@ export function buildOptionsAgentGraph() {
   graph.addNode("EngineerFeatures", engineerFeatures);
   graph.addNode("GenerateCandidates", generateCandidates);
   graph.addNode("RiskGuardrails", riskGuardrails);
+  graph.addNode("DeepReasoning", deepReasoning);
   graph.addNode("ScoreIPS", scoreIPS);
   graph.addNode("LLM_Rationale", llmRationale);
   graph.addNode("SelectTopK", selectTopK);
 
-  // Define edges
+  // Define edges - DeepReasoning now sits between RiskGuardrails and ScoreIPS
   graph.setEntryPoint("FetchMarketData");
   graph.addEdge("FetchMarketData", "FetchMacroData");
   graph.addEdge("FetchMacroData", "EngineerFeatures");
   graph.addEdge("EngineerFeatures", "GenerateCandidates");
   graph.addEdge("GenerateCandidates", "RiskGuardrails");
-  graph.addEdge("RiskGuardrails", "ScoreIPS");
+  graph.addEdge("RiskGuardrails", "DeepReasoning");
+  graph.addEdge("DeepReasoning", "ScoreIPS");
   graph.addEdge("ScoreIPS", "LLM_Rationale");
   graph.addEdge("LLM_Rationale", "SelectTopK");
   graph.setFinishPoint("SelectTopK");
@@ -631,6 +746,11 @@ export async function runAgentOnce(props: {
       scores: [],
       selected: [],
       errors: [],
+      reasoningChains: {},
+      ipsCompliance: {},
+      historicalContext: {},
+      researchSynthesis: {},
+      adjustedThresholds: {},
     };
 
     // Run graph

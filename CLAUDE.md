@@ -1,264 +1,266 @@
-You’re hitting the constraint because the agent is inserting a `strategy_type` (e.g., `"PCS"` or `"put_credit_spread"`) that isn’t in your table’s allowed list. Fix it by **normalizing strategy names in code before insert** (recommended), and optionally make the **“Add to Prospective Trades”** button insert into `public.trades` with `status='prospective'` (no `entry_date`) so it shows up in your Prospective list.
+create table public.trade_candidates (
+  id uuid not null default gen_random_uuid (),
+  run_id uuid not null,
+  symbol text not null,
+  strategy text not null,
+  contract_legs jsonb not null,
+  entry_mid numeric null,
+  est_pop numeric null,
+  breakeven numeric null,
+  max_loss numeric null,
+  max_profit numeric null,
+  rationale text null,
+  guardrail_flags jsonb null,
+  user_id uuid not null default auth.uid (),
+  constraint trade_candidates_pkey primary key (id),
+  constraint trade_candidates_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
 
-Below is a single **Claude Code** prompt you can paste in your terminal. It will:
+create index IF not exists idx_candidates_runid on public.trade_candidates using btree (run_id) TABLESPACE pg_default;
 
-1. Add a **strategy mapper** so agent labels (PCS/CCS/etc.) become values allowed by your `trades_strategy_type_check_v2` constraint.
-2. Update the **/api/prospectives** route to insert into **public.trades** (or update if you prefer to keep `trade_candidates` too).
-3. Update the **button handler** so it uses that route and passes the right payload.
+create index IF not exists trade_candidates_user_id_idx on public.trade_candidates using btree (user_id) TABLESPACE pg_default;
 
----
+create table public.trade_closures (
+  id uuid not null default gen_random_uuid (),
+  trade_id uuid not null,
+  close_method text not null,
+  close_date timestamp with time zone not null,
+  underlying_price_at_close numeric null,
+  cost_to_close_per_spread numeric null,
+  exit_premium_per_contract numeric null,
+  contracts_closed integer null,
+  shares_sold integer null,
+  sell_price numeric null,
+  assigned_shares integer null,
+  assigned_strike numeric null,
+  commissions_total numeric null,
+  fees_total numeric null,
+  realized_pl numeric null,
+  realized_pl_percent numeric null,
+  notes text null,
+  raw jsonb null,
+  created_at timestamp with time zone not null default now(),
+  updated_at timestamp with time zone not null default now(),
+  ips_name text null,
+  user_id uuid not null default auth.uid (),
+  constraint trade_closures_pkey primary key (id),
+  constraint trade_closures_trade_id_key unique (trade_id),
+  constraint trade_closures_trade_id_fkey foreign KEY (trade_id) references trades (id) on delete CASCADE,
+  constraint trade_closures_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
 
-### 0) Context
+create index IF not exists idx_trade_closures_trade on public.trade_closures using btree (trade_id) TABLESPACE pg_default;
 
-* We have a Postgres check constraint on `public.trades.strategy_type` allowing only:
-  `['buy_hold','put_credit','call_credit','iron_condor','covered_call','cash_secured_put','vertical_spread','put-credit-spreads','call-credit-spreads','iron-condors','covered-calls','long-calls','long-puts','buy-hold-stocks','unknown']`
-* The agent sometimes produces labels like `PCS`, `CCS`, `IC`, `CC`, `CSP`, `LONG_CALL`, etc. These violate the constraint.
+create index IF not exists trade_closures_user_id_idx on public.trade_closures using btree (user_id) TABLESPACE pg_default;
 
-### 1) Add a strategy normalizer
+create table public.trade_factors (
+  id uuid not null default gen_random_uuid (),
+  trade_id uuid not null,
+  factor_name text not null,
+  factor_value numeric null,
+  source text null,
+  confidence numeric null,
+  created_at timestamp with time zone not null default now(),
+  user_id uuid not null default auth.uid (),
+  constraint trade_factors_pkey primary key (id),
+  constraint trade_factors_trade_id_fkey foreign KEY (trade_id) references trades (id) on delete CASCADE,
+  constraint trade_factors_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
 
-**Create:** `src/lib/trades/strategyMap.ts`
+create index IF not exists idx_trade_factors_trade on public.trade_factors using btree (trade_id) TABLESPACE pg_default;
 
-```ts
-export type AgentStrategy =
-  | "PCS" | "PUT_CREDIT" | "PUT_CREDIT_SPREAD" | "PUT-CREDIT-SPREAD"
-  | "CCS" | "CALL_CREDIT" | "CALL_CREDIT_SPREAD" | "CALL-CREDIT-SPREAD"
-  | "IC" | "IRON_CONDOR" | "IRON-CONDOR"
-  | "CC" | "COVERED_CALL" | "COVERED-CALL"
-  | "CSP" | "CASH_SECURED_PUT" | "CASH-SECURED-PUT"
-  | "VERTICAL_SPREAD"
-  | "LONG_CALL" | "LONG_PUT"
-  | "BUY_HOLD" | "BUY-HOLD-STOCKS"
-  | "UNKNOWN" | string;
+create index IF not exists trade_factors_user_id_idx on public.trade_factors using btree (user_id) TABLESPACE pg_default;
 
-type TradesStrategyType =
-  | "buy_hold"
-  | "put_credit"
-  | "call_credit"
-  | "iron_condor"
-  | "covered_call"
-  | "cash_secured_put"
-  | "vertical_spread"
-  | "put-credit-spreads"
-  | "call-credit-spreads"
-  | "iron-condors"
-  | "covered-calls"
-  | "long-calls"
-  | "long-puts"
-  | "buy-hold-stocks"
-  | "unknown";
+create table public.trade_outcomes (
+  candidate_id uuid not null,
+  opened_at timestamp with time zone null,
+  closed_at timestamp with time zone null,
+  pnl numeric null,
+  mdd numeric null,
+  notes text null,
+  user_id uuid not null default auth.uid (),
+  constraint trade_outcomes_pkey primary key (candidate_id),
+  constraint trade_outcomes_candidate_id_fkey foreign KEY (candidate_id) references trade_candidates (id),
+  constraint trade_outcomes_user_id_fkey foreign KEY (user_id) references auth.users (id) on delete CASCADE
+) TABLESPACE pg_default;
 
-/** Map any agent label to a value allowed by trades.strategy_type check constraint. */
-export function mapAgentToTradesStrategy(s: AgentStrategy): TradesStrategyType {
-  const x = String(s || "").toUpperCase().replace(/\s+/g, "_");
-  switch (x) {
-    // Put credit spread
-    case "PCS":
-    case "PUT_CREDIT":
-    case "PUT_CREDIT_SPREAD":
-    case "PUT-CREDIT-SPREAD":
-      // choose ONE canonical; both "put_credit" and "put-credit-spreads" are allowed
-      return "put_credit";
+create index IF not exists trade_outcomes_user_id_idx on public.trade_outcomes using btree (user_id) TABLESPACE pg_default;
 
-    // Call credit spread
-    case "CCS":
-    case "CALL_CREDIT":
-    case "CALL_CREDIT_SPREAD":
-    case "CALL-CREDIT-SPREAD":
-      return "call_credit";
+create table public.trades (
+  id uuid not null default gen_random_uuid (),
+  user_id text not null default 'default-user'::text,
+  ips_id uuid null,
+  symbol text not null,
+  strategy_type text not null,
+  entry_date date null,
+  expiration_date date null,
+  exit_date date null,
+  status text not null default 'prospective'::text,
+  quantity integer null default 1,
+  entry_price numeric null,
+  exit_price numeric null,
+  strike_price numeric null,
+  strike_price_short numeric null,
+  strike_price_long numeric null,
+  premium_collected numeric null,
+  premium_paid numeric null,
+  contracts integer null default 1,
+  ips_score numeric null,
+  factors_met integer null,
+  total_factors integer null,
+  evaluation_notes text null,
+  realized_pnl numeric null,
+  commission numeric null default 0,
+  notes text null,
+  created_at timestamp with time zone null default now(),
+  updated_at timestamp with time zone null default now(),
+  ips_score_calculation_id uuid null,
+  name text null,
+  contract_type text null,
+  current_price numeric null,
+  number_of_contracts integer null,
+  short_strike numeric null,
+  long_strike numeric null,
+  credit_received numeric null,
+  max_gain numeric null,
+  max_loss numeric null,
+  spread_width numeric null,
+  closed_at timestamp with time zone null,
+  realized_pl numeric null,
+  realized_pl_percent numeric null,
+  ips_name text null,
+  constraint trades_pkey primary key (id),
+  constraint trades_ips_id_fkey foreign KEY (ips_id) references ips_configurations (id) on delete set null,
+  constraint trades_status_check check (
+    (
+      status = any (
+        array[
+          'prospective'::text,
+          'active'::text,
+          'closed'::text,
+          'expired'::text,
+          'cancelled'::text
+        ]
+      )
+    )
+  ),
+  constraint trades_strategy_type_check_v2 check (
+    (
+      strategy_type = any (
+        array[
+          'buy_hold'::text,
+          'put_credit'::text,
+          'call_credit'::text,
+          'iron_condor'::text,
+          'covered_call'::text,
+          'cash_secured_put'::text,
+          'vertical_spread'::text,
+          'put-credit-spreads'::text,
+          'call-credit-spreads'::text,
+          'iron-condors'::text,
+          'covered-calls'::text,
+          'long-calls'::text,
+          'long-puts'::text,
+          'buy-hold-stocks'::text,
+          'unknown'::text
+        ]
+      )
+    )
+  )
+) TABLESPACE pg_default;
 
-    // Iron condor
-    case "IC":
-    case "IRON_CONDOR":
-    case "IRON-CONDOR":
-      return "iron_condor";
+create index IF not exists idx_trades_user_status on public.trades using btree (user_id, status) TABLESPACE pg_default;
 
-    // Covered call
-    case "CC":
-    case "COVERED_CALL":
-    case "COVERED-CALL":
-      return "covered_call";
+create index IF not exists idx_trades_ips on public.trades using btree (ips_id) TABLESPACE pg_default;
 
-    // Cash-secured put
-    case "CSP":
-    case "CASH_SECURED_PUT":
-    case "CASH-SECURED-PUT":
-      return "cash_secured_put";
+create index IF not exists idx_trades_user_id on public.trades using btree (user_id) TABLESPACE pg_default;
 
-    // Longs
-    case "LONG_CALL":
-      return "long-calls";
-    case "LONG_PUT":
-      return "long-puts";
+create index IF not exists idx_trades_status on public.trades using btree (status) TABLESPACE pg_default;
 
-    // Vertical generic
-    case "VERTICAL_SPREAD":
-      return "vertical_spread";
+create index IF not exists idx_trades_symbol on public.trades using btree (symbol) TABLESPACE pg_default;
 
-    // Buy & hold
-    case "BUY_HOLD":
-    case "BUY-HOLD-STOCKS":
-      return "buy-hold-stocks";
+create trigger update_trades_updated_at BEFORE
+update on trades for EACH row
+execute FUNCTION update_updated_at_column ();
 
-    default:
-      return "unknown";
-  }
-}
-```
+create table public.ips_factors (
+  id uuid not null default gen_random_uuid (),
+  ips_id uuid not null,
+  factor_id text not null,
+  factor_name text not null,
+  weight integer not null,
+  target_value numeric null,
+  target_operator text null,
+  target_value_max numeric null,
+  preference_direction text null,
+  enabled boolean null default true,
+  created_at timestamp with time zone null default now(),
+  collection_method text null,
+  constraint ips_factors_pkey primary key (id),
+  constraint unique_ips_factor unique (ips_id, factor_id),
+  constraint ips_factors_factor_id_fkey foreign KEY (factor_id) references factor_definitions (id),
+  constraint ips_factors_ips_id_fkey foreign KEY (ips_id) references ips_configurations (id) on delete CASCADE,
+  constraint ips_factors_preference_direction_check check (
+    (
+      preference_direction = any (
+        array['higher'::text, 'lower'::text, 'target'::text]
+      )
+    )
+  ),
+  constraint ips_factors_collection_method_check check (
+    (
+      collection_method = any (array['api'::text, 'manual'::text])
+    )
+  ),
+  constraint ips_factors_target_operator_check check (
+    (
+      target_operator = any (
+        array[
+          'gte'::text,
+          'lte'::text,
+          'eq'::text,
+          'range'::text
+        ]
+      )
+    )
+  ),
+  constraint ips_factors_weight_check check (
+    (
+      (weight >= 1)
+      and (weight <= 10)
+    )
+  )
+) TABLESPACE pg_default;
 
-### 2) Fix the Prospective insert route to write into `public.trades`
+create index IF not exists idx_ips_factors_collection_method on public.ips_factors using btree (collection_method) TABLESPACE pg_default;
 
-**Edit or create:** `src/app/api/prospectives/route.ts`
+create unique INDEX IF not exists ips_factors_unique_ips_factor on public.ips_factors using btree (ips_id, factor_id) TABLESPACE pg_default;
 
-* Use service role key server-side.
-* Normalize `strategy_type` via the mapper.
-* Keep `status='prospective'` and `entry_date=NULL` (so it stays in Prospective).
-* Fill obvious columns from candidate (strikes, credit, spread width), but don’t force optional fields.
+create index IF not exists idx_ips_factors_ips_id on public.ips_factors using btree (ips_id) TABLESPACE pg_default;
 
-```ts
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import { v4 as uuidv4 } from "uuid";
-import { mapAgentToTradesStrategy } from "@/lib/trades/strategyMap";
+create index IF not exists idx_ips_factors_factor_id on public.ips_factors using btree (factor_id) TABLESPACE pg_default;
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY! // server-only
-);
+create table public.ips_configurations (
+  id uuid not null default gen_random_uuid (),
+  user_id text not null default 'default-user'::text,
+  name text not null,
+  description text null,
+  is_active boolean null default false,
+  total_factors integer null default 0,
+  active_factors integer null default 0,
+  total_weight numeric null default 0,
+  avg_weight numeric null default 0,
+  win_rate numeric null,
+  avg_roi numeric null,
+  total_trades integer null default 0,
+  created_at timestamp with time zone null default now(),
+  last_modified timestamp with time zone null default now(),
+  api_factors integer null default 0,
+  manual_factors integer null default 0,
+  strategies jsonb not null default '[]'::jsonb,
+  constraint ips_configurations_pkey primary key (id)
+) TABLESPACE pg_default;
 
-export async function POST(req: NextRequest) {
-  try {
-    const body = await req.json();
-
-    // Candidate-ish payload coming from the modal/agent
-    // Expected minimal inputs:
-    // symbol, strategy (agent label), contract_legs[], entry_mid, est_pop, breakeven, max_loss, max_profit, expiry
-    const id = body.id || uuidv4();
-    const symbol: string = body.symbol;
-    const agentStrategy: string = body.strategy || "UNKNOWN";
-    const strategy_type = mapAgentToTradesStrategy(agentStrategy);
-    const legs: Array<{ type:"BUY"|"SELL"; right:"P"|"C"; strike:number; expiry:string }> = body.contract_legs || [];
-    const expiry = body.expiration_date || body.exp || legs[0]?.expiry || null;
-
-    // Derive short/long strikes (typical 2-leg vertical)
-    const shortLeg = legs.find(l => l.type === "SELL");
-    const longLeg  = legs.find(l => l.type === "BUY");
-    const short_strike = shortLeg?.strike ?? body.short_strike ?? null;
-    const long_strike  = longLeg?.strike  ?? body.long_strike  ?? null;
-
-    // Numeric economics
-    const credit_received = body.entry_mid ?? body.credit_received ?? null;
-    const max_gain = body.max_profit ?? null;
-    const max_loss = body.max_loss ?? null;
-    const spread_width = (short_strike != null && long_strike != null)
-      ? Math.abs(Number(short_strike) - Number(long_strike))
-      : (body.spread_width ?? null);
-
-    // Optional IPS fields
-    const ips_id = body.ips_id ?? null;
-    const ips_score = body.ips_score ?? null;
-    const factors_met = body.factors_met ?? null;
-    const total_factors = body.total_factors ?? null;
-    const evaluation_notes = body.rationale ?? body.evaluation_notes ?? null;
-
-    const insertRow = {
-      id,
-      user_id: body.user_id || "default-user",
-      ips_id,
-      symbol,
-      strategy_type,
-      entry_date: null,             // keep null so status 'prospective' list shows it
-      expiration_date: expiry ? new Date(expiry) : null,
-      status: "prospective",
-      quantity: body.quantity ?? 1,
-      contracts: body.contracts ?? 1,
-      strike_price: null,           // legacy single-strike; use short/long below
-      strike_price_short: short_strike ?? null,
-      strike_price_long: long_strike ?? null,
-      short_strike,
-      long_strike,
-      premium_collected: credit_received,
-      premium_paid: null,
-      credit_received,
-      max_gain,
-      max_loss,
-      spread_width,
-      ips_score,
-      factors_met,
-      total_factors,
-      evaluation_notes,
-      name: body.name ?? `${symbol} ${strategy_type}`,
-      contract_type: (shortLeg?.right === "P" ? "put" : (shortLeg?.right === "C" ? "call" : null)),
-      number_of_contracts: body.number_of_contracts ?? body.contracts ?? 1,
-      // leave exit fields null
-    };
-
-    const { error } = await supabase.from("trades").insert(insertRow);
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 });
-
-    return NextResponse.json({ ok: true, id });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message ?? "insert failed" }, { status: 500 });
-  }
-}
-```
-
-### 3) Update the “Add to Prospective Trades” button
-
-Find the AI analysis modal component (the one in your screenshot). Update the click handler so it calls the route above and then navigates back to `/trades?highlight=<id>`.
-
-```tsx
-import { useRouter } from "next/navigation";
-...
-async function onAddProspective(candidate:any) {
-  const res = await fetch("/api/prospectives", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      // minimal data required
-      id: candidate.id,                 // keep if already generated; otherwise server will create
-      symbol: candidate.symbol,
-      strategy: candidate.strategy,     // e.g., "PCS" → mapper will normalize to 'put_credit'
-      contract_legs: candidate.contract_legs,
-      entry_mid: candidate.entry_mid,
-      est_pop: candidate.est_pop,
-      breakeven: candidate.breakeven,
-      max_loss: candidate.max_loss,
-      max_profit: candidate.max_profit,
-      exp: candidate.expiration_date || candidate.expiry,
-      rationale: candidate.rationale,
-      ips_id: candidate.ips_id,
-      ips_score: candidate.ips_score,
-      factors_met: candidate.factors_met,
-      total_factors: candidate.total_factors,
-    })
-  });
-  const json = await res.json();
-  if (!res.ok) throw new Error(json.error || "Failed to add trade");
-  router.push(`/trades?highlight=${encodeURIComponent(json.id)}`);
-}
-...
-<button onClick={() => onAddProspective(candidate)} className="px-4 py-2 rounded-2xl bg-black text-white">
-  Add to Prospective Trades
-</button>
-```
-
-### 4) (Optional) Keep `trade_candidates` too
-
-If you still want to insert into `trade_candidates` as a staging table, do that first, then also call `/api/prospectives`. But for the UI behavior you want, writing straight to `public.trades` with `status='prospective'` is simplest.
-
-### 5) Validation & Testing
-
-* Try adding a PCS: ensure `strategy_type` becomes `put_credit`.
-* Ensure no `entry_date` is set and `status='prospective'`.
-* Confirm Prospective list shows the newly added trade.
-* If you ever want to relax DB constraints instead of mapping, add synonyms to the check constraint (requires dropping and recreating the constraint). **Not recommended**—keep DB canonical and normalize in code as we just did.
-
-**Done criteria**
-
-* No more `violates check constraint "trades_strategy_type_check_v2"`.
-* Button inserts into `public.trades` and returns to `/trades` highlighting the new row.
-* Prospective list shows it even without an `entry_date`.
-
----
-
-If you prefer the DB to accept shorthand values like `"PCS"` directly, I can give you a safe migration to **drop and recreate** the check constraint including those values—but mapping in code is cleaner and future-proof.
+create trigger update_ips_configurations_last_modified BEFORE
+update on ips_configurations for EACH row
+execute FUNCTION update_last_modified_column ();

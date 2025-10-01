@@ -184,24 +184,19 @@ export async function GET(request: NextRequest) {
       }, { status: 400 });
     }
 
+    console.log('[Trades API GET] Fetching trades for userId:', userId, 'status:', status);
+
     let query = supabase
       .from('trades')
       .select(`
         *,
-        ips_configurations(name, description),
+        ips_configurations!ips_id(name, description),
         trade_factors(
           factor_name,
           factor_value,
           source,
           confidence
-        ),
-        ips_score_calculations(
-          final_score,
-          factors_used,
-          targets_met,
-          target_percentage
-        ),
-        trade_closures(*)
+        )
       `)
       .eq('user_id', userId)
       .order('created_at', { ascending: false });

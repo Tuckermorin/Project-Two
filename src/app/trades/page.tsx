@@ -473,7 +473,10 @@ export default function TradesPage() {
         }
         return {
           id: row.id,
-          ips: { id: row.ips_id, name: row.investment_performance_systems?.name || "IPS" },
+          ips: {
+            id: row.ips_id,
+            name: row.ips_configurations?.name || row.investment_performance_systems?.name || "IPS"
+          },
           data: base,
           createdAt: row.created_at,
           score: row.ips_score || undefined,
@@ -742,6 +745,7 @@ export default function TradesPage() {
               setCurrentView("prospective");
             }}
             availableIPSs={activeIPSs.map((ips: any) => ({ id: ips.id, name: ips.name }))}
+            userId={userId}
           />
         )}
 

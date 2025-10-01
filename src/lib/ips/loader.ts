@@ -30,7 +30,7 @@ export async function loadActiveIPS(userId?: string): Promise<IPSConfig> {
     .from("ips_configurations")
     .select("*")
     .eq("is_active", true)
-    .order("updated_at", { ascending: false })
+    .order("last_modified", { ascending: false })
     .limit(1)
     .maybeSingle();
 
@@ -43,15 +43,15 @@ export async function loadActiveIPS(userId?: string): Promise<IPSConfig> {
   const { data: factors, error: facErr } = await supabaseAdmin
     .from("ips_factors")
     .select(`
-      factor_key,
+      factor_id,
+      factor_name,
       weight,
-      threshold,
-      direction,
-      enabled,
-      display_name,
-      description
+      target_value,
+      target_operator,
+      target_value_max,
+      enabled
     `)
-    .eq("ips_configuration_id", cfgId)
+    .eq("ips_id", cfgId)
     .eq("enabled", true);
 
   if (facErr) throw new Error(`IPS factors load failed: ${facErr.message}`);
@@ -59,15 +59,15 @@ export async function loadActiveIPS(userId?: string): Promise<IPSConfig> {
   const config: IPSConfig = {
     id: cfgId,
     name: cfgRow.name ?? "Active IPS",
-    version: cfgRow.version ?? null,
+    version: null,
     factors: (factors ?? []).map(f => ({
-      factor_key: f.factor_key,
-      weight: Number(f.weight ?? 0),
-      threshold: f.threshold == null ? null : Number(f.threshold),
-      direction: f.direction ?? null,
+      factor_key: f.factor_id, // Use factor_id as the key
+      weight: Number(f.weight ?? 0) / 10, // Normalize from 1-10 scale to 0-1
+      threshold: f.target_value == null ? null : Number(f.target_value),
+      direction: f.target_operator === "gte" ? "gte" : f.target_operator === "lte" ? "lte" : null,
       enabled: f.enabled ?? true,
-      display_name: f.display_name ?? null,
-      description: f.description ?? null,
+      display_name: f.factor_name ?? null,
+      description: null,
     })),
   };
 

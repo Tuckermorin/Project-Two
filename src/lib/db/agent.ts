@@ -101,3 +101,17 @@ export async function latestCandidates(runId: string) {
     .eq("run_id", runId)
     .order("symbol");
 }
+
+export async function persistReasoningChain(
+  runId: string,
+  candidateId: string,
+  chain: any
+) {
+  // Store reasoning chain in trade_candidates or a separate table if needed
+  // For now, we can store it as part of the candidate JSON
+  await supabase
+    .from("trade_candidates")
+    .update({ reasoning_chain: chain })
+    .eq("run_id", runId)
+    .eq("id", candidateId);
+}
