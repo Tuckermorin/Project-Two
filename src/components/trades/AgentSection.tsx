@@ -1,14 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight, List } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 
 type Candidate = {
@@ -87,6 +88,10 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [addingToProspective, setAddingToProspective] = useState(false);
+  const [watchlistDialogOpen, setWatchlistDialogOpen] = useState(false);
+  const [watchlistItems, setWatchlistItems] = useState<Array<{ symbol: string; company_name?: string }>>([]);
+  const [selectedWatchlistSymbols, setSelectedWatchlistSymbols] = useState<Set<string>>(new Set());
+  const [loadingWatchlist, setLoadingWatchlist] = useState(false);
 
   const handleAddSymbol = () => {
     const trimmed = symbolInput.trim().toUpperCase();
@@ -104,6 +109,58 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
     if (e.key === "Enter") {
       handleAddSymbol();
     }
+  };
+
+  const loadWatchlist = async () => {
+    setLoadingWatchlist(true);
+    try {
+      const res = await fetch("/api/watchlist");
+      const json = await res.json();
+      if (res.ok && json.data) {
+        setWatchlistItems(json.data);
+      }
+    } catch (e) {
+      console.error("Failed to load watchlist:", e);
+    } finally {
+      setLoadingWatchlist(false);
+    }
+  };
+
+  const handleOpenWatchlistDialog = () => {
+    loadWatchlist();
+    setWatchlistDialogOpen(true);
+  };
+
+  const handleSelectAllWatchlist = () => {
+    setSelectedWatchlistSymbols(new Set(watchlistItems.map(item => item.symbol)));
+  };
+
+  const handleDeselectAllWatchlist = () => {
+    setSelectedWatchlistSymbols(new Set());
+  };
+
+  const handleToggleWatchlistSymbol = (symbol: string) => {
+    const newSet = new Set(selectedWatchlistSymbols);
+    if (newSet.has(symbol)) {
+      newSet.delete(symbol);
+    } else {
+      newSet.add(symbol);
+    }
+    setSelectedWatchlistSymbols(newSet);
+  };
+
+  const handleApplyWatchlistSelection = () => {
+    const selectedSymbolsArray = Array.from(selectedWatchlistSymbols);
+    // Add only unique symbols that aren't already in the list
+    const newSymbols = [...symbols];
+    selectedSymbolsArray.forEach(sym => {
+      if (!newSymbols.includes(sym)) {
+        newSymbols.push(sym);
+      }
+    });
+    setSymbols(newSymbols);
+    setWatchlistDialogOpen(false);
+    setSelectedWatchlistSymbols(new Set());
   };
 
   async function runAgent() {
@@ -224,6 +281,14 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                 disabled={!symbolInput.trim()}
               >
                 Add
+              </Button>
+              <Button
+                onClick={handleOpenWatchlistDialog}
+                variant="outline"
+                className="whitespace-nowrap"
+              >
+                <List className="h-4 w-4 mr-2" />
+                Select from Watchlist
               </Button>
             </div>
 
@@ -651,6 +716,84 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
               </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Watchlist Selector Dialog */}
+      <Dialog open={watchlistDialogOpen} onOpenChange={setWatchlistDialogOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Select Symbols from Watchlist</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {loadingWatchlist ? (
+              <div className="text-center py-8 text-muted-foreground">
+                Loading watchlist...
+              </div>
+            ) : watchlistItems.length === 0 ? (
+              <div className="text-center py-8 text-muted-foreground">
+                Your watchlist is empty. Add symbols to your watchlist first.
+              </div>
+            ) : (
+              <>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleSelectAllWatchlist}
+                  >
+                    Select All
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleDeselectAllWatchlist}
+                  >
+                    Deselect All
+                  </Button>
+                  <div className="ml-auto text-sm text-muted-foreground">
+                    {selectedWatchlistSymbols.size} selected
+                  </div>
+                </div>
+                <div className="space-y-2 max-h-[400px] overflow-y-auto border rounded-md p-4">
+                  {watchlistItems.map((item) => (
+                    <div
+                      key={item.symbol}
+                      className="flex items-center space-x-3 p-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded"
+                    >
+                      <Checkbox
+                        id={`watchlist-${item.symbol}`}
+                        checked={selectedWatchlistSymbols.has(item.symbol)}
+                        onCheckedChange={() => handleToggleWatchlistSymbol(item.symbol)}
+                      />
+                      <Label
+                        htmlFor={`watchlist-${item.symbol}`}
+                        className="flex-1 cursor-pointer"
+                      >
+                        <div className="font-medium">{item.symbol}</div>
+                        {item.company_name && (
+                          <div className="text-xs text-muted-foreground">
+                            {item.company_name}
+                          </div>
+                        )}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setWatchlistDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleApplyWatchlistSelection}
+              disabled={selectedWatchlistSymbols.size === 0}
+            >
+              Add {selectedWatchlistSymbols.size} Symbol{selectedWatchlistSymbols.size !== 1 ? 's' : ''}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </Card>

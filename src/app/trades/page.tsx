@@ -362,6 +362,10 @@ export default function TradesPage() {
     inputs?: any;
     scoreSources?: { baseline: number | null; ai: number | null };
     scoring?: any;
+    adjustments?: any;
+    drivers?: any[];
+    benchmarks?: any;
+    playbook?: any[];
   };
   const [aiByTrade, setAiByTrade] = useState<Record<string, AIAnalysis | undefined>>({});
   const [aiOpenRows, setAiOpenRows] = useState<Set<string>>(new Set());
@@ -702,7 +706,7 @@ export default function TradesPage() {
       <div className="max-w-6xl mx-auto p-6">
         <div className="mb-8 flex items-start justify-between">
           <div>
-            <h1 className="text-3xl font-bold mb-2">Choose an IPS to Make a Trade</h1>
+            <h1 className="text-3xl font-bold mb-2">Place a Trade</h1>
             <p className="text-gray-600">Only active IPS configurations are shown</p>
           </div>
           <div className="flex gap-2">
@@ -727,7 +731,7 @@ export default function TradesPage() {
 
               // Convert candidate to TradeFormData
               const tradeData: TradeFormData = {
-                name: `AI: ${candidate.symbol} ${candidate.strategy.replace(/_/g, " ")}`,
+                name: candidate.symbol,
                 symbol: candidate.symbol,
                 contractType: "put-credit-spread",
                 expirationDate: candidate.contract_legs[0]?.expiry,
@@ -752,7 +756,6 @@ export default function TradesPage() {
               setCurrentView("prospective");
             }}
             availableIPSs={activeIPSs.map((ips: any) => ({ id: ips.id, name: ips.name }))}
-            userId={userId}
           />
         )}
 
@@ -941,7 +944,7 @@ export default function TradesPage() {
               trade: t.data,
               ipsName: t.ips?.name || t.ips?.id,
               strategyType: t.data.contractType,
-              factorValues: t.factorValues ?? null,
+              factorValues: { ...t.data.ipsFactors, ...t.data.apiFactors },
               score: t.score ?? null,
             }),
           });
@@ -1271,7 +1274,7 @@ export default function TradesPage() {
                                         <div className="text-xs text-gray-700">
                                           <div className="text-xs font-semibold text-gray-600 mb-1">Playbook</div>
                                           <div className="space-y-1">
-                                            {R.playbook.entries.slice(0, 4).map((entry, idx) => (
+                                            {Array.from(R.playbook.entries()).slice(0, 4).map((entry: any, idx: number) => (
                                               <div key={idx} className="border border-blue-200 bg-blue-50 rounded px-2 py-1">
                                                 <div className="font-medium">{entry.trigger}</div>
                                                 {entry.condition && <div>Condition: {entry.condition}</div>}

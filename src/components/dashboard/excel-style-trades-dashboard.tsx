@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2 } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2, Columns3 } from 'lucide-react'
 import { dispatchTradesUpdated } from '@/lib/events'
 import {
   DropdownMenu,
@@ -95,20 +95,17 @@ const allColumns: Column[] = [
 
 // Default visible columns
 const defaultColumns = [
-  'status', 'name', 'placed', 'currentPrice', 'expDate', 'dte', 'contractType', 
+  'status', 'name', 'placed', 'currentPrice', 'expDate', 'dte', 'contractType',
   'contracts', 'shortStrike', 'longStrike', 'creditReceived', 'spreadWidth',
-  'maxGain', 'maxLoss', 'percentCurrentToShort', 'deltaShortLeg', 
+  'maxGain', 'maxLoss', 'percentCurrentToShort', 'deltaShortLeg',
   'theta', 'vega', 'ivAtEntry', 'sector'
 ]
 
-// Simple view columns
-const simpleColumns = ['status', 'name', 'contractType', 'expDate', 'dte', 'maxGain', 'maxLoss', 'percentCurrentToShort', 'ipsScore']
-
 export default function ExcelStyleTradesDashboard() {
   // State
-  const [viewMode, setViewMode] = useState<'simple' | 'detailed'>('simple')
   const [showIPS, setShowIPS] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState(new Set(defaultColumns))
+  const [showColumnSelector, setShowColumnSelector] = useState(false)
   const [sortConfig, setSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null)
   const [filterText, setFilterText] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
@@ -377,7 +374,7 @@ export default function ExcelStyleTradesDashboard() {
     }
   }
 
-  // Get columns to show based on view mode and IPS
+  // Get columns to show based on IPS view
   const columnsToShow = React.useMemo(() => {
     if (showIPS && hasActiveIPS) {
       // Show IPS factor columns instead of trade columns
@@ -386,16 +383,15 @@ export default function ExcelStyleTradesDashboard() {
         label: factor
       }))
     }
-    
-    const baseColumns = viewMode === 'simple' ? simpleColumns : Array.from(visibleColumns)
-    const filtered = allColumns.filter(col => baseColumns.includes(col.key))
+
+    const filtered = allColumns.filter(col => visibleColumns.has(col.key))
     const statusIndex = filtered.findIndex(col => col.key === 'status')
     if (statusIndex > 0) {
       const [statusColumn] = filtered.splice(statusIndex, 1)
       filtered.unshift(statusColumn)
     }
     return filtered
-  }, [viewMode, showIPS, hasActiveIPS, activeIPSFactors, visibleColumns])
+  }, [showIPS, hasActiveIPS, activeIPSFactors, visibleColumns])
 
   if (loading && trades.length === 0) {
     return (
@@ -449,17 +445,6 @@ export default function ExcelStyleTradesDashboard() {
         </div>
         
         <div className="flex gap-2">
-          {/* View mode toggle */}
-          <Select value={viewMode} onValueChange={(value: 'simple' | 'detailed') => setViewMode(value)}>
-            <SelectTrigger className="w-32">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="simple">Simple</SelectItem>
-              <SelectItem value="detailed">Detailed</SelectItem>
-            </SelectContent>
-          </Select>
-          
           {/* IPS toggle */}
           <Button
             variant={showIPS ? "default" : "outline"}
@@ -469,15 +454,15 @@ export default function ExcelStyleTradesDashboard() {
             {showIPS ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
             IPS View
           </Button>
-          
+
           {/* Column selector */}
-          {viewMode === 'detailed' && !showIPS && (
-            <Button variant="outline" size="sm">
-              <Settings2 className="h-4 w-4 mr-2" />
+          {!showIPS && (
+            <Button variant="outline" size="sm" onClick={() => setShowColumnSelector(true)}>
+              <Columns3 className="h-4 w-4 mr-2" />
               Columns
             </Button>
           )}
-          
+
           {/* Add trade button */}
           <Button variant="outline" size="sm" onClick={() => (window.location.href = '/trades')}>
             <Calendar className="h-4 w-4 mr-2" />
@@ -740,6 +725,68 @@ export default function ExcelStyleTradesDashboard() {
           >
             Delete Trade
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Column Selector Dialog */}
+    <Dialog open={showColumnSelector} onOpenChange={setShowColumnSelector}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Select Columns to Display</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setVisibleColumns(new Set(allColumns.map(c => c.key)))}
+            >
+              Select All
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setVisibleColumns(new Set())}
+            >
+              Deselect All
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setVisibleColumns(new Set(defaultColumns))}
+            >
+              Reset to Default
+            </Button>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            {allColumns.map((column) => (
+              <div key={column.key} className="flex items-center space-x-2">
+                <Checkbox
+                  id={`col-${column.key}`}
+                  checked={visibleColumns.has(column.key)}
+                  onCheckedChange={(checked) => {
+                    const newSet = new Set(visibleColumns)
+                    if (checked) {
+                      newSet.add(column.key)
+                    } else {
+                      newSet.delete(column.key)
+                    }
+                    setVisibleColumns(newSet)
+                  }}
+                />
+                <Label
+                  htmlFor={`col-${column.key}`}
+                  className="text-sm font-normal cursor-pointer"
+                >
+                  {column.label}
+                </Label>
+              </div>
+            ))}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button onClick={() => setShowColumnSelector(false)}>Done</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

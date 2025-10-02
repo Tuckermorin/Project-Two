@@ -3,6 +3,37 @@ import { createClient } from "@/lib/supabase/server-client";
 import { v4 as uuidv4 } from "uuid";
 import { mapAgentToTradesStrategy } from "@/lib/trades/strategyMap";
 
+// Map strategy_type to contract_type (display format)
+function strategyToContractType(strategyType: string): string {
+  switch (strategyType) {
+    case "put_credit":
+    case "put-credit-spreads":
+      return "put-credit-spread";
+    case "call_credit":
+    case "call-credit-spreads":
+      return "call-credit-spread";
+    case "iron_condor":
+    case "iron-condors":
+      return "iron-condor";
+    case "covered_call":
+    case "covered-calls":
+      return "covered-call";
+    case "cash_secured_put":
+      return "cash-secured-put";
+    case "long-calls":
+      return "long-call";
+    case "long-puts":
+      return "long-put";
+    case "buy_hold":
+    case "buy-hold-stocks":
+      return "buy-hold";
+    case "vertical_spread":
+      return "vertical-spread";
+    default:
+      return strategyType;
+  }
+}
+
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
@@ -106,8 +137,8 @@ export async function POST(req: NextRequest) {
       factors_met,
       total_factors,
       evaluation_notes,
-      name: body.name ?? `AI: ${symbol} ${strategy_type}`,
-      contract_type: shortLeg?.right === "P" ? "put" : shortLeg?.right === "C" ? "call" : null,
+      name: body.name ?? symbol,
+      contract_type: strategyToContractType(strategy_type),
       number_of_contracts: body.number_of_contracts ?? body.contracts ?? 1,
       // leave exit fields null
     };

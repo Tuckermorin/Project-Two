@@ -202,6 +202,14 @@ export async function GET(request: NextRequest) {
           factor_value,
           source,
           confidence
+        ),
+        trade_closures(
+          close_method,
+          close_date,
+          cost_to_close_per_spread,
+          realized_pl,
+          realized_pl_percent,
+          ips_name
         )
       `)
       .order('created_at', { ascending: false });
