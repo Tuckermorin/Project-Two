@@ -194,8 +194,29 @@ async function engineerFeatures(state: AgentState): Promise<Partial<AgentState>>
 
 // Node 4: GenerateCandidates
 async function generateCandidates(state: AgentState): Promise<Partial<AgentState>> {
-  console.log("[GenerateCandidates] Generating trade ideas");
+  console.log("[GenerateCandidates] Generating IPS-optimized trade ideas");
   const candidates: any[] = [];
+
+  // Get IPS delta preferences if available
+  let deltaMin = -0.40;
+  let deltaMax = -0.05;
+
+  if (state.ipsConfig?.factors) {
+    const deltaFactor = state.ipsConfig.factors.find(f =>
+      f.factor_key === "delta" || f.factor_key === "delta_max"
+    );
+    if (deltaFactor && deltaFactor.threshold) {
+      // If IPS specifies delta range, use it (e.g., -0.20 to -0.10)
+      if (deltaFactor.direction === "lte") {
+        deltaMax = deltaFactor.threshold; // e.g., -0.10
+        deltaMin = deltaFactor.threshold * 2; // e.g., -0.20
+      } else if (deltaFactor.direction === "gte") {
+        deltaMin = deltaFactor.threshold;
+        deltaMax = deltaFactor.threshold / 2;
+      }
+      console.log(`[GenerateCandidates] Using IPS delta range: ${deltaMin.toFixed(2)} to ${deltaMax.toFixed(2)}`);
+    }
+  }
 
   for (const symbol of state.symbols) {
     const data = state.marketData[symbol];
@@ -207,91 +228,106 @@ async function generateCandidates(state: AgentState): Promise<Partial<AgentState
 
     if (!currentPrice) continue;
 
-    // Filter for put credit spreads (example strategy)
+    // Filter for put credit spreads
     const puts = contracts.filter((c: any) => c.option_type === "P" && c.expiry);
 
     // Group by expiration
     const expirations = [...new Set(puts.map((p: any) => p.expiry))];
 
     for (const expiry of expirations.slice(0, 3)) {
-      // Limit to 3 expirations
       const expiryPuts = puts.filter((p: any) => p.expiry === expiry);
 
-      // Find options with strike < current price (OTM puts)
-      // Filter to only use puts that are sufficiently out of the money
-      // Avoid ATM options (within 2% of current price) which have high delta risk
-      const minStrike = currentPrice * 0.85; // At least 15% OTM
-      const maxStrike = currentPrice * 0.98; // No closer than 2% to current price
-
+      // Filter OTM puts with proper delta ranges
       const otmPuts = expiryPuts
         .filter((p: any) => {
           if (!p.strike || !p.bid || !p.ask) return false;
-          if (p.strike >= maxStrike) return false; // Too close to current price
-          if (p.strike < minStrike) return false; // Too far OTM
-          // Filter out options with very high delta (>0.4) if available
-          if (p.delta && Math.abs(p.delta) > 0.4) return false;
-          return p.strike < currentPrice;
+          if (p.strike >= currentPrice) return false; // Must be OTM
+
+          // Apply IPS delta filter if delta data available
+          if (p.delta) {
+            const absDelta = Math.abs(p.delta);
+            if (absDelta < Math.abs(deltaMax) || absDelta > Math.abs(deltaMin)) {
+              return false; // Outside IPS delta range
+            }
+          }
+
+          return true;
         })
-        .sort((a: any, b: any) => b.strike - a.strike);
+        .sort((a: any, b: any) => {
+          // Sort by delta (closest to IPS target first)
+          const targetDelta = (deltaMin + deltaMax) / 2;
+          const aDiff = Math.abs(Math.abs(a.delta || 0) - Math.abs(targetDelta));
+          const bDiff = Math.abs(Math.abs(b.delta || 0) - Math.abs(targetDelta));
+          return aDiff - bDiff;
+        });
 
       if (otmPuts.length < 2) continue;
 
-      // Select short and long strikes
-      // Short put should be highest available OTM strike (but not ATM)
-      // Long put should be 2-3 strikes lower for reasonable spread width
-      const shortPut = otmPuts[0];
-      const longPut = otmPuts[Math.min(2, otmPuts.length - 1)];
+      // Generate multiple candidates with varying strike selections
+      // This creates a range from IPS-optimal (lower delta) to higher return (higher delta)
+      const candidatesPerExpiry = Math.min(3, Math.floor(otmPuts.length / 2));
 
-      // Validate spread quality
-      const width = shortPut.strike - longPut.strike;
-      if (width <= 0) continue; // Invalid spread
+      for (let i = 0; i < candidatesPerExpiry; i++) {
+        const shortPutIdx = i * 2; // Spread them out
+        const longPutIdx = Math.min(shortPutIdx + 2, otmPuts.length - 1);
 
-      const entryMid = ((shortPut.bid + shortPut.ask) / 2) - ((longPut.bid + longPut.ask) / 2);
-      if (entryMid <= 0) continue; // Should receive a credit
+        if (shortPutIdx >= otmPuts.length || longPutIdx >= otmPuts.length) break;
 
-      const maxProfit = entryMid;
-      const maxLoss = width - entryMid;
-      const breakeven = shortPut.strike - entryMid;
+        const shortPut = otmPuts[shortPutIdx];
+        const longPut = otmPuts[longPutIdx];
 
-      // Better risk/reward check - avoid trades where max loss is much greater than max profit
-      const riskRewardRatio = maxProfit / maxLoss;
-      if (riskRewardRatio < 0.15) continue; // Skip if risk/reward is too poor
+        // Validate spread quality
+        const width = shortPut.strike - longPut.strike;
+        if (width <= 0) continue;
 
-      // Compute est_pop from greeks if available, otherwise use approximation
-      let estPop = 0.7; // Default assumption
-      if (shortPut.delta) {
-        // POP is approximately (1 - abs(delta)) for short puts
-        estPop = 1 - Math.abs(shortPut.delta);
+        const entryMid = ((shortPut.bid + shortPut.ask) / 2) - ((longPut.bid + longPut.ask) / 2);
+        if (entryMid <= 0) continue;
+
+        const maxProfit = entryMid;
+        const maxLoss = width - entryMid;
+        const breakeven = shortPut.strike - entryMid;
+
+        const riskRewardRatio = maxProfit / maxLoss;
+        if (riskRewardRatio < 0.15) continue;
+
+        // Compute POP from delta
+        let estPop = 0.7;
+        if (shortPut.delta) {
+          estPop = 1 - Math.abs(shortPut.delta);
+        }
+
+        candidates.push({
+          id: uuidv4(),
+          symbol,
+          strategy: "put_credit_spread",
+          contract_legs: [
+            {
+              type: "SELL",
+              right: "P",
+              strike: shortPut.strike,
+              expiry: shortPut.expiry,
+              delta: shortPut.delta,
+            },
+            {
+              type: "BUY",
+              right: "P",
+              strike: longPut.strike,
+              expiry: longPut.expiry,
+              delta: longPut.delta,
+            },
+          ],
+          entry_mid: entryMid,
+          est_pop: estPop,
+          breakeven,
+          max_loss: maxLoss,
+          max_profit: maxProfit,
+          guardrail_flags: {},
+        });
       }
-
-      candidates.push({
-        id: uuidv4(),
-        symbol,
-        strategy: "put_credit_spread",
-        contract_legs: [
-          {
-            type: "SELL",
-            right: "P",
-            strike: shortPut.strike,
-            expiry: shortPut.expiry,
-          },
-          {
-            type: "BUY",
-            right: "P",
-            strike: longPut.strike,
-            expiry: longPut.expiry,
-          },
-        ],
-        entry_mid: entryMid,
-        est_pop: estPop,
-        breakeven,
-        max_loss: maxLoss,
-        max_profit: maxProfit,
-        guardrail_flags: {},
-      });
     }
   }
 
+  console.log(`[GenerateCandidates] Generated ${candidates.length} IPS-optimized candidates`);
   return { candidates };
 }
 
@@ -465,6 +501,13 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
     c.detailed_analysis.ips_factors = [];
     c.detailed_analysis.ips_name = state.ipsConfig?.name || "Unknown IPS";
 
+    console.log(`[ScoreIPS] Candidate ${c.symbol} - IPS check:`, {
+      has_ipsConfig: !!state.ipsConfig,
+      ips_name: state.ipsConfig?.name,
+      has_factors: !!state.ipsConfig?.factors,
+      factors_count: state.ipsConfig?.factors?.length || 0,
+    });
+
     // Add fundamental data from API
     const fundamentals = state.fundamentalData?.[c.symbol];
     if (fundamentals) {
@@ -491,6 +534,7 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
 
     // If we have IPS config, use it to build comprehensive factor comparison
     if (state.ipsConfig && state.ipsConfig.factors) {
+      console.log(`[ScoreIPS] Building IPS factors for ${c.symbol}, have ${state.ipsConfig.factors.length} IPS factors`);
       const features = state.features[c.symbol] || {};
 
       for (const ipsFactor of state.ipsConfig.factors) {
@@ -500,12 +544,22 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
         const threshold = ipsFactor.threshold;
         const direction = ipsFactor.direction;
 
+        console.log(`[ScoreIPS] Processing factor: ${factorName}, key: ${factorKey}, threshold: ${threshold}, direction: ${direction}`);
+
         // Get actual value from features or reasoning chain
         let actualValue: any = features[factorKey];
 
         // Check reasoning chain for more accurate value
         if (c.reasoning_chain?.ips_compliance?.factor_scores?.[factorKey]) {
           actualValue = c.reasoning_chain.ips_compliance.factor_scores[factorKey].value;
+        }
+
+        // For delta, use the actual contract delta if available
+        if (factorKey === "delta" || factorKey === "delta_max") {
+          const shortLeg = c.contract_legs?.find((l: any) => l.type === "SELL");
+          if (shortLeg?.delta) {
+            actualValue = shortLeg.delta;
+          }
         }
 
         // Determine target display
@@ -718,17 +772,16 @@ Be factual and direct. Reference the actual data (IPS fit %, news sentiment, spe
 
       // Check if trade is out of IPS (score < 60) and generate justification
       if (ipsScore < 60) {
-        const justificationPrompt = `This ${c.symbol} ${c.strategy.replace(/_/g, " ")} trade only scores ${ipsFitPct}% on the IPS criteria, which is below the preferred threshold of 60%.
+        const justificationPrompt = `You are a seasoned options trader reviewing this ${c.symbol} ${c.strategy.replace(/_/g, " ")} trade that scores ${ipsFitPct}% on the IPS criteria (below the 60% threshold).
 
-Key factors that are concerning:
-${factorHighlights.filter((h) => h.includes("low") || h.includes("limited") || h.includes("risk")).join(", ")}
+Key concerns: ${factorHighlights.filter((h) => h.includes("low") || h.includes("limited") || h.includes("risk")).join(", ") || "standard spread risk"}
 
-Despite this, the AI is suggesting this trade. In 2-3 sentences, explain:
-1. Why this trade might still be valuable despite not meeting IPS criteria
-2. What specific opportunity or edge makes it worth considering
-3. What conditions would need to be true for this to be a good trade
+Provide a professional assessment in 2-3 sentences covering:
+- Why this trade might still offer value despite the lower IPS score
+- The specific edge or opportunity that makes it worth considering
+- What market conditions would make this trade attractive
 
-Be honest - if there's no compelling reason, say so directly.`;
+Write as if you're advising a colleague. Be direct and honest - if the risk/reward isn't compelling, say so.`;
 
         try {
           const justification = await rationaleLLM(justificationPrompt);
@@ -765,6 +818,12 @@ async function selectTopK(state: AgentState): Promise<Partial<AgentState>> {
 
   // Persist candidates
   for (const c of selected) {
+    console.log(`[SelectTopK] Persisting candidate ${c.symbol}:`, {
+      has_detailed_analysis: !!c.detailed_analysis,
+      has_ips_factors: !!c.detailed_analysis?.ips_factors,
+      ips_factors_count: c.detailed_analysis?.ips_factors?.length || 0,
+      ips_name: c.detailed_analysis?.ips_name || 'N/A',
+    });
     await db.persistCandidate(state.runId, c);
   }
 
@@ -778,8 +837,11 @@ export function buildOptionsAgentGraph() {
       runId: null,
       mode: null,
       symbols: null,
+      ipsId: null,
+      ipsConfig: null,
       asof: null,
       marketData: null,
+      fundamentalData: null,
       macroData: null,
       features: null,
       candidates: null,

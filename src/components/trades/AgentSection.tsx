@@ -185,6 +185,18 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Run failed");
 
+      console.log(`[AgentSection] Received ${json.selected?.length || 0} candidates from API`);
+      if (json.selected && json.selected.length > 0) {
+        const firstCand = json.selected[0];
+        console.log(`[AgentSection] First candidate check:`, {
+          symbol: firstCand.symbol,
+          has_detailed_analysis: !!firstCand.detailed_analysis,
+          has_ips_factors: !!firstCand.detailed_analysis?.ips_factors,
+          ips_factors_count: firstCand.detailed_analysis?.ips_factors?.length || 0,
+          ips_name: firstCand.detailed_analysis?.ips_name || 'N/A',
+        });
+      }
+
       setRunId(json.runId || null);
       setCands(json.selected || []);
     } catch (e: any) {
@@ -526,9 +538,12 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                               <td className="py-2 px-3 text-muted-foreground">{factor.weight || "N/A"}</td>
                               <td className="py-2 px-3">
                                 <Badge
-                                  variant={
-                                    factor.status === "pass" ? "default" :
-                                    factor.status === "warning" ? "secondary" : "destructive"
+                                  className={
+                                    factor.status === "pass"
+                                      ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
+                                      : factor.status === "warning"
+                                      ? "bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200"
+                                      : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
                                   }
                                 >
                                   {factor.status === "pass" ? "✓ Pass" :
@@ -679,11 +694,14 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                   )}
 
                   {selectedCandidate.detailed_analysis?.out_of_ips_justification && (
-                    <div className="border-l-4 border-amber-500 bg-amber-50 dark:bg-amber-900/20 p-4">
-                      <h4 className="text-sm font-medium mb-2 text-amber-900 dark:text-amber-200">
-                        ⚠️ Out-of-IPS Justification
+                    <div className="border-l-4 border-blue-400 bg-blue-50 dark:bg-blue-900/10 p-5 rounded-r-lg">
+                      <h4 className="text-sm font-semibold mb-3 text-blue-900 dark:text-blue-300 flex items-center gap-2">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                        Professional Assessment
                       </h4>
-                      <p className="text-sm text-amber-800 dark:text-amber-300">
+                      <p className="text-sm leading-relaxed text-gray-700 dark:text-gray-300">
                         {selectedCandidate.detailed_analysis.out_of_ips_justification}
                       </p>
                     </div>
