@@ -10,7 +10,9 @@
       "Bash(npm install:*)",
       "Bash(git add:*)",
       "Read(//mnt/c/Users/tucker.morin/OneDrive/**)",
-      "Bash(ls:*)"
+      "Bash(ls:*)",
+      "Bash(psql:*)",
+      "Bash(npx tsx:*)"
     ],
     "deny": [],
     "ask": []

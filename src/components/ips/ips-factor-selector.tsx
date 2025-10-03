@@ -1,26 +1,34 @@
-/**
- * Fixed IPS Factor Selector Component with API Support Indicators
- * Copy this into: src/components/ips/ips-factor-selector.tsx
- */
+"use client"
 
 import React, { useState, useMemo } from 'react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { 
-  ArrowLeft, 
-  ArrowRight, 
-  Search, 
-  Calculator, 
-  Users, 
-  TrendingUp, 
-  Database,
-  Sparkles,
-  CheckCircle,
-  AlertCircle
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import { Slider } from '@/components/ui/slider';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  ArrowLeft,
+  ArrowRight,
+  AlertCircle,
+  Zap,
+  Info,
+  Search,
+  X,
+  Plus
 } from 'lucide-react';
 
 interface FactorDefinition {
@@ -31,12 +39,16 @@ interface FactorDefinition {
   data_type: string;
   unit: string;
   source?: string;
+  description?: string;
+  collection_method?: 'api' | 'manual' | 'calculated';
 }
 
-interface FilteredFactors {
-  raw: FactorDefinition[];
-  grouped: Record<string, Record<string, FactorDefinition[]>>;
-  recommendedFactors?: string[];
+interface FactorConfiguration {
+  factorName: string;
+  weight: number;
+  targetOperator: 'gte' | 'lte' | 'eq' | 'range';
+  targetValue: number | null;
+  targetValueMax?: number | null;
 }
 
 interface IPSFactorSelectorProps {
@@ -47,6 +59,8 @@ interface IPSFactorSelectorProps {
   };
   selectedFactors: Set<string>;
   onFactorSelection: (selectedFactors: Set<string>) => void;
+  factorConfigurations: Record<string, any>;
+  onFactorConfiguration: (configurations: Record<string, any>) => void;
   onNext: () => void;
   onBack: () => void;
 }
@@ -55,186 +69,123 @@ export function IPSFactorSelector({
   factorDefinitions,
   selectedFactors,
   onFactorSelection,
+  factorConfigurations,
+  onFactorConfiguration,
   onNext,
   onBack
 }: IPSFactorSelectorProps) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [showRecommendedOnly, setShowRecommendedOnly] = useState(false);
-  const [selectedTab, setSelectedTab] = useState('quantitative');
 
-  const filteredFactors: FilteredFactors | null = useMemo(() => {
-    if (!factorDefinitions?.availableFactors) return null;
+  // Group factors by category
+  const factorsByCategory = useMemo(() => {
+    if (!factorDefinitions?.availableFactors) return {};
 
-    let factors = factorDefinitions.availableFactors;
+    // Deduplicate by name
+    const seenNames = new Set<string>();
+    const uniqueFactors = factorDefinitions.availableFactors.filter(factor => {
+      if (seenNames.has(factor.name)) return false;
+      seenNames.add(factor.name);
+      return true;
+    });
 
     // Filter by search query
-    if (searchQuery) {
-      factors = factors.filter(factor =>
-        factor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        factor.category.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    }
+    const filteredFactors = searchQuery
+      ? uniqueFactors.filter(factor =>
+          factor.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          factor.description?.toLowerCase().includes(searchQuery.toLowerCase())
+        )
+      : uniqueFactors;
 
-    // Filter by recommended only if enabled
-    if (showRecommendedOnly && factorDefinitions.recommendedFactors) {
-      factors = factors.filter(factor => 
-        factorDefinitions.recommendedFactors!.includes(factor.name)
-      );
-    }
-    
-    // Group filtered factors
-    const grouped = factors.reduce((acc: any, factor) => {
-      if (!acc[factor.type]) acc[factor.type] = {};
-      if (!acc[factor.type][factor.category]) acc[factor.type][factor.category] = [];
-      acc[factor.type][factor.category].push(factor);
-      return acc;
-    }, {});
+    // Group by category
+    const grouped: Record<string, FactorDefinition[]> = {};
+    filteredFactors.forEach(factor => {
+      if (!grouped[factor.category]) {
+        grouped[factor.category] = [];
+      }
+      grouped[factor.category].push(factor);
+    });
 
-    return {
-      raw: factors,
-      grouped,
-      recommendedFactors: factorDefinitions.recommendedFactors
-    };
-  }, [factorDefinitions, searchQuery, showRecommendedOnly]);
+    return grouped;
+  }, [factorDefinitions, searchQuery]);
 
-  const handleFactorToggle = (factorName: string) => {
+  const toggleFactor = (factorName: string) => {
     const newSelected = new Set(selectedFactors);
     if (newSelected.has(factorName)) {
       newSelected.delete(factorName);
+      // Remove configuration when factor is deselected
+      const newConfigs = { ...factorConfigurations };
+      delete newConfigs[factorName];
+      onFactorConfiguration(newConfigs);
     } else {
       newSelected.add(factorName);
+      // Initialize default configuration
+      const newConfigs = { ...factorConfigurations };
+      newConfigs[factorName] = {
+        weight: 1,
+        targetOperator: 'gte',
+        targetValue: null,
+        targetValueMax: null,
+      };
+      onFactorConfiguration(newConfigs);
     }
     onFactorSelection(newSelected);
   };
 
-  const selectAllRecommended = () => {
-    if (!filteredFactors?.recommendedFactors) return;
-    
-    const newSelected = new Set(selectedFactors);
-    filteredFactors.recommendedFactors.forEach(factorName => {
-      // Only add if the factor exists in our filtered results
-      const factorExists = filteredFactors.raw.some(f => f.name === factorName);
-      if (factorExists) {
-        newSelected.add(factorName);
-      }
-    });
-    onFactorSelection(newSelected);
+  const updateFactorConfig = (factorName: string, updates: Partial<FactorConfiguration>) => {
+    const newConfigs = { ...factorConfigurations };
+    const existing = newConfigs[factorName] || {
+      weight: 1,
+      targetOperator: 'gte' as const,
+      targetValue: null,
+      targetValueMax: null,
+    };
+    newConfigs[factorName] = { ...existing, ...updates };
+    onFactorConfiguration(newConfigs);
   };
 
-  const clearAllSelections = () => {
-    onFactorSelection(new Set());
+  const getFactorDetails = (factorName: string): FactorDefinition | undefined => {
+    return factorDefinitions.availableFactors.find(f => f.name === factorName);
   };
 
-  const getSelectedCountByType = (type: string) => {
-    if (!filteredFactors?.grouped[type]) return 0;
-    
-    return Object.values(filteredFactors.grouped[type])
-      .flat()
-      .filter(factor => selectedFactors.has(factor.name))
-      .length;
-  };
+  const selectedFactorsList = useMemo(() => {
+    return Array.from(selectedFactors)
+      .map(name => getFactorDetails(name))
+      .filter((f): f is FactorDefinition => f !== undefined);
+  }, [selectedFactors, factorDefinitions]);
 
-  const getTabIcon = (type: string) => {
-    switch (type) {
-      case 'quantitative': return <Calculator className="h-4 w-4" />;
-      case 'qualitative': return <Users className="h-4 w-4" />;
-      case 'options': return <TrendingUp className="h-4 w-4" />;
-      default: return <Database className="h-4 w-4" />;
-    }
-  };
+  const getCollectionMethodBadge = (factor: FactorDefinition) => {
+    const method = factor.collection_method || (factor.source ? 'api' : 'manual');
 
-  // Enhanced source badge - simplified without API indicators
-  const getSourceBadge = (factor: FactorDefinition) => {
-    if (factor.source === 'alpha_vantage' || factor.source === 'alpha_vantage_options') {
-      const label = factor.source === 'alpha_vantage_options' ? 'Alpha Vantage Options' : 'Alpha Vantage';
-      return <Badge variant="outline" className="text-xs bg-green-50 text-green-700">{label}</Badge>;
+    if (method === 'api') {
+      return (
+        <Badge variant="outline" className="text-xs bg-green-50 text-green-700 border-green-200 flex items-center gap-1">
+          <Zap className="h-3 w-3" />
+          API
+        </Badge>
+      );
+    } else if (method === 'manual') {
+      return (
+        <Badge variant="outline" className="text-xs bg-orange-50 text-orange-700 border-orange-200 flex items-center gap-1">
+          <AlertCircle className="h-3 w-3" />
+          Manual
+        </Badge>
+      );
+    } else if (method === 'calculated') {
+      return (
+        <Badge variant="outline" className="text-xs bg-blue-50 text-blue-700 border-blue-200 flex items-center gap-1">
+          Calculated
+        </Badge>
+      );
     }
     return null;
   };
 
-  const isFactorRecommended = (factorName: string) => {
-    return filteredFactors?.recommendedFactors?.includes(factorName) || false;
+  const clearAllSelections = () => {
+    onFactorSelection(new Set());
+    setFactorConfigs(new Map());
   };
 
-  const renderFactorSection = (title: string, categories: Record<string, FactorDefinition[]>, icon: React.ReactNode) => (
-    <div className="space-y-4">
-      <div className="flex items-center gap-2 mb-4">
-        {icon}
-        <h3 className="text-lg font-semibold">{title}</h3>
-        <Badge variant="secondary">
-          {Object.values(categories).flat().filter(f => selectedFactors.has(f.name)).length} selected
-        </Badge>
-      </div>
-      
-      {Object.keys(categories).length === 0 ? (
-        <div className="text-center py-8 text-gray-500">
-          <Database className="h-12 w-12 mx-auto mb-3 text-gray-300" />
-          <p>No factors available for this strategy combination</p>
-        </div>
-      ) : (
-        Object.entries(categories).map(([categoryName, categoryFactors]) => (
-          <Card key={categoryName} className="border border-gray-200">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-gray-700">
-                {categoryName}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div className="grid gap-3">
-                {categoryFactors.map((factor) => (
-                  <div
-                    key={factor.id}
-                    className={`flex items-start gap-3 p-3 rounded-lg border transition-colors ${
-                      selectedFactors.has(factor.name)
-                        ? 'bg-blue-50 border-blue-200'
-                        : 'bg-white border-gray-200 hover:bg-gray-50'
-                    }`}
-                  >
-                    <Checkbox
-                      checked={selectedFactors.has(factor.name)}
-                      onCheckedChange={() => handleFactorToggle(factor.name)}
-                      className="mt-0.5"
-                    />
-                    
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <h4 className="text-sm font-medium text-gray-900">
-                          {factor.name}
-                        </h4>
-                        {isFactorRecommended(factor.name) && (
-                          <Badge variant="outline" className="text-xs bg-amber-50 text-amber-700 flex items-center gap-1">
-                            <Sparkles className="h-3 w-3" />
-                            Recommended
-                          </Badge>
-                        )}
-                      </div>
-                      
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs text-gray-500">
-                          {factor.data_type} • {factor.unit}
-                        </span>
-                        {getSourceBadge(factor)}
-                      </div>
-                      
-                      {/* Manual input indicator for non-Alpha Vantage factors */}
-                      {!factor.source && (
-                        <div className="flex items-center gap-1 text-xs">
-                          <AlertCircle className="h-3 w-3 text-orange-600" />
-                          <span className="text-orange-600">Requires manual input</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-        ))
-      )}
-    </div>
-  );
-
-  if (!filteredFactors) {
+  if (!factorDefinitions?.availableFactors) {
     return (
       <div className="max-w-4xl mx-auto">
         <div className="text-center py-12">
@@ -246,155 +197,303 @@ export function IPSFactorSelector({
   }
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6">
-      {/* Header with Search and Controls */}
-      <div className="space-y-4">
-        <div className="text-center">
-          <h2 className="text-2xl font-bold mb-2">Select Factors</h2>
-          <p className="text-gray-600">
-            Choose the factors that will determine your investment decisions
-          </p>
-        </div>
+    <div className="max-w-7xl mx-auto space-y-6">
+      {/* Header */}
+      <div className="space-y-2">
+        <h2 className="text-2xl font-bold">Factor Selection & Configuration</h2>
+        <p className="text-gray-600">
+          Select factors and configure their weights and target values for your Investment Policy Statement.
+        </p>
+      </div>
 
-        {/* Search and Filter Controls */}
-        <div className="flex flex-col sm:flex-row gap-4 items-center">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Search factors..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10"
-            />
-          </div>
-          
+      {/* Summary Bar */}
+      <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+        <div className="flex items-center justify-between">
           <div className="flex items-center gap-4">
-            {filteredFactors.recommendedFactors && filteredFactors.recommendedFactors.length > 0 && (
-              <>
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="show-recommended"
-                    checked={showRecommendedOnly}
-                    onCheckedChange={checked => setShowRecommendedOnly(checked === true)}
-                  />
-                  <label htmlFor="show-recommended" className="text-sm text-gray-700">
-                    Show recommended only
-                  </label>
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={selectAllRecommended}
-                  className="flex items-center gap-2"
-                >
-                  <Sparkles className="h-4 w-4" />
-                  Select Recommended
-                </Button>
-              </>
-            )}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={clearAllSelections}
-            >
-              Clear All
-            </Button>
+            <span className="text-sm font-medium text-blue-900">
+              {selectedFactors.size} factors selected
+            </span>
           </div>
-        </div>
-
-        {/* Selection Summary */}
-        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <span className="text-sm font-medium text-blue-900">
-                {selectedFactors.size} factors selected
-              </span>
-              {filteredFactors.recommendedFactors && (
-                <span className="text-xs text-blue-700">
-                  {filteredFactors.recommendedFactors.filter(name => selectedFactors.has(name)).length} of {filteredFactors.recommendedFactors.length} recommended
-                </span>
-              )}
-            </div>
+          <div className="flex items-center gap-4">
             <div className="flex items-center gap-2 text-xs text-blue-700">
               <div className="flex items-center gap-1">
-                <CheckCircle className="h-3 w-3" />
-                <span>Alpha Vantage = API</span>
+                <Zap className="h-3 w-3" />
+                <span>API = Auto-collected</span>
               </div>
               <div className="flex items-center gap-1">
                 <AlertCircle className="h-3 w-3" />
-                <span>No badge = Manual</span>
+                <span>Manual = User input</span>
               </div>
             </div>
+            {selectedFactors.size > 0 && (
+              <Button variant="outline" size="sm" onClick={clearAllSelections}>
+                Clear All
+              </Button>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Factor Tabs */}
-      <Tabs value={selectedTab} onValueChange={setSelectedTab}>
-        <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="quantitative" className="flex items-center gap-2">
-            <Calculator className="h-4 w-4" />
-            Quantitative ({getSelectedCountByType('quantitative')})
-          </TabsTrigger>
-          <TabsTrigger value="qualitative" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Qualitative ({getSelectedCountByType('qualitative')})
-          </TabsTrigger>
-          <TabsTrigger value="options" className="flex items-center gap-2">
-            <TrendingUp className="h-4 w-4" />
-            Options ({getSelectedCountByType('options')})
-          </TabsTrigger>
-        </TabsList>
+      {/* Two-Column Layout */}
+      <div className="grid grid-cols-2 gap-6">
+        {/* LEFT COLUMN: Available Factors */}
+        <Card>
+          <CardHeader className="pb-4">
+            <CardTitle className="text-lg">Available Factors</CardTitle>
+            <div className="relative mt-2">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
+              <Input
+                type="text"
+                placeholder="Search factors..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-y-auto h-[600px] space-y-6 pr-2">
+              {Object.entries(factorsByCategory).map(([category, factors]) => (
+                <div key={category}>
+                  <h4 className="font-semibold text-gray-900 mb-3 text-sm uppercase tracking-wide sticky top-0 bg-white pb-2">
+                    {category}
+                  </h4>
+                  <div className="space-y-2">
+                    {factors.map(factor => (
+                      <TooltipProvider key={factor.id}>
+                        <div className="flex items-start gap-2 p-2 hover:bg-gray-50 rounded-md transition-colors">
+                          <Checkbox
+                            id={factor.id}
+                            checked={selectedFactors.has(factor.name)}
+                            onCheckedChange={() => toggleFactor(factor.name)}
+                            className="mt-0.5"
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2">
+                              <label
+                                htmlFor={factor.id}
+                                className="text-sm font-medium cursor-pointer"
+                              >
+                                {factor.name}
+                              </label>
+                              {factor.description && (
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Info className="h-3.5 w-3.5 text-gray-400 hover:text-gray-600 cursor-help flex-shrink-0" />
+                                  </TooltipTrigger>
+                                  <TooltipContent side="right" className="max-w-xs">
+                                    <p className="text-xs">{factor.description}</p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              )}
+                              {getCollectionMethodBadge(factor)}
+                            </div>
+                            <div className="text-xs text-gray-500 mt-0.5">
+                              {factor.data_type} • {factor.unit}
+                            </div>
+                          </div>
+                        </div>
+                      </TooltipProvider>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
 
-        <TabsContent value="quantitative" className="mt-6">
-          {renderFactorSection(
-            'Quantitative Factors', 
-            filteredFactors.grouped.quantitative || {}, 
-            <Calculator className="h-5 w-5 text-blue-600" />
-          )}
-        </TabsContent>
+        {/* RIGHT COLUMN: Selected Factors with Configuration */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Selected Factors ({selectedFactors.size})</CardTitle>
+            <CardDescription>Configure weights and target values</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="overflow-y-auto h-[600px] space-y-3 pr-2">
+              {selectedFactorsList.length === 0 ? (
+                <div className="text-center py-20 text-gray-400">
+                  <Plus className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p className="text-sm">Select factors from the left to configure them</p>
+                </div>
+              ) : (
+                selectedFactorsList.map(factor => {
+                  const config = factorConfigurations[factor.name];
+                  return (
+                    <div key={factor.id} className="border rounded-lg p-4 bg-white shadow-sm">
+                      <div className="flex items-start justify-between mb-3">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-gray-900 text-sm">{factor.name}</span>
+                            {getCollectionMethodBadge(factor)}
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">{factor.category}</p>
+                        </div>
+                        <button
+                          onClick={() => toggleFactor(factor.name)}
+                          className="text-red-600 hover:text-red-700 flex-shrink-0 ml-2"
+                        >
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
 
-        <TabsContent value="qualitative" className="mt-6">
-          {renderFactorSection(
-            'Qualitative Factors', 
-            filteredFactors.grouped.qualitative || {}, 
-            <Users className="h-5 w-5 text-green-600" />
-          )}
-        </TabsContent>
+                      {/* Configuration Inputs */}
+                      <div className="space-y-3">
+                        {/* Weight Slider */}
+                        <div>
+                          <div className="flex items-center justify-between mb-2">
+                            <label className="text-xs font-medium text-gray-700">
+                              Weight
+                            </label>
+                            <span className="text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                              {config?.weight || 1}
+                            </span>
+                          </div>
+                          <Slider
+                            value={[config?.weight || 1]}
+                            onValueChange={(values) => {
+                              updateFactorConfig(factor.name, { weight: values[0] });
+                            }}
+                            min={1}
+                            max={10}
+                            step={1}
+                            className="w-full"
+                          />
+                          <div className="flex justify-between mt-1">
+                            <span className="text-xs text-gray-500">1 (Low)</span>
+                            <span className="text-xs text-gray-500">10 (High)</span>
+                          </div>
+                        </div>
 
-        <TabsContent value="options" className="mt-6">
-          {renderFactorSection(
-            'Options Factors', 
-            filteredFactors.grouped.options || {}, 
-            <TrendingUp className="h-5 w-5 text-purple-600" />
-          )}
-        </TabsContent>
-      </Tabs>
+                        {/* Operator Select */}
+                        <div>
+                          <label className="block text-xs font-medium text-gray-700 mb-1">
+                            Operator
+                          </label>
+                          <Select
+                            value={config?.targetOperator || 'gte'}
+                            onValueChange={(value) =>
+                              updateFactorConfig(factor.name, {
+                                targetOperator: value as any,
+                                targetValueMax: value === 'range' ? config?.targetValueMax || null : null
+                              })
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="gte">≥ Greater than or equal</SelectItem>
+                              <SelectItem value="lte">≤ Less than or equal</SelectItem>
+                              <SelectItem value="eq">= Equal to</SelectItem>
+                              <SelectItem value="range">Range (between)</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
 
-      {/* Action Buttons */}
+                        {/* Target Value(s) */}
+                        {config?.targetOperator === 'range' ? (
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                Min Value
+                              </label>
+                              <Input
+                                type="number"
+                                step="any"
+                                placeholder={
+                                  factor.data_type === 'percentage'
+                                    ? '0.04 (4%)'
+                                    : factor.data_type === 'currency'
+                                    ? '100.00'
+                                    : 'Min...'
+                                }
+                                value={config?.targetValue ?? ''}
+                                onChange={(e) =>
+                                  updateFactorConfig(factor.name, {
+                                    targetValue: e.target.value ? parseFloat(e.target.value) : null
+                                  })
+                                }
+                                onWheel={(e) => e.currentTarget.blur()}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-xs font-medium text-gray-700 mb-1">
+                                Max Value
+                              </label>
+                              <Input
+                                type="number"
+                                step="any"
+                                placeholder={
+                                  factor.data_type === 'percentage'
+                                    ? '0.08 (8%)'
+                                    : factor.data_type === 'currency'
+                                    ? '200.00'
+                                    : 'Max...'
+                                }
+                                value={config?.targetValueMax ?? ''}
+                                onChange={(e) =>
+                                  updateFactorConfig(factor.name, {
+                                    targetValueMax: e.target.value ? parseFloat(e.target.value) : null
+                                  })
+                                }
+                                onWheel={(e) => e.currentTarget.blur()}
+                              />
+                            </div>
+                          </div>
+                        ) : (
+                          <div>
+                            <label className="block text-xs font-medium text-gray-700 mb-1">
+                              Target Value
+                            </label>
+                            <Input
+                              type="number"
+                              step="any"
+                              placeholder={
+                                factor.data_type === 'percentage'
+                                  ? 'e.g., 0.04 for 4%'
+                                  : factor.data_type === 'currency'
+                                  ? 'e.g., 100.00'
+                                  : 'Enter target...'
+                              }
+                              value={config?.targetValue ?? ''}
+                              onChange={(e) =>
+                                updateFactorConfig(factor.name, {
+                                  targetValue: e.target.value ? parseFloat(e.target.value) : null
+                                })
+                              }
+                              onWheel={(e) => e.currentTarget.blur()}
+                            />
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Navigation */}
       <div className="flex items-center justify-between pt-6 border-t">
         <Button variant="outline" onClick={onBack}>
           <ArrowLeft className="h-4 w-4 mr-2" />
-          Back to Strategy Selection
+          Back
         </Button>
-        
-        <div className="flex gap-3">
-          <Button 
-            variant="outline"
-            disabled={selectedFactors.size === 0}
-          >
-            Save as Draft
-          </Button>
-          <Button 
-            className="bg-blue-600 hover:bg-blue-700"
-            disabled={selectedFactors.size === 0}
-            onClick={onNext}
-          >
-            Configure Factors
-            <ArrowRight className="ml-2 h-4 w-4" />
-          </Button>
-        </div>
+        <Button
+          onClick={onNext}
+          disabled={selectedFactors.size === 0}
+          className="bg-blue-600 hover:bg-blue-700"
+        >
+          Continue
+          <ArrowRight className="h-4 w-4 ml-2" />
+        </Button>
       </div>
     </div>
   );
 }
+function setFactorConfigs(arg0: Map<any, any>) {
+  throw new Error('Function not implemented.');
+}
+

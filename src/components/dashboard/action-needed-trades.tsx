@@ -51,14 +51,10 @@ type CloseDialogState = {
 }
 
 const closeMethods = [
-  { key: 'manual_close', label: 'Manual Close' },
-  { key: 'expired_worthless', label: 'Expired — Worthless' },
-  { key: 'expired_itm_assigned', label: 'Expired — ITM Assigned' },
-  { key: 'rolled', label: 'Rolled' },
-  { key: 'stop_hit', label: 'Stop Hit' },
-  { key: 'target_hit', label: 'Target Hit' },
-  { key: 'risk_rules_exit', label: 'Risk Rules Exit' },
-  { key: 'other', label: 'Other' },
+  { key: 'manual close', label: 'Manual Close' },
+  { key: 'expired', label: 'Expired' },
+  { key: 'exit (profit)', label: 'Exit (Profit)' },
+  { key: 'exit (loss)', label: 'Exit (Loss)' },
 ]
 
 const LOCAL_CLOSURE_KEY = 'tenxiv:trade-closures'
@@ -90,7 +86,7 @@ export function ActionNeededTradesPanel() {
     open: false,
     trade: null,
     closeDate: new Date().toISOString().slice(0, 10),
-    closeMethod: 'manual_close',
+    closeMethod: 'manual close',
     costToClosePerSpread: '',
     saving: false,
     error: null,
@@ -192,7 +188,7 @@ export function ActionNeededTradesPanel() {
       open: false,
       trade: null,
       closeDate: new Date().toISOString().slice(0, 10),
-      closeMethod: 'manual_close',
+      closeMethod: 'manual close',
       costToClosePerSpread: '',
       saving: false,
       error: null,
@@ -427,7 +423,7 @@ export function ActionNeededTradesPanel() {
                                   open: true,
                                   trade,
                                   closeDate: trade.closeMeta?.date || new Date().toISOString().slice(0, 10),
-                                  closeMethod: trade.closeMeta?.reason || 'manual_close',
+                                  closeMethod: trade.closeMeta?.reason || 'manual close',
                                   costToClosePerSpread: trade.closeMeta?.costToClose != null ? String(trade.closeMeta.costToClose) : '',
                                   saving: false,
                                   error: null,

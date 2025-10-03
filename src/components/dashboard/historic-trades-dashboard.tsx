@@ -115,8 +115,8 @@ const simpleHistoricColumns = ['name', 'closedDate', 'contractType', 'actualPL',
 const closeMethods = [
   { key: 'manual_close', label: 'Manual Close' },
   { key: 'expired', label: 'Expired' },
-  { key: 'exit_profit', label: 'Exit (Profit)' },
-  { key: 'exit_loss', label: 'Exit (Loss)' },
+  { key: 'exit (profit)', label: 'Exit (Profit)' },
+  { key: 'exit (loss)', label: 'Exit (Loss)' },
 ]
 
 export default function HistoricTradesDashboard() {

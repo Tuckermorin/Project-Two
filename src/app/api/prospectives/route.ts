@@ -140,6 +140,11 @@ export async function POST(req: NextRequest) {
       name: body.name ?? symbol,
       contract_type: strategyToContractType(strategy_type),
       number_of_contracts: body.number_of_contracts ?? body.contracts ?? 1,
+      delta_short_leg: body.delta_short_leg ?? null,
+      theta: body.theta ?? null,
+      vega: body.vega ?? null,
+      iv_at_entry: body.iv_at_entry ?? null,
+      sector: body.sector ?? null,
       // leave exit fields null
     };
 

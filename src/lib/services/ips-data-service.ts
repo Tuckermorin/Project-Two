@@ -253,24 +253,36 @@ class IPSDataService {
     return TRADING_STRATEGIES;
   }
 
-  // Get all factors
-  getAllFactors(): FactorDefinition[] {
-    return ALL_FACTORS;
+  // Get all factors from database
+  async getAllFactors(): Promise<FactorDefinition[]> {
+    try {
+      const response = await fetch('/api/factors', { cache: 'no-store' });
+      if (!response.ok) {
+        console.error('Failed to fetch factors from API');
+        return ALL_FACTORS; // Fallback to static data
+      }
+      const factors = await response.json();
+      return Array.isArray(factors) ? factors : ALL_FACTORS;
+    } catch (error) {
+      console.error('Error fetching factors:', error);
+      return ALL_FACTORS; // Fallback to static data
+    }
   }
 
-  // Get factors by type
-  getFactorsByType(type: 'quantitative' | 'qualitative' | 'options'): FactorDefinition[] {
-    return ALL_FACTORS.filter(factor => factor.type === type);
+  // Get factors by type from database
+  async getFactorsByType(type: 'quantitative' | 'qualitative' | 'options'): Promise<FactorDefinition[]> {
+    const allFactors = await this.getAllFactors();
+    return allFactors.filter(factor => factor.type === type);
   }
 
-  // Get factors for selected strategies
-  getFactorsForStrategies(strategyIds: string[]): {
+  // Get factors for selected strategies from database
+  async getFactorsForStrategies(strategyIds: string[]): Promise<{
     availableFactors: FactorDefinition[];
     recommendedFactors: string[];
     requiredTypes: string[];
-  } {
+  }> {
     const selectedStrategies = TRADING_STRATEGIES.filter(s => strategyIds.includes(s.id));
-    
+
     // Get required factor types
     const requiredTypes = new Set<string>();
     selectedStrategies.forEach(strategy => {
@@ -283,8 +295,11 @@ class IPSDataService {
       strategy.recommendedFactors.forEach(factor => recommendedFactors.add(factor));
     });
 
+    // Fetch all factors from database
+    const allFactors = await this.getAllFactors();
+
     // Filter available factors based on required types
-    const availableFactors = ALL_FACTORS.filter(factor => 
+    const availableFactors = allFactors.filter(factor =>
       requiredTypes.has(factor.type)
     );
 

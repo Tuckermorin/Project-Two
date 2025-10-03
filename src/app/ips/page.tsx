@@ -44,7 +44,6 @@ import {
 // Import components
 import { IPSStrategySelector } from "@/components/ips/ips-strategy-selector";
 import { IPSFactorSelector } from "@/components/ips/ips-factor-selector";
-import { IPSFactorConfiguration } from "@/components/ips/ips-factor-configuration";
 import { IPSExitWatchConfig } from "@/components/ips/ips-exit-watch-config";
 import { IPSSummary } from "@/components/ips/ips-summary";
 import { TradeScoreDisplay } from "@/components/ips/trade-score-display";
@@ -192,7 +191,7 @@ function normalizeIpsRows(rows: unknown): IPSConfiguration[] {
 // Page State
 // -------------------------------
 interface IPSFlowState {
-  step: "list" | "strategies" | "selection" | "configuration" | "exit_watch" | "summary" | "scoring";
+  step: "list" | "strategies" | "selection" | "exit_watch" | "summary" | "scoring";
   selectedStrategies: string[];
   selectedFactors: Set<string>;
   factorConfigurations: Record<string, any>;
@@ -347,16 +346,19 @@ export default function IPSPage() {
     setDeleteDialog(prev => ({ ...prev, isDeleting: true }));
 
     try {
-      const { error } = await supabase
-        .from("ips_configurations")
-        .delete()
-        .eq("id", deleteDialog.ipsId);
+      const response = await fetch(`/api/ips/${deleteDialog.ipsId}`, {
+        method: 'DELETE',
+      });
 
-      if (error) {
+      if (!response.ok) {
+        const error = await response.json();
         console.error("Error deleting IPS:", error);
-        toast.error("Failed to delete IPS: " + error.message);
+        toast.error("Failed to delete IPS: " + (error.error || "Unknown error"));
+        setDeleteDialog(prev => ({ ...prev, isDeleting: false }));
       } else {
+        // Update both ipsList and allIPSs
         await fetchIPS();
+        setAllIPSs((prev) => prev.filter((ips) => ips.id !== deleteDialog.ipsId));
         toast.success(`IPS "${deleteDialog.ipsName}" deleted successfully`);
         setDeleteDialog({
           isOpen: false,
@@ -394,17 +396,20 @@ export default function IPSPage() {
 
   // Load factor definitions when strategies are selected
   useEffect(() => {
-    if (state.selectedStrategies.length > 0) {
-      try {
-        const factors = ipsDataService.getFactorsForStrategies(state.selectedStrategies);
-        setFactorDefinitions(factors);
-      } catch (e) {
-        console.warn("Could not load factors for strategies:", e);
-        setFactorDefinitions({});
+    const loadFactors = async () => {
+      if (state.selectedStrategies.length > 0) {
+        try {
+          const factors = await ipsDataService.getFactorsForStrategies(state.selectedStrategies);
+          setFactorDefinitions(factors);
+        } catch (e) {
+          console.warn("Could not load factors for strategies:", e);
+          setFactorDefinitions({});
+        }
+      } else {
+        setFactorDefinitions(null);
       }
-    } else {
-      setFactorDefinitions(null);
-    }
+    };
+    loadFactors();
   }, [state.selectedStrategies]);
 
   // Navigation handlers
@@ -439,7 +444,7 @@ export default function IPSPage() {
       return;
     }
 
-    const allFactorDefs = ipsDataService.getAllFactors();
+    const allFactorDefs = await ipsDataService.getAllFactors();
     const enriched = (factors || []).map((f: any) => {
       const info = allFactorDefs.find(
         (df: any) => df.id === f.factor_id || df.name === f.factor_name
@@ -470,7 +475,7 @@ export default function IPSPage() {
 
     const selected = new Set<string>();
     const configurations: Record<string, any> = {};
-    const allFactorDefs = ipsDataService.getAllFactors();
+    const allFactorDefs = await ipsDataService.getAllFactors();
 
     (factors || []).forEach((f: any) => {
       const factorName = f.factor_name || f.name;
@@ -510,7 +515,7 @@ export default function IPSPage() {
 
     setState((prev) => ({
       ...prev,
-      step: "configuration",
+      step: "selection",
       selectedStrategies: (ips as any).strategies || [],
       selectedFactors: selected,
       factorConfigurations: configurations,
@@ -533,7 +538,8 @@ export default function IPSPage() {
 
   const handleFactorSelection = (selectedFactors: Set<string>) => {
     setState((prev) => {
-      const allFactorDefs = ipsDataService.getAllFactors();
+      // Use the already-loaded factorDefinitions from state
+      const allFactorDefs = factorDefinitions?.availableFactors || [];
       const newConfigs: Record<string, any> = { ...prev.factorConfigurations };
 
       // Add defaults for newly selected factors
@@ -589,7 +595,7 @@ const handleSaveIPS = async (ipsData: any) => {
 
   // We need to convert factor names to full factor objects
   // Get all factor definitions from the service
-  const allFactors = ipsDataService.getAllFactors();
+  const allFactors = await ipsDataService.getAllFactors();
   
   // Map factor names to full factor objects with configurations
   const factors = factorNames.map((factorName: string) => {
@@ -730,8 +736,7 @@ const handleSaveIPS = async (ipsData: any) => {
   if (state.step !== "list") {
     const steps = [
       { id: "strategies", name: "Strategies", icon: (Layers as any) },
-      { id: "selection", name: "Factor Selection", icon: (Target as any) },
-      { id: "configuration", name: "Configuration", icon: (Settings as any) },
+      { id: "selection", name: "Selection & Configuration", icon: (Target as any) },
       { id: "exit_watch", name: "Exit & Watch", icon: (Eye as any) },
       { id: "summary", name: "Summary", icon: (CheckCircle as any) },
       { id: "scoring", name: "Scoring", icon: (BarChart3 as any) },
@@ -791,19 +796,10 @@ const handleSaveIPS = async (ipsData: any) => {
           <IPSFactorSelector
             selectedFactors={state.selectedFactors}
             onFactorSelection={handleFactorSelection}
-            onNext={() => handleStepNavigation("configuration")}
-            onBack={() => handleStepNavigation("strategies")}
-            factorDefinitions={factorDefinitions}
-          />
-        )}
-
-        {state.step === "configuration" && factorDefinitions && (
-          <IPSFactorConfiguration
-            selectedFactors={state.selectedFactors}
             factorConfigurations={state.factorConfigurations}
-            onConfigurationChange={handleFactorConfiguration}
-            onBack={() => handleStepNavigation("selection")}
+            onFactorConfiguration={handleFactorConfiguration}
             onNext={() => handleStepNavigation("exit_watch")}
+            onBack={() => handleStepNavigation("strategies")}
             factorDefinitions={factorDefinitions}
           />
         )}
@@ -837,7 +833,7 @@ const handleSaveIPS = async (ipsData: any) => {
             <div className="flex justify-between mt-6">
               <Button
                 variant="outline"
-                onClick={() => handleStepNavigation("configuration")}
+                onClick={() => handleStepNavigation("selection")}
               >
                 Back
               </Button>

@@ -541,6 +541,342 @@ export class AlphaVantageClient {
     const data = await this.makeRequest<any>({ function: 'TREASURY_YIELD', maturity: '10year', interval: 'daily' });
     return this.latestFromDataSeries(data);
   }
+
+  async getTreasuryYield(maturity: '3month' | '2year' | '5year' | '7year' | '10year' | '30year' = '10year') {
+    const data = await this.makeRequest<any>({ function: 'TREASURY_YIELD', maturity, interval: 'daily' });
+    return this.latestFromDataSeries(data);
+  }
+
+  async getRealGDP(interval: 'quarterly' | 'annual' = 'quarterly') {
+    const data = await this.makeRequest<any>({ function: 'REAL_GDP', interval });
+    return this.latestFromDataSeries(data);
+  }
+
+  async getRealGDPPerCapita() {
+    const data = await this.makeRequest<any>({ function: 'REAL_GDP_PER_CAPITA' });
+    return this.latestFromDataSeries(data);
+  }
+
+  async getConsumerSentiment() {
+    const data = await this.makeRequest<any>({ function: 'CONSUMER_SENTIMENT' });
+    return this.latestFromDataSeries(data);
+  }
+
+  async getRetailSales() {
+    const data = await this.makeRequest<any>({ function: 'RETAIL_SALES' });
+    return this.latestFromDataSeries(data);
+  }
+
+  async getDurableGoods() {
+    const data = await this.makeRequest<any>({ function: 'DURABLES' });
+    return this.latestFromDataSeries(data);
+  }
+
+  async getNonfarmPayroll() {
+    const data = await this.makeRequest<any>({ function: 'NONFARM_PAYROLL' });
+    return this.latestFromDataSeries(data);
+  }
+
+  async getInflation() {
+    const data = await this.makeRequest<any>({ function: 'INFLATION' });
+    return this.latestFromDataSeries(data);
+  }
+
+  async getInflationExpectation() {
+    const data = await this.makeRequest<any>({ function: 'INFLATION_EXPECTATION' });
+    return this.latestFromDataSeries(data);
+  }
+
+  // ---------- Extended Technical Indicators ----------
+
+  async getEMA(symbol: string, timePeriod = 20, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'EMA', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: EMA');
+    const v = latest?.values?.EMA != null ? Number(latest.values.EMA) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getWMA(symbol: string, timePeriod = 20, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'WMA', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: WMA');
+    const v = latest?.values?.WMA != null ? Number(latest.values.WMA) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getDEMA(symbol: string, timePeriod = 20, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'DEMA', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: DEMA');
+    const v = latest?.values?.DEMA != null ? Number(latest.values.DEMA) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getTEMA(symbol: string, timePeriod = 20, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'TEMA', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: TEMA');
+    const v = latest?.values?.TEMA != null ? Number(latest.values.TEMA) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getTRIMA(symbol: string, timePeriod = 20, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'TRIMA', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: TRIMA');
+    const v = latest?.values?.TRIMA != null ? Number(latest.values.TRIMA) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getKAMA(symbol: string, timePeriod = 20, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'KAMA', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: KAMA');
+    const v = latest?.values?.KAMA != null ? Number(latest.values.KAMA) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getT3(symbol: string, timePeriod = 5, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'T3', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: T3');
+    const v = latest?.values?.T3 != null ? Number(latest.values.T3) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getVWAP(symbol: string, interval: '1min' | '5min' | '15min' | '30min' | '60min' = '60min') {
+    const data = await this.makeRequest<any>({
+      function: 'VWAP', symbol: symbol.toUpperCase(), interval
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: VWAP');
+    const v = latest?.values?.VWAP != null ? Number(latest.values.VWAP) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getBBANDS(symbol: string, timePeriod = 20, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'BBANDS', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: BBANDS');
+    const upper = latest?.values?.['Real Upper Band'] != null ? Number(latest.values['Real Upper Band']) : null;
+    const middle = latest?.values?.['Real Middle Band'] != null ? Number(latest.values['Real Middle Band']) : null;
+    const lower = latest?.values?.['Real Lower Band'] != null ? Number(latest.values['Real Lower Band']) : null;
+    return {
+      upper: Number.isFinite(upper) ? upper : null,
+      middle: Number.isFinite(middle) ? middle : null,
+      lower: Number.isFinite(lower) ? lower : null,
+      date: latest?.date || null
+    };
+  }
+
+  async getATR(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'ATR', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod)
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: ATR');
+    const v = latest?.values?.ATR != null ? Number(latest.values.ATR) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getNATR(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'NATR', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod)
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: NATR');
+    const v = latest?.values?.NATR != null ? Number(latest.values.NATR) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getSTOCH(symbol: string, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'STOCH', symbol: symbol.toUpperCase(), interval
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: STOCH');
+    const slowK = latest?.values?.SlowK != null ? Number(latest.values.SlowK) : null;
+    const slowD = latest?.values?.SlowD != null ? Number(latest.values.SlowD) : null;
+    return {
+      slowK: Number.isFinite(slowK) ? slowK : null,
+      slowD: Number.isFinite(slowD) ? slowD : null,
+      date: latest?.date || null
+    };
+  }
+
+  async getSTOCHF(symbol: string, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'STOCHF', symbol: symbol.toUpperCase(), interval
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: STOCHF');
+    const fastK = latest?.values?.FastK != null ? Number(latest.values.FastK) : null;
+    const fastD = latest?.values?.FastD != null ? Number(latest.values.FastD) : null;
+    return {
+      fastK: Number.isFinite(fastK) ? fastK : null,
+      fastD: Number.isFinite(fastD) ? fastD : null,
+      date: latest?.date || null
+    };
+  }
+
+  async getSTOCHRSI(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'STOCHRSI', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: STOCHRSI');
+    const fastK = latest?.values?.FastK != null ? Number(latest.values.FastK) : null;
+    const fastD = latest?.values?.FastD != null ? Number(latest.values.FastD) : null;
+    return {
+      fastK: Number.isFinite(fastK) ? fastK : null,
+      fastD: Number.isFinite(fastD) ? fastD : null,
+      date: latest?.date || null
+    };
+  }
+
+  async getWILLR(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'WILLR', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod)
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: WILLR');
+    const v = latest?.values?.WILLR != null ? Number(latest.values.WILLR) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getADX(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'ADX', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod)
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: ADX');
+    const v = latest?.values?.ADX != null ? Number(latest.values.ADX) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getADXR(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'ADXR', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod)
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: ADXR');
+    const v = latest?.values?.ADXR != null ? Number(latest.values.ADXR) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getCCI(symbol: string, timePeriod = 20, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'CCI', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod)
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: CCI');
+    const v = latest?.values?.CCI != null ? Number(latest.values.CCI) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getMFI(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'MFI', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod)
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: MFI');
+    const v = latest?.values?.MFI != null ? Number(latest.values.MFI) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getCMO(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'CMO', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: CMO');
+    const v = latest?.values?.CMO != null ? Number(latest.values.CMO) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getROC(symbol: string, timePeriod = 10, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'ROC', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: ROC');
+    const v = latest?.values?.ROC != null ? Number(latest.values.ROC) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getAROON(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'AROON', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod)
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: AROON');
+    const aroonUp = latest?.values?.['Aroon Up'] != null ? Number(latest.values['Aroon Up']) : null;
+    const aroonDown = latest?.values?.['Aroon Down'] != null ? Number(latest.values['Aroon Down']) : null;
+    return {
+      aroonUp: Number.isFinite(aroonUp) ? aroonUp : null,
+      aroonDown: Number.isFinite(aroonDown) ? aroonDown : null,
+      date: latest?.date || null
+    };
+  }
+
+  async getAROONOSC(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'AROONOSC', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod)
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: AROONOSC');
+    const v = latest?.values?.AROONOSC != null ? Number(latest.values.AROONOSC) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getBOP(symbol: string, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'BOP', symbol: symbol.toUpperCase(), interval
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: BOP');
+    const v = latest?.values?.BOP != null ? Number(latest.values.BOP) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getTRIX(symbol: string, timePeriod = 30, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
+    const data = await this.makeRequest<any>({
+      function: 'TRIX', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: TRIX');
+    const v = latest?.values?.TRIX != null ? Number(latest.values.TRIX) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getULTOSC(symbol: string, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'ULTOSC', symbol: symbol.toUpperCase(), interval
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: ULTOSC');
+    const v = latest?.values?.ULTOSC != null ? Number(latest.values.ULTOSC) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getAD(symbol: string, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'AD', symbol: symbol.toUpperCase(), interval
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: Chaikin A/D');
+    const v = latest?.values?.['Chaikin A/D'] != null ? Number(latest.values['Chaikin A/D']) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getADOSC(symbol: string, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'ADOSC', symbol: symbol.toUpperCase(), interval
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: ADOSC');
+    const v = latest?.values?.ADOSC != null ? Number(latest.values.ADOSC) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
+  async getOBV(symbol: string, interval: 'daily' | 'weekly' | 'monthly' = 'daily') {
+    const data = await this.makeRequest<any>({
+      function: 'OBV', symbol: symbol.toUpperCase(), interval
+    });
+    const latest = this.extractLatestFromTA(data, 'Technical Analysis: OBV');
+    const v = latest?.values?.OBV != null ? Number(latest.values.OBV) : null;
+    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
+  }
+
   async getDailyAdjustedSeries(symbol: string, outputsize: 'compact' | 'full' = 'compact') {
     const data = await this.makeRequest<any>({
       function: 'TIME_SERIES_DAILY_ADJUSTED',
