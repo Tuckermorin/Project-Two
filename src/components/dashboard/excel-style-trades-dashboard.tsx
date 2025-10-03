@@ -183,7 +183,11 @@ export default function ExcelStyleTradesDashboard() {
   const daysToExpiry = (exp: string): number => {
     const d = new Date(exp)
     if (isNaN(d.getTime())) return 0
-    const ms = d.setHours(0,0,0,0) - new Date().setHours(0,0,0,0)
+    // Options expire at 4PM ET on expiration day, so set to 4PM (16:00) for accurate DTE
+    const expiry = new Date(d)
+    expiry.setHours(16, 0, 0, 0)
+    const now = new Date()
+    const ms = expiry.getTime() - now.getTime()
     return Math.ceil(ms / (1000*60*60*24))
   }
 
@@ -247,18 +251,29 @@ export default function ExcelStyleTradesDashboard() {
           }
           return obj
         })
-        // Auto-move expired (DTE < 0) to history (PATCH -> closed)
-        const expired = normalized.filter(t => t.dte < 0)
+        // Auto-move expired (DTE <= 0) to action-needed instead of auto-closing
+        const expired = normalized.filter(t => t.dte <= 0)
         if (expired.length) {
           try {
-            await fetch('/api/trades', {
-              method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ids: expired.map(e=>e.id), status: 'closed' })
+            const raw = localStorage.getItem(LOCAL_CLOSURE_KEY)
+            const obj = raw ? JSON.parse(raw) : {}
+            expired.forEach(trade => {
+              obj[trade.id] = {
+                ...(obj[trade.id] || {}),
+                needsAction: true,
+                reason: 'expired_worthless',
+                date: new Date().toISOString().slice(0, 10),
+                contractsClosed: trade.contracts,
+                ipsName: trade.ipsName,
+              }
             })
-          } catch {}
+            localStorage.setItem(LOCAL_CLOSURE_KEY, JSON.stringify(obj))
+            dispatchTradesUpdated({ type: 'expired', ids: expired.map(e => e.id) })
+          } catch (e) {
+            console.error('Failed to move expired trades to action needed', e)
+          }
         }
-        setTrades(normalized.filter(t => t.dte >= 0))
+        setTrades(normalized.filter(t => t.dte > 0))
       } catch (e) {
         console.error('Failed to load dashboard trades', e)
         setTrades([])

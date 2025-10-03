@@ -74,7 +74,11 @@ function daysToExpiry(exp: string | null): number | null {
   if (!exp) return null
   const d = new Date(exp)
   if (Number.isNaN(d.getTime())) return null
-  const diff = d.setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)
+  // Options expire at 4PM ET on expiration day, so set to 4PM (16:00) for accurate DTE
+  const expiry = new Date(d)
+  expiry.setHours(16, 0, 0, 0)
+  const now = new Date()
+  const diff = expiry.getTime() - now.getTime()
   return Math.ceil(diff / (1000 * 60 * 60 * 24))
 }
 

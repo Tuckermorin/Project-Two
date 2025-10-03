@@ -88,6 +88,7 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [addingToProspective, setAddingToProspective] = useState(false);
+  const [numberOfContracts, setNumberOfContracts] = useState<string>("1");
   const [watchlistDialogOpen, setWatchlistDialogOpen] = useState(false);
   const [watchlistItems, setWatchlistItems] = useState<Array<{ symbol: string; company_name?: string }>>([]);
   const [selectedWatchlistSymbols, setSelectedWatchlistSymbols] = useState<Set<string>>(new Set());
@@ -209,6 +210,8 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
   const handleAddToProspective = async (candidate: Candidate) => {
     if (!runId) return;
 
+    const contracts = parseInt(numberOfContracts) || 1;
+
     setAddingToProspective(true);
     try {
       const res = await fetch("/api/prospectives", {
@@ -231,6 +234,7 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
           ips_id: selectedIpsId,
           ips_score: candidate.score,
           expiration_date: candidate.contract_legs?.[0]?.expiry,
+          number_of_contracts: contracts,
         }),
       });
 
@@ -240,6 +244,7 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
       // Navigate to trades page with highlight
       router.push(`/trades?highlight=${encodeURIComponent(json.id)}`);
       setDetailsDialogOpen(false);
+      setNumberOfContracts("1"); // Reset to default
     } catch (error: any) {
       setError(error.message);
     } finally {
@@ -434,6 +439,7 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                           variant="outline"
                           onClick={() => {
                             setSelectedCandidate(c);
+                            setNumberOfContracts("1"); // Reset to default when opening
                             setDetailsDialogOpen(true);
                           }}
                         >
@@ -709,12 +715,35 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                 </CardContent>
               </Card>
 
+              {/* Number of Contracts Input */}
+              <Card className="bg-gray-50 dark:bg-gray-800">
+                <CardContent className="pt-4">
+                  <div className="space-y-2">
+                    <Label htmlFor="contracts-input" className="text-sm font-medium">
+                      Number of Contracts
+                    </Label>
+                    <Input
+                      id="contracts-input"
+                      type="number"
+                      min="1"
+                      value={numberOfContracts}
+                      onChange={(e) => setNumberOfContracts(e.target.value)}
+                      className="w-32"
+                      placeholder="1"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Enter the number of contracts you plan to trade
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+
               {/* Actions */}
               <div className="flex gap-3">
                 <Button
                   className="flex-1"
                   onClick={() => handleAddToProspective(selectedCandidate)}
-                  disabled={addingToProspective}
+                  disabled={addingToProspective || !numberOfContracts || parseInt(numberOfContracts) < 1}
                 >
                   {addingToProspective ? (
                     <>

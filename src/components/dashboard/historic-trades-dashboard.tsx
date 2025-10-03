@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { ArrowUpDown, ArrowUp, ArrowDown, Filter, Eye, EyeOff, Settings2, AlertCircle, History, Trash2, RefreshCw, Loader2, MoreVertical } from 'lucide-react'
@@ -108,8 +109,15 @@ const defaultHistoricColumns = [
   'theta', 'thetaAtClose', 'closingReason', 'ipsScore', 'ipsName'
 ]
 
-// Simple view for historic trades  
+// Simple view for historic trades
 const simpleHistoricColumns = ['name', 'closedDate', 'contractType', 'actualPL', 'actualPLPercent', 'closingReason', 'ipsScore']
+
+const closeMethods = [
+  { key: 'manual_close', label: 'Manual Close' },
+  { key: 'expired', label: 'Expired' },
+  { key: 'exit_profit', label: 'Exit (Profit)' },
+  { key: 'exit_loss', label: 'Exit (Loss)' },
+]
 
 export default function HistoricTradesDashboard() {
   // State
@@ -123,6 +131,23 @@ export default function HistoricTradesDashboard() {
   const [trades, setTrades] = useState<HistoricTrade[]>([])
   const [loading, setLoading] = useState<boolean>(false)
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; trade: HistoricTrade | null }>({ open: false, trade: null })
+  const [editDialog, setEditDialog] = useState<{
+    open: boolean;
+    trade: HistoricTrade | null;
+    closeDate: string;
+    closePrice: string;
+    closeMethod: string;
+    saving: boolean;
+    error?: string | null;
+  }>({
+    open: false,
+    trade: null,
+    closeDate: new Date().toISOString().slice(0, 10),
+    closePrice: '',
+    closeMethod: 'manual_close',
+    saving: false,
+    error: null,
+  })
   const [ipsFilter, setIpsFilter] = useState<string>('all')
   const [error, setError] = useState<string | null>(null)
   const hasActiveIPS = false
@@ -215,6 +240,49 @@ export default function HistoricTradesDashboard() {
       dispatchTradesUpdated({ type: 'delete', scope: 'history', id })
     } catch (e) {
       console.error('Failed to delete historical trade', e)
+    }
+  }
+
+  async function handleEditTrade() {
+    if (!editDialog.trade) return
+    try {
+      setEditDialog(prev => ({ ...prev, saving: true, error: null }))
+
+      const payload: Record<string, unknown> = {
+        tradeId: editDialog.trade.id,
+        closeMethod: editDialog.closeMethod,
+        closeDate: editDialog.closeDate,
+        costToClosePerSpread: editDialog.closePrice ? parseFloat(editDialog.closePrice) : null,
+        contractsClosed: editDialog.trade.contracts || null,
+      }
+
+      const res = await fetch('/api/trades/close', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        throw new Error(json?.error || 'Failed to update trade')
+      }
+
+      // Reload trades to get updated data
+      await loadTrades()
+      dispatchTradesUpdated({ type: 'updated', id: editDialog.trade.id })
+
+      setEditDialog({
+        open: false,
+        trade: null,
+        closeDate: new Date().toISOString().slice(0, 10),
+        closePrice: '',
+        closeMethod: 'manual_close',
+        saving: false,
+        error: null,
+      })
+    } catch (e: any) {
+      console.error('Edit trade failed', e)
+      setEditDialog(prev => ({ ...prev, saving: false, error: e?.message || 'Unable to update trade' }))
     }
   }
 
@@ -621,6 +689,19 @@ export default function HistoricTradesDashboard() {
                             View Details
                           </DropdownMenuItem>
                           <DropdownMenuItem
+                            onSelect={() => setEditDialog({
+                              open: true,
+                              trade,
+                              closeDate: trade.closedDate ? new Date(trade.closedDate).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+                              closePrice: String(trade.closedPrice || trade.premiumAtClose || ''),
+                              closeMethod: trade.closingReason || 'manual_close',
+                              saving: false,
+                              error: null,
+                            })}
+                          >
+                            Edit Close Details
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
                             className="text-red-600 focus:text-red-600"
                             onSelect={() => setDeleteDialog({ open: true, trade })}
                             title="Delete"
@@ -676,6 +757,102 @@ export default function HistoricTradesDashboard() {
             }}
           >
             Delete Trade
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog
+      open={editDialog.open}
+      onOpenChange={(open) => {
+        if (!open) {
+          setEditDialog({
+            open: false,
+            trade: null,
+            closeDate: new Date().toISOString().slice(0, 10),
+            closePrice: '',
+            closeMethod: 'manual_close',
+            saving: false,
+            error: null,
+          })
+        }
+      }}
+    >
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit Close Details</DialogTitle>
+        </DialogHeader>
+        {editDialog.trade && (
+          <div className="space-y-4">
+            <div className="space-y-3">
+              <div className="text-sm text-gray-600">{editDialog.trade.name}</div>
+              <div>
+                <Label className="text-sm">Close Date</Label>
+                <Input
+                  type="date"
+                  value={editDialog.closeDate}
+                  onChange={e => setEditDialog(prev => ({ ...prev, closeDate: e.target.value }))}
+                />
+              </div>
+              <div>
+                <Label className="text-sm">Closing Reason</Label>
+                <Select
+                  value={editDialog.closeMethod}
+                  onValueChange={value => setEditDialog(prev => ({ ...prev, closeMethod: value }))}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select reason" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {closeMethods.map(method => (
+                      <SelectItem key={method.key} value={method.key}>{method.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-sm">Cost to Close (per spread)</Label>
+                <Input
+                  inputMode="decimal"
+                  value={editDialog.closePrice}
+                  onChange={e => setEditDialog(prev => ({ ...prev, closePrice: e.target.value }))}
+                  placeholder="e.g., 0.35"
+                />
+                <div className="text-xs text-gray-500 mt-1">
+                  Initial credit: ${editDialog.trade.creditReceived?.toFixed(2) ?? '0.00'} • Contracts: {editDialog.trade.contracts}
+                </div>
+              </div>
+            </div>
+            {editDialog.error && (
+              <p className="text-sm text-red-600">{editDialog.error}</p>
+            )}
+          </div>
+        )}
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => setEditDialog({
+              open: false,
+              trade: null,
+              closeDate: new Date().toISOString().slice(0, 10),
+              closePrice: '',
+              closeMethod: 'manual_close',
+              saving: false,
+              error: null,
+            })}
+            disabled={editDialog.saving}
+          >
+            Cancel
+          </Button>
+          <Button onClick={handleEditTrade} disabled={editDialog.saving}>
+            {editDialog.saving ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Saving…
+              </>
+            ) : (
+              'Save Changes'
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

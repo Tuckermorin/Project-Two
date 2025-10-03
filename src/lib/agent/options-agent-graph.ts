@@ -41,6 +41,41 @@ interface AgentState {
 // Rate limiting queue
 const queue = new PQueue({ concurrency: 2, interval: 1000, intervalCap: 2 });
 
+// Node 0: FetchIPS - Load IPS configuration first
+async function fetchIPS(state: AgentState): Promise<Partial<AgentState>> {
+  console.log(`[FetchIPS] Loading IPS configuration: ${state.ipsId || 'none'}`);
+
+  if (!state.ipsId) {
+    console.log("[FetchIPS] No IPS ID provided, skipping IPS load");
+    return { ipsConfig: null };
+  }
+
+  try {
+    const { loadIPSById } = await import("@/lib/ips/loader");
+    const { assertIPSShape } = await import("@/lib/ips/assert");
+
+    const ipsConfig = await loadIPSById(state.ipsId);
+    assertIPSShape(ipsConfig);
+
+    console.log(`[FetchIPS] Loaded IPS config: ${ipsConfig.name} with ${ipsConfig.factors?.length || 0} factors`);
+    console.log(`[FetchIPS] IPS Factors:`, ipsConfig.factors?.map(f => ({
+      name: f.display_name,
+      key: f.factor_key,
+      weight: f.weight,
+      threshold: f.threshold,
+      direction: f.direction
+    })));
+
+    return { ipsConfig };
+  } catch (error: any) {
+    console.error("[FetchIPS] Failed to load IPS config:", error.message);
+    return {
+      ipsConfig: null,
+      errors: [...state.errors, `IPS Load: ${error.message}`]
+    };
+  }
+}
+
 // Node 1: FetchMarketData
 async function fetchMarketData(state: AgentState): Promise<Partial<AgentState>> {
   console.log(`[FetchMarketData] Processing ${state.symbols.length} symbols`);
@@ -856,6 +891,7 @@ export function buildOptionsAgentGraph() {
     },
   });
 
+  graph.addNode("FetchIPS", fetchIPS);
   graph.addNode("FetchMarketData", fetchMarketData);
   graph.addNode("FetchMacroData", fetchMacroData);
   graph.addNode("EngineerFeatures", engineerFeatures);
@@ -866,8 +902,9 @@ export function buildOptionsAgentGraph() {
   graph.addNode("LLM_Rationale", llmRationale);
   graph.addNode("SelectTopK", selectTopK);
 
-  // Define edges - DeepReasoning now sits between RiskGuardrails and ScoreIPS
-  graph.setEntryPoint("FetchMarketData");
+  // Define edges - FetchIPS first, then market data
+  graph.setEntryPoint("FetchIPS");
+  graph.addEdge("FetchIPS", "FetchMarketData");
   graph.addEdge("FetchMarketData", "FetchMacroData");
   graph.addEdge("FetchMacroData", "EngineerFeatures");
   graph.addEdge("EngineerFeatures", "GenerateCandidates");
@@ -892,40 +929,17 @@ export async function runAgentOnce(props: {
 
   console.log(`[Agent] Starting run ${runId} with ${props.symbols.length} symbols, IPS: ${props.ipsId || 'none'}`);
 
-  // Load IPS configuration if provided
-  let ipsConfig = null;
-  if (props.ipsId) {
-    try {
-      const { loadIPSById } = await import("@/lib/ips/loader");
-      const { assertIPSShape } = await import("@/lib/ips/assert");
-
-      ipsConfig = await loadIPSById(props.ipsId);
-      assertIPSShape(ipsConfig);
-
-      console.log(`[Agent] Loaded IPS config: ${ipsConfig.name} with ${ipsConfig.factors?.length || 0} factors`);
-      console.log(`[Agent] IPS Factors:`, ipsConfig.factors.map(f => ({
-        name: f.display_name,
-        key: f.factor_key,
-        weight: f.weight,
-        threshold: f.threshold,
-        direction: f.direction
-      })));
-    } catch (error: any) {
-      console.error("[Agent] Failed to load IPS config:", error.message, error.stack);
-    }
-  }
-
   try {
     // Open run
     await db.openRun({ runId, mode: props.mode, symbols: props.symbols });
 
-    // Initialize state
+    // Initialize state - ipsConfig will be loaded by FetchIPS node
     const initialState: AgentState = {
       runId,
       mode: props.mode,
       symbols: props.symbols,
       ipsId: props.ipsId,
-      ipsConfig,
+      ipsConfig: null, // Will be populated by FetchIPS node
       asof,
       marketData: {},
       fundamentalData: {},

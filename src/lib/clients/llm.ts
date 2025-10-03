@@ -1,6 +1,6 @@
 import { ChatOllama } from "@langchain/ollama";
 
-const DEFAULT_MODEL = "gpt-oss:120b";
+const DEFAULT_MODEL = "gpt-oss:20b";
 const DEFAULT_TEMPERATURE = 0.2;
 
 const normalizeBaseUrl = (raw?: string | null): string => {

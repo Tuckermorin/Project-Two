@@ -38,24 +38,46 @@ The AI agent is built using **LangGraph.js** with the following components:
 
 ### Graph Nodes (Connected START → END)
 
-1. **FetchMarketData**: Retrieves options chains and quotes from Alpha Vantage
-2. **FetchMacroData**: Fetches macro indicators (Fed Funds, Unemployment, Term Spread) from FRED
-3. **EngineerFeatures**: Computes IV rank, term slope, put skew, volume/OI ratios
-4. **GenerateCandidates**: Creates put credit spread candidates with proper OTM filtering
-5. **RiskGuardrails**: Checks for earnings events and macro risks using Tavily search
-6. **DeepReasoning**: Multi-phase analysis including IPS compliance, historical context, and threshold adjustments
-7. **ScoreIPS**: Scores candidates against IPS criteria with detailed factor-by-factor breakdown
-8. **LLM_Rationale**: Generates natural language trade rationale with news context
-9. **SelectTopK**: Ranks and selects top 10 candidates
+1. **FetchIPS**: Loads IPS (Investment Policy Statement) configuration with factor definitions
+2. **FetchMarketData**: Retrieves options chains, quotes, and company fundamentals from Alpha Vantage
+3. **FetchMacroData**: Fetches macro indicators (Fed Funds, Unemployment, Term Spread) from FRED
+4. **EngineerFeatures**: Computes IV rank, term slope, put skew, volume/OI ratios
+5. **GenerateCandidates**: Creates put credit spread candidates with IPS-optimized delta filtering
+6. **RiskGuardrails**: Checks for earnings events and macro risks using Tavily search
+7. **DeepReasoning**: Multi-phase analysis including IPS compliance, historical context, and threshold adjustments
+8. **ScoreIPS**: Scores candidates against IPS criteria with detailed factor-by-factor breakdown
+9. **LLM_Rationale**: Generates natural language trade rationale with news context
+10. **SelectTopK**: Ranks and selects top 10 candidates
 
 ### StructuredTool Definitions (src/lib/agent/tools.ts)
 
 All tools use `StructuredTool` from `@langchain/core/tools` with Zod schemas:
 
+#### Core Market Data Tools
 - **GetQuoteTool**: Fetches current stock quotes (price, volume, change)
 - **GetCompanyOverviewTool**: Retrieves fundamentals (PE, beta, market cap, sector, financials)
 - **SearchNewsTool**: Searches recent news using Tavily API
 - **GetOptionsChainTool**: Fetches options chain data (strikes, IVs, greeks, OI)
+
+#### Fundamental Data Tools (4)
+- **GetIncomeStatementTool**: Quarterly/annual revenue, gross profit, operating income, net income
+- **GetBalanceSheetTool**: Assets, liabilities, equity, current ratio components
+- **GetCashFlowTool**: Operating cash flow, CapEx, free cash flow
+- **GetEarningsTool**: Historical earnings with estimates and surprises
+
+#### Alpha Intelligence Tools (1)
+- **GetNewsSentimentTool**: News articles with sentiment scores (bullish/bearish/neutral)
+
+#### Technical Indicators Tools (3)
+- **GetRSITool**: Relative Strength Index (overbought/oversold signals)
+- **GetMACDTool**: Moving Average Convergence Divergence (trend and momentum)
+- **GetSMATool**: Simple Moving Average (trend direction and support/resistance)
+
+#### Macro/Economic Tools (4)
+- **GetCPITool**: Consumer Price Index (inflation indicator)
+- **GetUnemploymentTool**: Unemployment rate (economic health)
+- **GetFedFundsRateTool**: Federal Funds Rate (monetary policy)
+- **GetTreasuryYieldTool**: 10-year Treasury yield (risk-free rate)
 
 ### Model Binding
 
@@ -65,9 +87,11 @@ Tools are bound to the LLM before invocation:
 import { ChatOllama } from "@langchain/ollama";
 import { agentTools } from "@/lib/agent/tools";
 
-const model = new ChatOllama({ model: "llama3" });
+const model = new ChatOllama({ model: "gpt-oss:20b" });
 const modelWithTools = model.bind({ tools: agentTools });
 ```
+
+**Total Tools Available**: 17 structured tools with Zod schemas for comprehensive market analysis
 
 ### Running the Agent
 
@@ -161,7 +185,7 @@ The LangGraph agent was developed iteratively with extensive testing at each sta
 
 LLM / Express server:
 - `OLLAMA_HOST` (default `http://golem:11434`) — connect via Tailscale
-- `OLLAMA_MODEL` (recommended `gpt-oss:120b` or `llama4:maverick`)
+- `OLLAMA_MODEL` (default `gpt-oss:20b` - optimized for tool calling)
 
 Run locally:
 - `npm run server` (starts Express at `http://localhost:4000`)
