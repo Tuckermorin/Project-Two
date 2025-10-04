@@ -1,7 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -202,30 +202,9 @@ interface IPSFlowState {
 }
 
 // --------------------------------------------
-// Supabase singleton (no multiple GoTrueClient)
+// Supabase client (shared with auth provider)
 // --------------------------------------------
-const globalForSupabase = globalThis as unknown as {
-  __supabase?: ReturnType<typeof createClient>;
-};
-
-const supabase =
-  globalForSupabase.__supabase ??
-  createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      auth: {
-        storageKey: "tenxiv-auth", // unique key to avoid collisions
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: true,
-      },
-    }
-  );
-
-if (!globalForSupabase.__supabase) {
-  globalForSupabase.__supabase = supabase;
-}
+const supabase = createClient();
 
 export default function IPSPage() {
   // State for the IPS flow
@@ -434,6 +413,13 @@ export default function IPSPage() {
     const ips = allIPSs.find((i) => i.id === ipsId);
     if (!ips) return;
 
+    console.log('🔍 Loading factors for IPS:', ipsId);
+
+    // Check authenticated user
+    const { data: { user } } = await supabase.auth.getUser();
+    console.log('👤 Authenticated user:', user?.id);
+    console.log('📋 IPS user_id:', ips.user_id);
+
     const { data: factors, error } = await supabase
       .from("ips_factors")
       .select("*")
@@ -444,18 +430,36 @@ export default function IPSPage() {
       return;
     }
 
+    console.log('📊 Fetched factors from database:', factors);
+
     const allFactorDefs = await ipsDataService.getAllFactors();
+    console.log('📚 Available factor definitions:', allFactorDefs?.length || 0);
+
     const enriched = (factors || []).map((f: any) => {
       const info = allFactorDefs.find(
         (df: any) => df.id === f.factor_id || df.name === f.factor_name
       );
-      return {
+
+      const enrichedFactor = {
         ...f,
+        factor_name: f.factor_name || info?.name || f.factor_id,
         type: info?.type || "quantitative",
         category: info?.category || "Unknown",
+        weight: f.weight || 0,
+        enabled: f.enabled !== false,
       };
+
+      console.log(`  ✓ Factor ${f.factor_id}:`, {
+        name: enrichedFactor.factor_name,
+        type: enrichedFactor.type,
+        weight: enrichedFactor.weight,
+        matched: !!info
+      });
+
+      return enrichedFactor;
     });
 
+    console.log('✅ Enriched factors:', enriched.length, 'factors ready to display');
     setDetailsDialog({ isOpen: true, ips, factors: enriched });
   };
 
@@ -504,7 +508,7 @@ export default function IPSPage() {
 
     // Ensure factors for the existing strategies are loaded so the selector isn't blank
     try {
-      const defs = ipsDataService.getFactorsForStrategies(
+      const defs = await ipsDataService.getFactorsForStrategies(
         ((ips as any).strategies || []) as string[]
       );
       setFactorDefinitions(defs);
@@ -858,6 +862,7 @@ const handleSaveIPS = async (ipsData: any) => {
               isEditing={!!state.currentIPSId}
               initialName={current?.name}
               initialDescription={current?.description}
+              selectedStrategies={state.selectedStrategies}
             />
           );
         })()}

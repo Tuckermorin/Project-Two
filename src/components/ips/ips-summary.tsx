@@ -32,17 +32,19 @@ interface IPSSummaryProps {
   isEditing?: boolean;
   initialName?: string;
   initialDescription?: string;
+  selectedStrategies?: string[];
 }
 
-export function IPSSummary({ 
-  selectedFactors, 
-  factorConfigurations, 
-  onBack, 
-  onSave, 
+export function IPSSummary({
+  selectedFactors,
+  factorConfigurations,
+  onBack,
+  onSave,
   factorDefinitions,
   isEditing = false,
   initialName,
-  initialDescription
+  initialDescription,
+  selectedStrategies = []
 }: IPSSummaryProps) {
   const [ipsName, setIPSName] = useState<string>(initialName ?? (isEditing ? 'Updated Strategy' : 'My Trading Strategy'));
   const [ipsDescription, setIPSDescription] = useState<string>(initialDescription ?? '');
@@ -57,12 +59,16 @@ export function IPSSummary({
   }, [isEditing, initialName, initialDescription]);
 
   const enabledFactors = Array.from(selectedFactors).filter(
-    factorName => factorConfigurations[factorName]?.enabled
+    factorName => {
+      const config = factorConfigurations[factorName];
+      return config && config.enabled !== false;
+    }
   );
 
-  const totalWeight = Object.values(factorConfigurations)
-    .filter((config: any) => config.enabled)
-    .reduce((sum: number, config: any) => sum + config.weight, 0);
+  const totalWeight = enabledFactors.reduce((sum: number, factorName: string) => {
+    const config = factorConfigurations[factorName];
+    return sum + (config?.weight || 0);
+  }, 0);
 
   const avgWeight = enabledFactors.length > 0 ? totalWeight / enabledFactors.length : 0;
 
@@ -80,11 +86,12 @@ export function IPSSummary({
     }
 
     setIsSaving(true);
-    
+
     try {
       const ipsData = {
         name: ipsName.trim(),
         description: ipsDescription.trim(),
+        strategies: selectedStrategies,
         factors: enabledFactors,
         configurations: factorConfigurations,
       };
@@ -262,59 +269,6 @@ export function IPSSummary({
                 );
               })}
             </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Validation & Warnings */}
-      <Card className="mb-8">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <Shield className="h-5 w-5 text-yellow-600" />
-            Validation & Recommendations
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-3">
-            {/* Weight Balance Check */}
-            {totalWeight > enabledFactors.length * 10 && (
-              <div className="flex items-center gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <div className="h-2 w-2 bg-yellow-500 rounded-full" />
-                <span className="text-sm text-yellow-800">
-                  <strong>High total weight detected:</strong> Consider reducing some factor weights for better balance.
-                </span>
-              </div>
-            )}
-
-            {/* Factor Count Check */}
-            {enabledFactors.length < 3 && (
-              <div className="flex items-center gap-2 p-3 bg-orange-50 border border-orange-200 rounded-lg">
-                <div className="h-2 w-2 bg-orange-500 rounded-full" />
-                <span className="text-sm text-orange-800">
-                  <strong>Few factors enabled:</strong> Consider adding more factors for comprehensive analysis.
-                </span>
-              </div>
-            )}
-
-            {/* Type Balance Check */}
-            {getFactorsByType('quantitative').length === 0 && (
-              <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <div className="h-2 w-2 bg-blue-500 rounded-full" />
-                <span className="text-sm text-blue-800">
-                  <strong>No quantitative factors:</strong> Consider adding financial metrics for data-driven decisions.
-                </span>
-              </div>
-            )}
-
-            {/* Success State */}
-            {enabledFactors.length >= 5 && totalWeight <= enabledFactors.length * 8 && (
-              <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg">
-                <CheckCircle className="h-4 w-4 text-green-600" />
-                <span className="text-sm text-green-800">
-                  <strong>Configuration looks good!</strong> Your IPS is well-balanced and ready to use.
-                </span>
-              </div>
-            )}
           </div>
         </CardContent>
       </Card>

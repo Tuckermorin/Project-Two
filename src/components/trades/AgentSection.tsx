@@ -89,11 +89,6 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
   const [selectedCandidate, setSelectedCandidate] = useState<Candidate | null>(null);
   const [addingToProspective, setAddingToProspective] = useState(false);
   const [numberOfContracts, setNumberOfContracts] = useState<string>("1");
-  const [deltaShortLeg, setDeltaShortLeg] = useState<string>("");
-  const [theta, setTheta] = useState<string>("");
-  const [vega, setVega] = useState<string>("");
-  const [ivAtEntry, setIvAtEntry] = useState<string>("");
-  const [sector, setSector] = useState<string>("");
   const [watchlistDialogOpen, setWatchlistDialogOpen] = useState(false);
   const [watchlistItems, setWatchlistItems] = useState<Array<{ symbol: string; company_name?: string }>>([]);
   const [selectedWatchlistSymbols, setSelectedWatchlistSymbols] = useState<Set<string>>(new Set());
@@ -217,6 +212,14 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
 
     const contracts = parseInt(numberOfContracts) || 1;
 
+    // Auto-extract values from candidate data
+    const shortLeg = candidate.contract_legs?.find(l => l.type === "SELL");
+    const deltaValue = shortLeg?.delta ? Math.abs(shortLeg.delta) : null;
+    const thetaValue = (shortLeg as any)?.theta ? parseFloat((shortLeg as any).theta) : null;
+    const vegaValue = (shortLeg as any)?.vega ? parseFloat((shortLeg as any).vega) : null;
+    const ivValue = (shortLeg as any)?.iv ? parseFloat((shortLeg as any).iv) * 100 : null;
+    const sectorValue = candidate.detailed_analysis?.api_data?.sector || null;
+
     setAddingToProspective(true);
     try {
       const res = await fetch("/api/prospectives", {
@@ -225,7 +228,7 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
         body: JSON.stringify({
           id: candidate.id,
           run_id: runId,
-          user_id: userId, // Add userId to ensure consistency
+          user_id: userId,
           symbol: candidate.symbol,
           strategy: candidate.strategy,
           contract_legs: candidate.contract_legs,
@@ -240,11 +243,11 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
           ips_score: candidate.score,
           expiration_date: candidate.contract_legs?.[0]?.expiry,
           number_of_contracts: contracts,
-          delta_short_leg: deltaShortLeg ? parseFloat(deltaShortLeg) : null,
-          theta: theta ? parseFloat(theta) : null,
-          vega: vega ? parseFloat(vega) : null,
-          iv_at_entry: ivAtEntry ? parseFloat(ivAtEntry) : null,
-          sector: sector || null,
+          delta_short_leg: deltaValue,
+          theta: thetaValue,
+          vega: vegaValue,
+          iv_at_entry: ivValue,
+          sector: sectorValue,
         }),
       });
 
@@ -255,13 +258,8 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
       router.push(`/trades?highlight=${encodeURIComponent(json.id)}`);
       setDetailsDialogOpen(false);
 
-      // Reset all fields to default
+      // Reset number of contracts
       setNumberOfContracts("1");
-      setDeltaShortLeg("");
-      setTheta("");
-      setVega("");
-      setIvAtEntry("");
-      setSector("");
     } catch (error: any) {
       setError(error.message);
     } finally {
@@ -456,13 +454,7 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                           variant="outline"
                           onClick={() => {
                             setSelectedCandidate(c);
-                            // Reset all fields to default when opening
                             setNumberOfContracts("1");
-                            setDeltaShortLeg("");
-                            setTheta("");
-                            setVega("");
-                            setIvAtEntry("");
-                            setSector("");
                             setDetailsDialogOpen(true);
                           }}
                         >
@@ -744,92 +736,70 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                   <CardTitle className="text-base">Trade Entry Details</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="contracts-input" className="text-sm font-medium">
-                        Number of Contracts
-                      </Label>
-                      <Input
-                        id="contracts-input"
-                        type="number"
-                        min="1"
-                        value={numberOfContracts}
-                        onChange={(e) => setNumberOfContracts(e.target.value)}
-                        placeholder="1"
-                      />
-                    </div>
+                  {/* Only manual input: Number of Contracts */}
+                  <div className="space-y-2">
+                    <Label htmlFor="contracts-input" className="text-sm font-medium">
+                      Number of Contracts
+                    </Label>
+                    <Input
+                      id="contracts-input"
+                      type="number"
+                      min="1"
+                      value={numberOfContracts}
+                      onChange={(e) => setNumberOfContracts(e.target.value)}
+                      placeholder="1"
+                      className="max-w-xs"
+                    />
+                  </div>
 
-                    <div className="space-y-2">
-                      <Label htmlFor="delta-input" className="text-sm font-medium">
-                        Delta (Short Leg)
-                      </Label>
-                      <Input
-                        id="delta-input"
-                        type="number"
-                        step="0.01"
-                        value={deltaShortLeg}
-                        onChange={(e) => setDeltaShortLeg(e.target.value)}
-                        placeholder="0.25"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="theta-input" className="text-sm font-medium">
-                        Theta
-                      </Label>
-                      <Input
-                        id="theta-input"
-                        type="number"
-                        step="0.01"
-                        value={theta}
-                        onChange={(e) => setTheta(e.target.value)}
-                        placeholder="-0.05"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="vega-input" className="text-sm font-medium">
-                        Vega
-                      </Label>
-                      <Input
-                        id="vega-input"
-                        type="number"
-                        step="0.01"
-                        value={vega}
-                        onChange={(e) => setVega(e.target.value)}
-                        placeholder="0.15"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="iv-input" className="text-sm font-medium">
-                        IV at Entry (%)
-                      </Label>
-                      <Input
-                        id="iv-input"
-                        type="number"
-                        step="0.1"
-                        value={ivAtEntry}
-                        onChange={(e) => setIvAtEntry(e.target.value)}
-                        placeholder="25.5"
-                      />
-                    </div>
-
-                    <div className="space-y-2">
-                      <Label htmlFor="sector-input" className="text-sm font-medium">
-                        Sector
-                      </Label>
-                      <Input
-                        id="sector-input"
-                        type="text"
-                        value={sector}
-                        onChange={(e) => setSector(e.target.value)}
-                        placeholder="Technology"
-                      />
+                  {/* Auto-populated data (read-only display) */}
+                  <div>
+                    <h4 className="text-sm font-medium mb-3">Auto-Populated Metrics from Options Chain</h4>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
+                      <div>
+                        <div className="text-xs text-muted-foreground">Delta (Short Leg)</div>
+                        <div className="font-medium">
+                          {selectedCandidate.contract_legs.find(l => l.type === "SELL")?.delta
+                            ? Math.abs(selectedCandidate.contract_legs.find(l => l.type === "SELL")!.delta!).toFixed(3)
+                            : "N/A"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Theta</div>
+                        <div className="font-medium">
+                          {(selectedCandidate.contract_legs.find(l => l.type === "SELL") as any)?.theta?.toFixed(3) || "N/A"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Vega</div>
+                        <div className="font-medium">
+                          {(selectedCandidate.contract_legs.find(l => l.type === "SELL") as any)?.vega?.toFixed(3) || "N/A"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">IV at Entry</div>
+                        <div className="font-medium">
+                          {(selectedCandidate.contract_legs.find(l => l.type === "SELL") as any)?.iv
+                            ? ((selectedCandidate.contract_legs.find(l => l.type === "SELL") as any).iv * 100).toFixed(1) + "%"
+                            : "N/A"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Sector</div>
+                        <div className="font-medium">
+                          {selectedCandidate.detailed_analysis?.api_data?.sector || "N/A"}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">Open Interest</div>
+                        <div className="font-medium">
+                          {(selectedCandidate.contract_legs.find(l => l.type === "SELL") as any)?.oi?.toLocaleString() || "N/A"}
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Enter trade metrics to track performance
+                    Metrics are automatically extracted from options chain and fundamental data
                   </p>
                 </CardContent>
               </Card>

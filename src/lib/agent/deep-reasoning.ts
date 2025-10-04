@@ -89,9 +89,9 @@ export function analyzeIPSCompliance(
   let total_score = 0;
   let total_weight = 0;
 
-  // Get delta from contract legs if available
+  // Get delta from actual contract legs (not features placeholder)
   const shortLeg = candidate.contract_legs?.find((l) => l.type === "SELL");
-  const delta = shortLeg ? Math.abs(features.delta ?? 0.25) : 0.25; // Default assumption
+  const delta = shortLeg?.delta ? Math.abs(shortLeg.delta) : 0.25; // Use actual delta from contract
 
   for (const factor of ipsConfig.factors) {
     if (!factor.enabled) continue;

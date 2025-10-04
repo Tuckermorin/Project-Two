@@ -128,6 +128,8 @@ async function fetchMarketData(state: AgentState): Promise<Partial<AgentState>> 
         asof: result.asof,
       };
 
+      console.log(`[FetchMarketData] Got ${normalized.length} contracts for ${symbol}`);
+
       // Fetch company fundamentals
       try {
         console.log(`[FetchMarketData] Fetching fundamentals for ${symbol}`);
@@ -232,26 +234,23 @@ async function generateCandidates(state: AgentState): Promise<Partial<AgentState
   console.log("[GenerateCandidates] Generating IPS-optimized trade ideas");
   const candidates: any[] = [];
 
-  // Get IPS delta preferences if available
-  let deltaMin = -0.40;
-  let deltaMax = -0.05;
+  // Get IPS delta preferences - target optimal range 0.12-0.15 for better returns
+  let deltaMin = 0.12;
+  let deltaMax = 0.15;
 
   if (state.ipsConfig?.factors) {
     const deltaFactor = state.ipsConfig.factors.find(f =>
-      f.factor_key === "delta" || f.factor_key === "delta_max"
+      f.factor_key === "delta" || f.factor_key === "delta_max" || f.factor_key === "opt-delta"
     );
     if (deltaFactor && deltaFactor.threshold) {
-      // If IPS specifies delta range, use it (e.g., -0.20 to -0.10)
-      if (deltaFactor.direction === "lte") {
-        deltaMax = deltaFactor.threshold; // e.g., -0.10
-        deltaMin = deltaFactor.threshold * 2; // e.g., -0.20
-      } else if (deltaFactor.direction === "gte") {
-        deltaMin = deltaFactor.threshold;
-        deltaMax = deltaFactor.threshold / 2;
-      }
-      console.log(`[GenerateCandidates] Using IPS delta range: ${deltaMin.toFixed(2)} to ${deltaMax.toFixed(2)}`);
+      // If IPS specifies max delta, use it and calculate optimal min (80% of max)
+      deltaMax = Math.abs(deltaFactor.threshold); // e.g., 0.18
+      deltaMin = deltaMax * 0.67; // e.g., 0.12 (optimal range for returns)
+      console.log(`[GenerateCandidates] Using IPS delta range: ${deltaMin.toFixed(3)} to ${deltaMax.toFixed(3)}`);
     }
   }
+
+  console.log(`[GenerateCandidates] Target delta range: ${deltaMin.toFixed(3)} to ${deltaMax.toFixed(3)}`);
 
   for (const symbol of state.symbols) {
     const data = state.marketData[symbol];
@@ -265,12 +264,24 @@ async function generateCandidates(state: AgentState): Promise<Partial<AgentState
 
     // Filter for put credit spreads
     const puts = contracts.filter((c: any) => c.option_type === "P" && c.expiry);
+    console.log(`[GenerateCandidates] ${symbol}: ${puts.length} puts from ${contracts.length} total contracts`);
 
     // Group by expiration
     const expirations = [...new Set(puts.map((p: any) => p.expiry))];
+    console.log(`[GenerateCandidates] ${symbol}: ${expirations.length} expirations found: ${expirations.slice(0, 3).join(', ')}`);
 
     for (const expiry of expirations.slice(0, 3)) {
       const expiryPuts = puts.filter((p: any) => p.expiry === expiry);
+
+      console.log(`[GenerateCandidates] ${symbol} expiry ${expiry}: ${expiryPuts.length} puts, sample delta: ${expiryPuts[0]?.delta || 'N/A'}, current price: ${currentPrice}`);
+
+      // Check if deltas are in small scale (< 0.01) - likely need different handling
+      const sampleDelta = Math.abs(expiryPuts[0]?.delta || 0);
+      const useDeltaFiltering = sampleDelta > 0.01; // Only use delta filtering if values are in normal range
+
+      if (!useDeltaFiltering && sampleDelta > 0) {
+        console.log(`[GenerateCandidates] ${symbol} expiry ${expiry}: Delta values too small (${sampleDelta.toFixed(5)}), using moneyness filtering instead`);
+      }
 
       // Filter OTM puts with proper delta ranges
       const otmPuts = expiryPuts
@@ -278,23 +289,41 @@ async function generateCandidates(state: AgentState): Promise<Partial<AgentState
           if (!p.strike || !p.bid || !p.ask) return false;
           if (p.strike >= currentPrice) return false; // Must be OTM
 
-          // Apply IPS delta filter if delta data available
-          if (p.delta) {
-            const absDelta = Math.abs(p.delta);
-            if (absDelta < Math.abs(deltaMax) || absDelta > Math.abs(deltaMin)) {
-              return false; // Outside IPS delta range
-            }
+          // Use moneyness-based filtering since deltas are unreliable
+          const moneyness = p.strike / currentPrice;
+          // For ~0.12-0.15 delta puts, we want strikes around 88-85% of current price
+          // Being more generous to get some candidates
+          if (moneyness > 0.92 || moneyness < 0.75) {
+            return false;
           }
 
           return true;
         })
         .sort((a: any, b: any) => {
-          // Sort by delta (closest to IPS target first)
+          // Sort by delta (closest to IPS target first) or by moneyness if no delta
           const targetDelta = (deltaMin + deltaMax) / 2;
-          const aDiff = Math.abs(Math.abs(a.delta || 0) - Math.abs(targetDelta));
-          const bDiff = Math.abs(Math.abs(b.delta || 0) - Math.abs(targetDelta));
-          return aDiff - bDiff;
+
+          const aHasDelta = a.delta != null && a.delta !== undefined;
+          const bHasDelta = b.delta != null && b.delta !== undefined;
+
+          if (aHasDelta && bHasDelta) {
+            const aDiff = Math.abs(Math.abs(a.delta) - Math.abs(targetDelta));
+            const bDiff = Math.abs(Math.abs(b.delta) - Math.abs(targetDelta));
+            return aDiff - bDiff;
+          } else if (aHasDelta) {
+            return -1; // Prefer contracts with delta
+          } else if (bHasDelta) {
+            return 1;
+          } else {
+            // Both missing delta - sort by moneyness (closer to 0.86 is better for ~0.13 delta)
+            const targetMoneyness = 0.86;
+            const aMoneyness = a.strike / currentPrice;
+            const bMoneyness = b.strike / currentPrice;
+            return Math.abs(aMoneyness - targetMoneyness) - Math.abs(bMoneyness - targetMoneyness);
+          }
         });
+
+      console.log(`[GenerateCandidates] ${symbol} expiry ${expiry}: ${otmPuts.length} OTM puts after filtering (need ≥2 for spreads)`);
 
       if (otmPuts.length < 2) continue;
 
@@ -342,6 +371,13 @@ async function generateCandidates(state: AgentState): Promise<Partial<AgentState
               strike: shortPut.strike,
               expiry: shortPut.expiry,
               delta: shortPut.delta,
+              theta: shortPut.theta,
+              vega: shortPut.vega,
+              iv: shortPut.iv,
+              bid: shortPut.bid,
+              ask: shortPut.ask,
+              oi: shortPut.oi,
+              volume: shortPut.volume,
             },
             {
               type: "BUY",
@@ -349,6 +385,13 @@ async function generateCandidates(state: AgentState): Promise<Partial<AgentState
               strike: longPut.strike,
               expiry: longPut.expiry,
               delta: longPut.delta,
+              theta: longPut.theta,
+              vega: longPut.vega,
+              iv: longPut.iv,
+              bid: longPut.bid,
+              ask: longPut.ask,
+              oi: longPut.oi,
+              volume: longPut.volume,
             },
           ],
           entry_mid: entryMid,
@@ -464,6 +507,200 @@ async function deepReasoning(state: AgentState): Promise<Partial<AgentState>> {
   };
 }
 
+// Helper: Extract real factor values from actual data sources
+function extractRealFactorValue(
+  factorKey: string,
+  candidate: any,
+  features: any,
+  fundamentalData: any,
+  marketData: any,
+  macroData?: any
+): number | null {
+  const shortLeg = candidate.contract_legs?.find((l: any) => l.type === "SELL");
+
+  switch (factorKey) {
+    // Delta factors
+    case "delta":
+    case "delta_max":
+    case "opt-delta":
+      return shortLeg?.delta ? Math.abs(shortLeg.delta) : null;
+
+    // IV Rank
+    case "iv_rank":
+    case "opt-iv-rank":
+      // Calculate IV rank from options chain
+      const contracts = marketData?.contracts || [];
+      const ivValues = contracts.map((c: any) => c.iv).filter((v: any) => v != null);
+      if (ivValues.length < 10) return null;
+      ivValues.sort((a: number, b: number) => a - b);
+      const currentIV = shortLeg?.iv;
+      if (!currentIV) return null;
+      const rank = ivValues.filter((v: number) => v <= currentIV).length / ivValues.length;
+      return rank * 100; // Convert to percentile
+
+    // Greeks
+    case "theta":
+    case "opt-theta":
+      return shortLeg?.theta ? parseFloat(shortLeg.theta) : null;
+
+    case "vega":
+    case "opt-vega":
+      return shortLeg?.vega ? parseFloat(shortLeg.vega) : null;
+
+    // Open Interest
+    case "open_interest":
+    case "opt-open-interest":
+      return shortLeg?.oi ? parseInt(shortLeg.oi) : null;
+
+    // Bid-Ask Spread
+    case "bid_ask_spread":
+    case "opt-bid-ask-spread":
+      if (shortLeg?.bid && shortLeg?.ask) {
+        return Math.abs(shortLeg.ask - shortLeg.bid);
+      }
+      return null;
+
+    // IV / Implied Volatility
+    case "iv":
+    case "opt-iv":
+    case "implied_volatility":
+      return shortLeg?.iv ? parseFloat(shortLeg.iv) : null;
+
+    // Market Cap
+    case "market_cap":
+    case "market_cap_category":
+    case "calc-market-cap-category":
+      const mcStr = fundamentalData?.MarketCapitalization;
+      return mcStr ? parseFloat(mcStr) : null;
+
+    // P/E Ratio
+    case "pe_ratio":
+      const peStr = fundamentalData?.PERatio;
+      return peStr ? parseFloat(peStr) : null;
+
+    // Beta
+    case "beta":
+      const betaStr = fundamentalData?.Beta;
+      return betaStr ? parseFloat(betaStr) : null;
+
+    // Analyst Rating
+    case "analyst_target_price":
+    case "analyst_rating":
+    case "tavily-analyst-rating-avg":
+      const targetStr = fundamentalData?.AnalystTargetPrice;
+      return targetStr ? parseFloat(targetStr) : null;
+
+    // Momentum (50-day MA)
+    case "momentum":
+    case "momentum_50d":
+    case "50_day_moving_average":
+    case "av-50-day-ma":
+    case "av-mom":
+      const price = marketData?.quote?.["Global Quote"]?.["05. price"];
+      const ma50Str = fundamentalData?.["50DayMovingAverage"];
+      if (price && ma50Str) {
+        const ma50 = parseFloat(ma50Str);
+        const current = parseFloat(price);
+        return ((current - ma50) / ma50) * 100;
+      }
+      return null;
+
+    // 200-day MA
+    case "momentum_200d":
+    case "200_day_moving_average":
+    case "av-200-day-ma":
+      const price200 = marketData?.quote?.["Global Quote"]?.["05. price"];
+      const ma200Str = fundamentalData?.["200DayMovingAverage"];
+      if (price200 && ma200Str) {
+        const ma200 = parseFloat(ma200Str);
+        const current200 = parseFloat(price200);
+        return ((current200 - ma200) / ma200) * 100;
+      }
+      return null;
+
+    // 52-week position
+    case "week_52_position":
+    case "52w_range_position":
+    case "calc-52w-range-position":
+      const currentPrice = marketData?.quote?.["Global Quote"]?.["05. price"];
+      const high52 = fundamentalData?.["52WeekHigh"];
+      const low52 = fundamentalData?.["52WeekLow"];
+      if (currentPrice && high52 && low52) {
+        const current = parseFloat(currentPrice);
+        const high = parseFloat(high52);
+        const low = parseFloat(low52);
+        return ((current - low) / (high - low)) * 100;
+      }
+      return null;
+
+    // Distance from 52-week high
+    case "distance_from_52w_high":
+    case "calc-dist-52w-high":
+      const currentPrice2 = marketData?.quote?.["Global Quote"]?.["05. price"];
+      const high522 = fundamentalData?.["52WeekHigh"];
+      if (currentPrice2 && high522) {
+        const current = parseFloat(currentPrice2);
+        const high = parseFloat(high522);
+        return ((high - current) / high) * 100;
+      }
+      return null;
+
+    // Sentiment Score
+    case "sentiment_score":
+    case "news_sentiment_score":
+    case "tavily-news-sentiment-score":
+      // Extract from Tavily news results
+      const newsResults = candidate.detailed_analysis?.news_results || [];
+      if (newsResults.length === 0) return 0.5; // Neutral default
+
+      let positiveCount = 0;
+      let negativeCount = 0;
+      newsResults.forEach((article: any) => {
+        const text = (article.title + ' ' + (article.snippet || article.content || '')).toLowerCase();
+        if (text.match(/bullish|upgrade|beat|strong|growth|positive|outperform/)) positiveCount++;
+        if (text.match(/bearish|downgrade|miss|weak|decline|negative|underperform|concern/)) negativeCount++;
+      });
+
+      const total = positiveCount + negativeCount;
+      if (total === 0) return 0.5; // Neutral
+      return (positiveCount / total);
+
+    // News Volume
+    case "news_volume":
+    case "tavily-news-volume":
+      const newsCount = candidate.detailed_analysis?.news_results?.length || 0;
+      return newsCount;
+
+    // Put/Call Ratios
+    case "put_call_ratio":
+    case "opt-put-call-ratio":
+    case "calc-put-call-oi-ratio":
+      // Would need additional options data to calculate
+      return null;
+
+    // IV Percentile
+    case "iv_percentile":
+    case "calc-iv-percentile":
+      // Would need historical IV data
+      return null;
+
+    // Social Media Sentiment
+    case "social_sentiment":
+    case "tavily-social-sentiment":
+      // Would need social media data from Tavily
+      return null;
+
+    // Inflation Rate
+    case "inflation_rate":
+    case "av-inflation":
+      return macroData?.["DFF"]?.[0]?.value || null;
+
+    default:
+      // Fallback to features for unmatched keys
+      return features[factorKey] ?? null;
+  }
+}
+
 // Node 6: ScoreIPS
 async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
   console.log("[ScoreIPS] Scoring trades with IPS:", state.ipsConfig?.name || "default");
@@ -520,17 +757,6 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
     breakdown.risk_reward = c.max_profit / (c.max_loss || 1);
     breakdown.guardrails = c.guardrail_flags;
 
-    const scoreObj = {
-      symbol: c.symbol,
-      strategy: c.strategy,
-      score: scorePercent,
-      breakdown,
-      version: state.ipsConfig ? "ips_v1" : "default_v1",
-    };
-
-    scores.push(scoreObj);
-    await db.persistScore(state.runId, scoreObj);
-
     // Build IPS factors comparison for detailed analysis
     if (!c.detailed_analysis) c.detailed_analysis = {};
     c.detailed_analysis.ips_factors = [];
@@ -581,20 +807,22 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
 
         console.log(`[ScoreIPS] Processing factor: ${factorName}, key: ${factorKey}, threshold: ${threshold}, direction: ${direction}`);
 
-        // Get actual value from features or reasoning chain
-        let actualValue: any = features[factorKey];
+        // Get actual value from real data sources using extraction function
+        let actualValue: any = extractRealFactorValue(
+          factorKey,
+          c,
+          features,
+          state.fundamentalData?.[c.symbol],
+          state.marketData?.[c.symbol],
+          state.macroData
+        );
 
-        // Check reasoning chain for more accurate value
-        if (c.reasoning_chain?.ips_compliance?.factor_scores?.[factorKey]) {
+        console.log(`[ScoreIPS] ${factorName} (${factorKey}): extracted value = ${actualValue}`);
+
+        // Check reasoning chain as fallback
+        if (actualValue == null && c.reasoning_chain?.ips_compliance?.factor_scores?.[factorKey]) {
           actualValue = c.reasoning_chain.ips_compliance.factor_scores[factorKey].value;
-        }
-
-        // For delta, use the actual contract delta if available
-        if (factorKey === "delta" || factorKey === "delta_max") {
-          const shortLeg = c.contract_legs?.find((l: any) => l.type === "SELL");
-          if (shortLeg?.delta) {
-            actualValue = shortLeg.delta;
-          }
+          console.log(`[ScoreIPS] ${factorName}: used reasoning chain fallback = ${actualValue}`);
         }
 
         // Determine target display
@@ -636,6 +864,30 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
       }
 
       console.log(`[ScoreIPS] Built ${c.detailed_analysis.ips_factors.length} factor comparisons for ${c.symbol}`);
+
+      // Recalculate IPS score based on actual factor values
+      const totalFactors = c.detailed_analysis.ips_factors.length;
+      const passedFactors = c.detailed_analysis.ips_factors.filter((f: any) => f.status === "pass").length;
+      const totalWeight = state.ipsConfig.factors.reduce((sum: number, f: any) => sum + (f.weight || 0), 0);
+      const passedWeight = state.ipsConfig.factors
+        .filter((f: any) => {
+          const factorResult = c.detailed_analysis.ips_factors.find((df: any) => df.factor_key === f.factor_key);
+          return factorResult?.status === "pass";
+        })
+        .reduce((sum: number, f: any) => sum + (f.weight || 0), 0);
+
+      // Calculate weighted IPS fit percentage
+      const ipsFitPercent = totalWeight > 0 ? (passedWeight / totalWeight) * 100 : 0;
+      scorePercent = ipsFitPercent; // Update the score to reflect actual factor performance
+
+      console.log(`[ScoreIPS] ${c.symbol} IPS Fit recalculated: ${ipsFitPercent.toFixed(1)}% (${passedFactors}/${totalFactors} factors passed, ${passedWeight.toFixed(1)}/${totalWeight.toFixed(1)} weight)`);
+
+      // Update breakdown with recalculated values
+      breakdown.ips_fit = ipsFitPercent;
+      breakdown.factors_passed = passedFactors;
+      breakdown.total_factors = totalFactors;
+      breakdown.weight_passed = passedWeight;
+      breakdown.total_weight = totalWeight;
     } else if (c.reasoning_chain?.ips_compliance?.factor_scores) {
       // Use reasoning chain compliance data if IPS config not available
       for (const [factorName, factorData] of Object.entries(c.reasoning_chain.ips_compliance.factor_scores)) {
@@ -672,6 +924,21 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
         }
       }
     }
+
+    // Save the score after all factor processing is complete
+    const scoreObj = {
+      symbol: c.symbol,
+      strategy: c.strategy,
+      score: scorePercent,
+      breakdown,
+      version: state.ipsConfig ? "ips_v1" : "default_v1",
+    };
+
+    scores.push(scoreObj);
+    await db.persistScore(state.runId, scoreObj);
+
+    // Store score in candidate for UI display
+    c.score = scorePercent;
   }
 
   return { scores, candidates: state.candidates };
@@ -807,16 +1074,18 @@ Be factual and direct. Reference the actual data (IPS fit %, news sentiment, spe
 
       // Check if trade is out of IPS (score < 60) and generate justification
       if (ipsScore < 60) {
-        const justificationPrompt = `You are a seasoned options trader reviewing this ${c.symbol} ${c.strategy.replace(/_/g, " ")} trade that scores ${ipsFitPct}% on the IPS criteria (below the 60% threshold).
+        const keyConcerns = factorHighlights.filter((h) => h.includes("low") || h.includes("limited") || h.includes("risk")).join(", ") || "standard spread risk";
 
-Key concerns: ${factorHighlights.filter((h) => h.includes("low") || h.includes("limited") || h.includes("risk")).join(", ") || "standard spread risk"}
+        const justificationPrompt = `As a professional options trader, provide a 2-3 sentence assessment of this ${c.symbol} ${c.strategy.replace(/_/g, " ")} trade scoring ${ipsFitPct}% on IPS criteria.
 
-Provide a professional assessment in 2-3 sentences covering:
-- Why this trade might still offer value despite the lower IPS score
-- The specific edge or opportunity that makes it worth considering
-- What market conditions would make this trade attractive
+Key concerns: ${keyConcerns}
 
-Write as if you're advising a colleague. Be direct and honest - if the risk/reward isn't compelling, say so.`;
+Address:
+1. Why this trade may still offer value despite the lower score
+2. The specific edge or opportunity present
+3. Ideal market conditions for this setup
+
+Be direct and honest about risk/reward. Do not include your reasoning process - provide only the final professional assessment.`;
 
         try {
           const justification = await rationaleLLM(justificationPrompt);
