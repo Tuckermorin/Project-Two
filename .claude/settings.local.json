@@ -29,7 +29,9 @@
       "Bash(curl -s \"https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=TSLA&apikey=XF0H4EC893MP2ATJ\")",
       "Bash(curl -s \"https://www.alphavantage.co/query?function=HISTORICAL_OPTIONS&symbol=MU&apikey=XF0H4EC893MP2ATJ\")",
       "Bash(node:*)",
-      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT factor_id, factor_name, collection_method, enabled FROM ips_factors WHERE ips_id = ''20edfe58-2e44-4234-96cd-503011577cf4'' ORDER BY factor_name;\")"
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT factor_id, factor_name, collection_method, enabled FROM ips_factors WHERE ips_id = ''20edfe58-2e44-4234-96cd-503011577cf4'' ORDER BY factor_name;\")",
+      "Bash(awk:*)",
+      "Bash(taskkill:*)"
     ],
     "deny": [],
     "ask": []

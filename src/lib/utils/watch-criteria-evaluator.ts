@@ -182,32 +182,36 @@ export function evaluateExitStrategy(
   if (!exitStrategies) return null
 
   // Check profit target
-  if (exitStrategies.profit?.enabled && trade.max_gain && trade.current_price && trade.entry_price) {
-    const currentPnL = (trade.entry_price - trade.current_price) * 100 // Simplified for credit spreads
-    const profitTarget = exitStrategies.profit.type === 'percentage'
-      ? (trade.max_gain * exitStrategies.profit.value / 100)
-      : exitStrategies.profit.value
+  if (exitStrategies.profit?.enabled && trade.max_gain && trade.credit_received && trade.current_price) {
+    // For credit spreads: profit = credit_received - current_price (cost to buy back)
+    const currentProfit = trade.credit_received - trade.current_price
+    const profitPercent = (currentProfit / trade.max_gain) * 100
 
-    if (currentPnL >= profitTarget) {
+    const profitTarget = exitStrategies.profit.value // This is the percentage (e.g., 50 for 50%)
+
+    if (profitPercent >= profitTarget) {
       return {
         shouldExit: true,
-        reason: `Profit target reached (${exitStrategies.profit.value}${exitStrategies.profit.type === 'percentage' ? '%' : '$'})`,
+        reason: `Profit target reached: ${profitPercent.toFixed(0)}% of max gain (target: ${profitTarget}%)`,
         type: 'profit'
       }
     }
   }
 
   // Check stop loss
-  if (exitStrategies.loss?.enabled && trade.max_loss && trade.current_price && trade.entry_price) {
-    const currentLoss = (trade.current_price - trade.entry_price) * 100 // Simplified
-    const lossThreshold = exitStrategies.loss.type === 'percentage'
-      ? (trade.credit_received || 0) * exitStrategies.loss.value / 100
-      : exitStrategies.loss.value
+  if (exitStrategies.loss?.enabled && trade.credit_received && trade.current_price) {
+    // For credit spreads: cost to close (buy back)
+    // If current_price is the spread value, loss = current_price (what you pay to buy it back)
+    // Loss as % of credit = (current_price / credit_received) * 100
+    const costToClose = trade.current_price
+    const lossPercent = (costToClose / trade.credit_received) * 100
 
-    if (currentLoss >= lossThreshold) {
+    const lossThreshold = exitStrategies.loss.value // This is the percentage (e.g., 250 for 250%)
+
+    if (lossPercent >= lossThreshold) {
       return {
         shouldExit: true,
-        reason: `Stop loss triggered (${exitStrategies.loss.value}${exitStrategies.loss.type === 'percentage' ? '%' : '$'})`,
+        reason: `Stop loss triggered: ${lossPercent.toFixed(0)}% of credit (threshold: ${lossThreshold}%)`,
         type: 'loss'
       }
     }

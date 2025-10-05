@@ -13,6 +13,7 @@ import { tavilySearch } from "@/lib/clients/tavily";
 import { rationaleLLM } from "@/lib/clients/llm";
 import * as db from "@/lib/db/agent";
 import { buildReasoningChain } from "./deep-reasoning";
+import { evaluatePCSTrade, formatEvaluation, type PCSCandidate } from "./pcs-trade-evaluator";
 
 // State interface
 interface AgentState {
@@ -145,6 +146,43 @@ async function fetchMarketData(state: AgentState): Promise<Partial<AgentState>> 
         fundamentalData[symbol] = null;
       }
 
+      // Fetch 5-day historical prices for momentum calculation
+      try {
+        console.log(`[FetchMarketData] Fetching 5-day price history for ${symbol}`);
+        const avClient = getAlphaVantageClient();
+        const dailySeries = await queue.add(() =>
+          pRetry(() => avClient.getDailyAdjustedSeries(symbol, 'compact'), { retries: 2 })
+        );
+
+        // Extract prices from the last 6 days (to ensure we get 5 days ago even with weekends)
+        if (dailySeries) {
+          const dates = Object.keys(dailySeries).sort().reverse();
+          if (dates.length >= 6) {
+            const price5dAgo = parseFloat(dailySeries[dates[5]]['5. adjusted close']);
+            marketData[symbol].price5dAgo = price5dAgo;
+            console.log(`[FetchMarketData] Got 5-day price for ${symbol}: $${price5dAgo}`);
+          }
+        }
+      } catch (priceError: any) {
+        console.warn(`[FetchMarketData] Failed to fetch 5-day price for ${symbol}:`, priceError.message);
+      }
+
+      // Fetch ATR-14 for volatility assessment
+      try {
+        console.log(`[FetchMarketData] Fetching ATR-14 for ${symbol}`);
+        const avClient = getAlphaVantageClient();
+        const atr = await queue.add(() =>
+          pRetry(() => avClient.getATR(symbol, 14, 'daily'), { retries: 2 })
+        );
+
+        if (atr && atr.value) {
+          marketData[symbol].atr14 = atr.value;
+          console.log(`[FetchMarketData] Got ATR-14 for ${symbol}: ${atr.value.toFixed(2)}`);
+        }
+      } catch (atrError: any) {
+        console.warn(`[FetchMarketData] Failed to fetch ATR-14 for ${symbol}:`, atrError.message);
+      }
+
       const latency = Date.now() - start;
       await db.logTool(state.runId, "FetchMarketData", { symbol }, { count: normalized.length }, latency);
     } catch (error: any) {
@@ -161,7 +199,7 @@ async function fetchMacroData(state: AgentState): Promise<Partial<AgentState>> {
   console.log("[FetchMacroData] Fetching macro indicators");
   try {
     const start = Date.now();
-    const series = ["DFF", "UNRATE", "T10Y3M"]; // Fed Funds, Unemployment, Term Spread
+    const series = ["DFF", "UNRATE", "T10Y3M", "CPIAUCSL"]; // Fed Funds, Unemployment, Term Spread, CPI (Inflation)
     const fredSlice = await queue.add(() =>
       pRetry(() => getSeries(series), { retries: 3 })
     );
@@ -415,7 +453,10 @@ async function riskGuardrails(state: AgentState): Promise<Partial<AgentState>> {
   const candidates = state.candidates.map((c) => ({ ...c }));
 
   for (const c of candidates) {
-    // Check for earnings in next 10 days
+    // Initialize detailed_analysis if not exists
+    if (!c.detailed_analysis) c.detailed_analysis = {};
+
+    // Check for earnings in next 10 days and store news results
     try {
       const tav = await tavilySearch(
         `${c.symbol} earnings date next 10 days`,
@@ -424,8 +465,42 @@ async function riskGuardrails(state: AgentState): Promise<Partial<AgentState>> {
       c.guardrail_flags.earnings_risk = tav.results.some((r: any) =>
         r.snippet.toLowerCase().includes("earnings")
       );
+      // Store earnings news for news volume/sentiment analysis
+      if (!c.detailed_analysis.news_results) c.detailed_analysis.news_results = [];
+      c.detailed_analysis.news_results.push(...tav.results);
     } catch (error) {
       c.guardrail_flags.earnings_risk = false;
+    }
+
+    // Fetch 7-day news for sentiment and volume
+    try {
+      const newsSearch7d = await tavilySearch(
+        `${c.symbol} stock news analysis`,
+        { time_range: "week", max_results: 15 }
+      );
+      if (!c.detailed_analysis.news_results) c.detailed_analysis.news_results = [];
+      c.detailed_analysis.news_results.push(...newsSearch7d.results);
+      c.detailed_analysis.news_count_7d = newsSearch7d.results.length;
+      console.log(`[RiskGuardrails] ${c.symbol}: Found ${newsSearch7d.results.length} news articles (7d)`);
+    } catch (error) {
+      console.warn(`[RiskGuardrails] Failed to fetch 7-day news for ${c.symbol}:`, error);
+      c.detailed_analysis.news_count_7d = 0;
+    }
+
+    // Fetch 90-day news count for z-score baseline
+    try {
+      const newsSearch90d = await tavilySearch(
+        `${c.symbol} stock news`,
+        { time_range: "month", max_results: 50 }
+      );
+      // Tavily "month" returns ~30 days, so we'll multiply by 3 for an estimate
+      // This is an approximation since Tavily doesn't support custom date ranges
+      const estimatedCount90d = newsSearch90d.results.length * 3;
+      c.detailed_analysis.news_count_90d = estimatedCount90d;
+      console.log(`[RiskGuardrails] ${c.symbol}: Estimated 90-day news count: ${estimatedCount90d} (based on ${newsSearch90d.results.length} in 30d)`);
+    } catch (error) {
+      console.warn(`[RiskGuardrails] Failed to fetch 90-day news estimate for ${c.symbol}:`, error);
+      c.detailed_analysis.news_count_90d = 0;
     }
 
     // Check macro events
@@ -674,30 +749,151 @@ function extractRealFactorValue(
     // Put/Call Ratios
     case "put_call_ratio":
     case "opt-put-call-ratio":
+      // Calculate from options volume
+      const allContracts = marketData?.contracts || [];
+      const putVolume = allContracts
+        .filter((c: any) => c.option_type === "P")
+        .reduce((sum: number, c: any) => sum + (c.volume || 0), 0);
+      const callVolume = allContracts
+        .filter((c: any) => c.option_type === "C")
+        .reduce((sum: number, c: any) => sum + (c.volume || 0), 0);
+      return callVolume > 0 ? putVolume / callVolume : null;
+
     case "calc-put-call-oi-ratio":
-      // Would need additional options data to calculate
-      return null;
+      // Calculate from open interest
+      const allContractsOI = marketData?.contracts || [];
+      const putOI = allContractsOI
+        .filter((c: any) => c.option_type === "P")
+        .reduce((sum: number, c: any) => sum + (c.oi || 0), 0);
+      const callOI = allContractsOI
+        .filter((c: any) => c.option_type === "C")
+        .reduce((sum: number, c: any) => sum + (c.oi || 0), 0);
+      return callOI > 0 ? putOI / callOI : null;
 
     // IV Percentile
     case "iv_percentile":
     case "calc-iv-percentile":
-      // Would need historical IV data
-      return null;
+      // Calculate IV percentile from options chain (same as IV rank)
+      const contractsForIVP = marketData?.contracts || [];
+      const ivValuesForPercentile = contractsForIVP.map((c: any) => c.iv).filter((v: any) => v != null);
+      if (ivValuesForPercentile.length < 10) return null;
+      ivValuesForPercentile.sort((a: number, b: number) => a - b);
+      const currentIVForPercentile = shortLeg?.iv;
+      if (!currentIVForPercentile) return null;
+      const percentile = ivValuesForPercentile.filter((v: number) => v <= currentIVForPercentile).length / ivValuesForPercentile.length;
+      return percentile * 100; // Convert to percentile
 
     // Social Media Sentiment
     case "social_sentiment":
     case "tavily-social-sentiment":
-      // Would need social media data from Tavily
-      return null;
+      // Use same sentiment analysis as news for now
+      const socialResults = candidate.detailed_analysis?.news_results || [];
+      if (socialResults.length === 0) return 0; // Neutral default
 
-    // Inflation Rate
+      let socialPositive = 0;
+      let socialNegative = 0;
+      socialResults.forEach((article: any) => {
+        const text = (article.title + ' ' + (article.snippet || article.content || '')).toLowerCase();
+        if (text.match(/bullish|upgrade|beat|strong|growth|positive|outperform/)) socialPositive++;
+        if (text.match(/bearish|downgrade|miss|weak|decline|negative|underperform|concern/)) socialNegative++;
+      });
+
+      const socialTotal = socialPositive + socialNegative;
+      if (socialTotal === 0) return 0; // Neutral
+      // Return a sentiment score from -1 to 1, then convert to 0-2 range for threshold comparison
+      const sentimentScore = (socialPositive - socialNegative) / socialTotal;
+      return sentimentScore; // Range: -1 (very bearish) to 1 (very bullish), 0 is neutral
+
+    // Inflation Rate (Year-over-Year CPI change as percentage)
     case "inflation_rate":
     case "av-inflation":
-      return macroData?.["DFF"]?.[0]?.value || null;
+      const cpiData = macroData?.["CPIAUCSL"];
+      if (!cpiData || cpiData.length < 13) return null; // Need at least 13 months for YoY
+      const currentCPI = cpiData[0]?.value; // Most recent
+      const yearAgoCPI = cpiData[12]?.value; // 12 months ago
+      if (!currentCPI || !yearAgoCPI) return null;
+      // Calculate YoY inflation rate as percentage
+      return ((currentCPI - yearAgoCPI) / yearAgoCPI) * 100;
 
     default:
       // Fallback to features for unmatched keys
       return features[factorKey] ?? null;
+  }
+}
+
+function evaluateFactorScore(
+  direction: string | null | undefined,
+  value: number,
+  threshold?: number | null,
+  thresholdMax?: number | null
+): { score: number; met: boolean } {
+  const clampScore = (v: number) => {
+    if (!Number.isFinite(v)) return 0;
+    return Math.max(0, Math.min(100, v));
+  };
+
+  const tv = threshold != null ? Number(threshold) : null;
+  const tvMax = thresholdMax != null ? Number(thresholdMax) : null;
+  const val = Number(value);
+
+  switch (direction) {
+    case "gte":
+    case "gt": {
+      if (tv == null) return { score: 0, met: false };
+      if (val >= tv) {
+        const base = Math.abs(tv) > 0 ? Math.abs(tv) : 1;
+        const excessRatio = (val - tv) / base;
+        return { score: clampScore(70 + excessRatio * 30), met: true };
+      }
+      const ratio = tv === 0 ? 0 : val / tv;
+      return { score: clampScore(ratio * 100), met: false };
+    }
+    case "lte":
+    case "lt": {
+      if (tv == null) return { score: 0, met: false };
+      if (val <= tv) {
+        const base = Math.abs(tv) > 0 ? Math.abs(tv) : 1;
+        const savings = (tv - val) / base;
+        return { score: clampScore(70 + savings * 30), met: true };
+      }
+      const base = Math.abs(tv) > 0 ? Math.abs(tv) : 1;
+      const excess = (val - tv) / base;
+      return { score: clampScore(70 - excess * 70), met: false };
+    }
+    case "range":
+    case "between": {
+      if (tv == null || tvMax == null) return { score: 0, met: false };
+      if (val >= tv && val <= tvMax) {
+        const rangeSize = tvMax - tv;
+        if (rangeSize === 0) return { score: 100, met: true };
+        const position = (val - tv) / rangeSize;
+        const distanceFromCenter = Math.abs(position - 0.5);
+        return { score: clampScore(70 + (1 - distanceFromCenter * 2) * 30), met: true };
+      }
+      const boundsWidth = Math.abs(tvMax - tv) || 1;
+      const distance = val < tv ? tv - val : val - tvMax;
+      return { score: clampScore(70 - (distance / boundsWidth) * 70), met: false };
+    }
+    case "eq":
+    case "equals": {
+      if (tv == null) return { score: 0, met: false };
+      const denom = Math.abs(tv) > 0 ? Math.abs(tv) : Math.max(Math.abs(val), 1);
+      const relErr = Math.abs(val - tv) / denom;
+      if (relErr <= 0.05) return { score: 100, met: true };
+      if (relErr <= 0.1) return { score: 90, met: false };
+      if (relErr <= 0.2) return { score: 75, met: false };
+      if (relErr <= 0.5) return { score: clampScore(50), met: false };
+      return { score: clampScore(50 - relErr * 50), met: false };
+    }
+    default: {
+      if (tv != null) {
+        const denom = Math.abs(tv) > 0 ? Math.abs(tv) : Math.max(Math.abs(val), 1);
+        const relErr = Math.abs(val - tv) / denom;
+        const baseScore = relErr <= 0.1 ? 80 : relErr <= 0.2 ? 65 : Math.max(35, 65 - relErr * 45);
+        return { score: clampScore(baseScore), met: relErr <= 0.1 };
+      }
+      return { score: 50, met: false };
+    }
   }
 }
 
@@ -707,12 +903,10 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
   const scores: any[] = [];
 
   for (const c of state.candidates) {
-    // Use adjusted score from DeepReasoning if available, otherwise fallback to simple scoring
     let scorePercent = 50;
     let breakdown: Record<string, any> = {};
 
     if (c.reasoning_chain && c.adjusted_score != null) {
-      // Use the comprehensive score from DeepReasoning
       scorePercent = c.adjusted_score;
       breakdown = {
         ips_baseline: c.ips_baseline_score,
@@ -722,12 +916,10 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
         recommendation: c.recommendation,
       };
 
-      // Add detailed IPS factor scores
       if (c.reasoning_chain.ips_compliance?.factor_scores) {
         breakdown.ips_factors = c.reasoning_chain.ips_compliance.factor_scores;
       }
     } else {
-      // Fallback to old simple scoring if DeepReasoning was skipped
       const features = state.features[c.symbol] || {};
       const { scoreAgainstIPS } = await import("@/lib/ips/scorer");
 
@@ -742,7 +934,6 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
 
       scorePercent = score * 100;
 
-      // Apply simple adjustments
       if (c.guardrail_flags?.earnings_risk) scorePercent -= 15;
       if (c.guardrail_flags?.macro_event) scorePercent -= 10;
 
@@ -757,19 +948,10 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
     breakdown.risk_reward = c.max_profit / (c.max_loss || 1);
     breakdown.guardrails = c.guardrail_flags;
 
-    // Build IPS factors comparison for detailed analysis
     if (!c.detailed_analysis) c.detailed_analysis = {};
-    c.detailed_analysis.ips_factors = [];
+    const factorDetails: any[] = [];
     c.detailed_analysis.ips_name = state.ipsConfig?.name || "Unknown IPS";
 
-    console.log(`[ScoreIPS] Candidate ${c.symbol} - IPS check:`, {
-      has_ipsConfig: !!state.ipsConfig,
-      ips_name: state.ipsConfig?.name,
-      has_factors: !!state.ipsConfig?.factors,
-      factors_count: state.ipsConfig?.factors?.length || 0,
-    });
-
-    // Add fundamental data from API
     const fundamentals = state.fundamentalData?.[c.symbol];
     if (fundamentals) {
       c.detailed_analysis.api_data = {
@@ -793,21 +975,41 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
       console.log(`[ScoreIPS] No fundamental data available for ${c.symbol}`);
     }
 
-    // If we have IPS config, use it to build comprehensive factor comparison
     if (state.ipsConfig && state.ipsConfig.factors) {
       console.log(`[ScoreIPS] Building IPS factors for ${c.symbol}, have ${state.ipsConfig.factors.length} IPS factors`);
       const features = state.features[c.symbol] || {};
 
+      const parseNumeric = (value: any): number | null => {
+        if (value === null || value === undefined) return null;
+        if (typeof value === "number") return Number.isFinite(value) ? value : null;
+        if (typeof value === "string") {
+          const cleaned = value.replace(/[%,$]/g, "").trim();
+          if (!cleaned) return null;
+          const parsed = Number(cleaned);
+          return Number.isFinite(parsed) ? parsed : null;
+        }
+        return null;
+      };
+
+      let totalWeight = 0;
+      let weightedContribution = 0;
+      let weightPassed = 0;
+      let factorsPassed = 0;
+      let evaluatedWeight = 0;
+      let factorsEvaluated = 0;
+
       for (const ipsFactor of state.ipsConfig.factors) {
         const factorKey = ipsFactor.factor_key;
         const factorName = ipsFactor.display_name || factorKey;
-        const weight = ipsFactor.weight;
+        const weight = ipsFactor.weight || 0;
         const threshold = ipsFactor.threshold;
+        const thresholdMax = ipsFactor.threshold_max;
         const direction = ipsFactor.direction;
 
-        console.log(`[ScoreIPS] Processing factor: ${factorName}, key: ${factorKey}, threshold: ${threshold}, direction: ${direction}`);
+        totalWeight += weight;
 
-        // Get actual value from real data sources using extraction function
+        console.log(`[ScoreIPS] Processing factor: ${factorName}, key: ${factorKey}, threshold: ${threshold}, threshold_max: ${thresholdMax}, direction: ${direction}`);
+
         let actualValue: any = extractRealFactorValue(
           factorKey,
           c,
@@ -819,80 +1021,99 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
 
         console.log(`[ScoreIPS] ${factorName} (${factorKey}): extracted value = ${actualValue}`);
 
-        // Check reasoning chain as fallback
         if (actualValue == null && c.reasoning_chain?.ips_compliance?.factor_scores?.[factorKey]) {
           actualValue = c.reasoning_chain.ips_compliance.factor_scores[factorKey].value;
           console.log(`[ScoreIPS] ${factorName}: used reasoning chain fallback = ${actualValue}`);
         }
 
-        // Determine target display
-        let targetDisplay = "N/A";
-        if (threshold !== null && threshold !== undefined) {
-          const directionSymbol = direction === "gte" ? "≥" : direction === "lte" ? "≤" : "=";
-          targetDisplay = `${directionSymbol} ${threshold}`;
-        }
+        const numericValue = parseNumeric(actualValue);
+        const hasThreshold = threshold !== null && threshold !== undefined;
+        const hasThresholdMax = thresholdMax !== null && thresholdMax !== undefined;
 
-        // Determine status
-        let status: "pass" | "fail" | "warning" = "warning";
-        if (actualValue !== null && actualValue !== undefined && threshold !== null && threshold !== undefined) {
-          const numValue = typeof actualValue === "number" ? actualValue : parseFloat(actualValue);
-          if (!isNaN(numValue)) {
-            if (direction === "gte") {
-              status = numValue >= threshold ? "pass" : "fail";
-            } else if (direction === "lte") {
-              status = numValue <= threshold ? "pass" : "fail";
-            } else {
-              // No direction specified, just show the value
-              status = "warning";
-            }
+        let factorScore = 0;
+        let met = false;
+
+        if (numericValue != null && hasThreshold) {
+          const evaluation = evaluateFactorScore(direction ?? null, numericValue, threshold ?? null, thresholdMax ?? null);
+          factorScore = evaluation.score;
+          met = evaluation.met;
+          weightedContribution += (factorScore / 100) * weight;
+          evaluatedWeight += weight;
+          factorsEvaluated += 1;
+          if (met) {
+            weightPassed += weight;
+            factorsPassed += 1;
           }
+        } else if (numericValue != null && !hasThreshold) {
+          factorScore = 50;
+          weightedContribution += (factorScore / 100) * weight;
+          evaluatedWeight += weight;
+          factorsEvaluated += 1;
         }
 
-        // Format actual value
-        const actualDisplay = actualValue !== null && actualValue !== undefined
-          ? (typeof actualValue === "number" ? actualValue.toFixed(2) : String(actualValue))
+        let status: "pass" | "fail" | "warning" = "warning";
+        if (!hasThreshold) {
+          status = "warning";
+        } else if (numericValue == null) {
+          status = "fail";
+        } else {
+          status = met ? "pass" : "fail";
+        }
+
+        const targetDisplay = hasThreshold
+          ? direction === "range" && hasThresholdMax
+            ? `${threshold} to ${thresholdMax}`
+            : direction === "gte"
+              ? `>= ${threshold}`
+              : direction === "lte"
+                ? `<= ${threshold}`
+                : `= ${threshold}`
           : "N/A";
 
-        c.detailed_analysis.ips_factors.push({
+        const actualDisplay =
+          actualValue !== null && actualValue !== undefined
+            ? typeof actualValue === "number"
+              ? actualValue.toFixed(2)
+              : String(actualValue)
+            : "N/A";
+
+        factorDetails.push({
           name: factorName,
           factor_key: factorKey,
           target: targetDisplay,
           actual: actualDisplay,
-          weight: (weight * 100).toFixed(0) + "%", // Convert 0-1 scale to percentage
+          weight: (weight * 100).toFixed(0) + "%",
           status,
+          score: factorScore.toFixed(1),
         });
       }
 
-      console.log(`[ScoreIPS] Built ${c.detailed_analysis.ips_factors.length} factor comparisons for ${c.symbol}`);
+      console.log(`[ScoreIPS] Built ${factorDetails.length} factor comparisons for ${c.symbol}`);
 
-      // Recalculate IPS score based on actual factor values
-      const totalFactors = c.detailed_analysis.ips_factors.length;
-      const passedFactors = c.detailed_analysis.ips_factors.filter((f: any) => f.status === "pass").length;
-      const totalWeight = state.ipsConfig.factors.reduce((sum: number, f: any) => sum + (f.weight || 0), 0);
-      const passedWeight = state.ipsConfig.factors
-        .filter((f: any) => {
-          const factorResult = c.detailed_analysis.ips_factors.find((df: any) => df.factor_key === f.factor_key);
-          return factorResult?.status === "pass";
-        })
-        .reduce((sum: number, f: any) => sum + (f.weight || 0), 0);
+      const ipsFitPercent = totalWeight > 0 ? (weightedContribution / totalWeight) * 100 : 0;
+      scorePercent = Math.max(0, Math.min(100, ipsFitPercent));
 
-      // Calculate weighted IPS fit percentage
-      const ipsFitPercent = totalWeight > 0 ? (passedWeight / totalWeight) * 100 : 0;
-      scorePercent = ipsFitPercent; // Update the score to reflect actual factor performance
-
-      console.log(`[ScoreIPS] ${c.symbol} IPS Fit recalculated: ${ipsFitPercent.toFixed(1)}% (${passedFactors}/${totalFactors} factors passed, ${passedWeight.toFixed(1)}/${totalWeight.toFixed(1)} weight)`);
-
-      // Update breakdown with recalculated values
-      breakdown.ips_fit = ipsFitPercent;
-      breakdown.factors_passed = passedFactors;
-      breakdown.total_factors = totalFactors;
-      breakdown.weight_passed = passedWeight;
+      breakdown.ips_fit = scorePercent;
+      breakdown.factors_passed = factorsPassed;
+      breakdown.total_factors = factorDetails.length;
+      breakdown.weight_passed = weightPassed;
       breakdown.total_weight = totalWeight;
+      breakdown.weighted_sum = weightedContribution;
+      breakdown.weight_evaluated = evaluatedWeight;
+      breakdown.weight_missing = Math.max(totalWeight - evaluatedWeight, 0);
+      breakdown.factors_evaluated = factorsEvaluated;
+      breakdown.factor_scores = factorDetails.map((detail) => ({
+        factor: detail.factor_key || detail.name,
+        score: Number(detail.score),
+        status: detail.status,
+        weight: detail.weight,
+      }));
+
+      c.detailed_analysis.ips_factors = factorDetails;
     } else if (c.reasoning_chain?.ips_compliance?.factor_scores) {
-      // Use reasoning chain compliance data if IPS config not available
       for (const [factorName, factorData] of Object.entries(c.reasoning_chain.ips_compliance.factor_scores)) {
         if (typeof factorData === "object" && "value" in factorData) {
-          c.detailed_analysis.ips_factors.push({
+          factorDetails.push({
             name: factorName,
             target: factorData.target || "see IPS",
             actual: typeof factorData.value === "number" ? factorData.value.toFixed(2) : String(factorData.value),
@@ -901,31 +1122,107 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
         }
       }
 
-      // Add violations and passes summary
       if (c.reasoning_chain.ips_compliance.violations?.length > 0) {
         c.detailed_analysis.ips_violations = c.reasoning_chain.ips_compliance.violations;
       }
       if (c.reasoning_chain.ips_compliance.passes?.length > 0) {
         c.detailed_analysis.ips_passes = c.reasoning_chain.ips_compliance.passes;
       }
+
+      c.detailed_analysis.ips_factors = factorDetails;
     } else {
-      // Fallback to old format
       for (const [factorName, weightData] of Object.entries(breakdown)) {
         if (factorName === "risk_reward" || factorName === "guardrails") continue;
         if (typeof weightData === "object" && "value" in weightData && weightData.value !== undefined) {
           const value = weightData.value;
           const status = value >= 60 ? "pass" : value >= 40 ? "warning" : "fail";
-          c.detailed_analysis.ips_factors.push({
+          factorDetails.push({
             name: factorName,
             target: "> 60 (preferred)",
             actual: value.toFixed(1),
             status,
+            score: value.toFixed(1),
           });
         }
       }
+
+      c.detailed_analysis.ips_factors = factorDetails;
     }
 
-    // Save the score after all factor processing is complete
+    scorePercent = Math.max(0, Math.min(100, scorePercent));
+
+    // Enhanced PCS Trade Evaluation (ChatGPT Framework)
+    if (c.strategy === "put_credit_spread") {
+      try {
+        const shortLeg = c.contract_legs?.find((l: any) => l.type === "SELL");
+        const longLeg = c.contract_legs?.find((l: any) => l.type === "BUY");
+        const quote = state.marketData?.[c.symbol]?.quote?.["Global Quote"];
+        const currentPrice = quote ? parseFloat(quote["05. price"]) : null;
+
+        if (shortLeg && longLeg && currentPrice) {
+          // Calculate DTE
+          const expDate = new Date(shortLeg.expiry);
+          const now = new Date();
+          const dte = Math.ceil((expDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+          // Build PCS candidate for enhanced evaluation
+          const marketDataForSymbol = state.marketData?.[c.symbol];
+          const pcsCandidate: PCSCandidate = {
+            symbol: c.symbol,
+            shortStrike: shortLeg.strike,
+            longStrike: longLeg.strike,
+            credit: c.entry_mid || 0,
+            width: shortLeg.strike - longLeg.strike,
+            dte,
+            currentPrice,
+            shortDelta: shortLeg.delta ? Math.abs(shortLeg.delta) : undefined,
+            shortTheta: shortLeg.theta || undefined,
+            shortVega: shortLeg.vega || undefined,
+            ivRank: breakdown.iv_rank?.value || state.features?.[c.symbol]?.iv_rank || undefined,
+            bidAskSpread: shortLeg.bid && shortLeg.ask ? Math.abs(shortLeg.ask - shortLeg.bid) : undefined,
+            openInterest: shortLeg.oi || undefined,
+            newsCount7d: c.detailed_analysis?.news_count_7d || undefined,
+            newsCount90d: c.detailed_analysis?.news_count_90d || undefined,
+            price5dAgo: marketDataForSymbol?.price5dAgo || undefined,
+            atr14: marketDataForSymbol?.atr14 || undefined,
+            supportLevel: undefined, // TODO: Add support level from TA
+          };
+
+          // Run enhanced evaluation
+          const pcsEval = evaluatePCSTrade(pcsCandidate);
+
+          // Store enhanced evaluation in detailed_analysis
+          if (!c.detailed_analysis) c.detailed_analysis = {};
+          c.detailed_analysis.pcs_evaluation = {
+            decision: pcsEval.decision,
+            score: pcsEval.score,
+            hard_gates: pcsEval.hardGates,
+            strengths: pcsEval.strengths,
+            concerns: pcsEval.concerns,
+            fixes: pcsEval.fixes,
+            management: pcsEval.management,
+            formatted_output: formatEvaluation(pcsEval),
+          };
+
+          console.log(`[ScoreIPS] Enhanced PCS evaluation for ${c.symbol}: ${pcsEval.decision} (score: ${pcsEval.score})`);
+
+          // Optionally adjust score based on PCS evaluation
+          // If hard gates fail, significantly reduce score
+          if (pcsEval.hardGates.creditToWidth === 'FAIL' ||
+              pcsEval.hardGates.newsZScore === 'FAIL' ||
+              pcsEval.hardGates.liquidity === 'FAIL') {
+            scorePercent = Math.min(scorePercent, 40); // Cap at 40 if hard gates fail
+            console.log(`[ScoreIPS] ${c.symbol}: Hard gate failure, capped score at 40`);
+          }
+
+          // Store enhanced score
+          c.pcs_enhanced_score = pcsEval.score;
+        }
+      } catch (error: any) {
+        console.warn(`[ScoreIPS] Enhanced PCS evaluation failed for ${c.symbol}:`, error.message);
+      }
+    }
+
     const scoreObj = {
       symbol: c.symbol,
       strategy: c.strategy,
@@ -937,13 +1234,11 @@ async function scoreIPS(state: AgentState): Promise<Partial<AgentState>> {
     scores.push(scoreObj);
     await db.persistScore(state.runId, scoreObj);
 
-    // Store score in candidate for UI display
     c.score = scorePercent;
   }
 
   return { scores, candidates: state.candidates };
 }
-
 // Node 7: LLM_Rationale
 async function llmRationale(state: AgentState): Promise<Partial<AgentState>> {
   console.log("[LLM_Rationale] Generating rationales");
@@ -1034,7 +1329,13 @@ Be factual and direct. Reference the actual data (IPS fit %, news sentiment, spe
                       c.guardrail_flags?.macro_event ? "FOMC event risk" :
                       undefined;
 
-      c.rationale = shortSummary(c.symbol, ipsScore / 100, features, newsSignal, riskNote);
+      // If enhanced PCS evaluation exists, use it as the primary rationale
+      if (c.detailed_analysis?.pcs_evaluation?.formatted_output) {
+        c.rationale = c.detailed_analysis.pcs_evaluation.formatted_output;
+        console.log(`[LLM_Rationale] Using enhanced PCS evaluation for ${c.symbol}`);
+      } else {
+        c.rationale = shortSummary(c.symbol, ipsScore / 100, features, newsSignal, riskNote);
+      }
 
       // Add news summary to detailed analysis
       if (!c.detailed_analysis) c.detailed_analysis = {};
@@ -1105,34 +1406,127 @@ Be direct and honest about risk/reward. Do not include your reasoning process - 
 
 // Node 8: SelectTopK
 async function selectTopK(state: AgentState): Promise<Partial<AgentState>> {
-  console.log("[SelectTopK] Selecting top trades");
+  console.log(`[SelectTopK] Selecting top trades`);
 
-  // Sort by score descending
-  const scored = state.candidates.map((c) => {
-    const scoreData = state.scores.find(
-      (s) => s.symbol === c.symbol && s.strategy === c.strategy
+  const PERFECT_THRESHOLD = 99.9;
+
+  const annotated = state.candidates.map((candidate: any) => {
+    const scoreRecord = state.scores.find(
+      (s) => s.symbol === candidate.symbol && s.strategy === candidate.strategy
     );
-    return { ...c, score: scoreData?.score || 0 };
+    const ipsScore = scoreRecord?.score ?? candidate.score ?? 0;
+    const breakdown: any = scoreRecord?.breakdown ?? {};
+
+    const maxProfit = Number(candidate.max_profit ?? 0) || 0;
+    const rawMaxLoss = Number(candidate.max_loss ?? 0) || 0;
+    const riskReward = rawMaxLoss > 0 ? maxProfit / rawMaxLoss : 0;
+    const normalizedReturn = Number.isFinite(riskReward) && riskReward > 0 ? Math.min(riskReward * 100, 300) : 0;
+    const weightMissing = typeof breakdown.weight_missing === 'number' ? breakdown.weight_missing : 0;
+    const composite = ipsScore * 0.7 + normalizedReturn * 0.3 - weightMissing * 100;
+
+    const factorScores = Array.isArray(breakdown?.factor_scores) ? breakdown.factor_scores : [];
+    const failingFactors = factorScores
+      .filter((f: any) => f && f.status === 'fail')
+      .sort((a: any, b: any) => {
+        const aWeight = parseFloat(String(a?.weight ?? '').replace('%', '')) || 0;
+        const bWeight = parseFloat(String(b?.weight ?? '').replace('%', '')) || 0;
+        return bWeight - aWeight;
+      })
+      .map((f: any) => f?.name || f?.factor || f?.factor_key)
+      .filter(Boolean);
+
+    return {
+      ...candidate,
+      score: ipsScore,
+      __selection: {
+        alignment: ipsScore,
+        riskReward: Number.isFinite(riskReward) && riskReward > 0 ? riskReward : 0,
+        composite,
+        weightMissing,
+        failingFactors,
+      },
+    };
   });
 
-  scored.sort((a, b) => b.score - a.score);
+  const perfectMatches = annotated.filter((c: any) => c.__selection.alignment >= PERFECT_THRESHOLD);
+  const remainder = annotated.filter((c: any) => c.__selection.alignment < PERFECT_THRESHOLD);
 
-  // Select top 10
-  const selected = scored.slice(0, 10);
+  console.log(`[SelectTopK] Perfect matches: ${perfectMatches.length}/${annotated.length}`);
 
-  // Persist candidates
+  perfectMatches.sort((a: any, b: any) => {
+    const rrDiff = b.__selection.riskReward - a.__selection.riskReward;
+    if (Math.abs(rrDiff) > 1e-4) return rrDiff;
+    const profitDiff = (Number(b.max_profit ?? 0) || 0) - (Number(a.max_profit ?? 0) || 0);
+    if (Math.abs(profitDiff) > 1e-4) return profitDiff;
+    return b.__selection.alignment - a.__selection.alignment;
+  });
+
+  remainder.sort((a: any, b: any) => {
+    const compositeDiff = b.__selection.composite - a.__selection.composite;
+    if (Math.abs(compositeDiff) > 1e-4) return compositeDiff;
+    const alignDiff = b.__selection.alignment - a.__selection.alignment;
+    if (Math.abs(alignDiff) > 1e-4) return alignDiff;
+    const rrDiff = b.__selection.riskReward - a.__selection.riskReward;
+    if (Math.abs(rrDiff) > 1e-4) return rrDiff;
+    return (Number(b.max_profit ?? 0) || 0) - (Number(a.max_profit ?? 0) || 0);
+  });
+
+  const prioritized = [...perfectMatches, ...remainder];
+  const selectedRaw = prioritized.slice(0, 10);
+  const perfectCount = perfectMatches.length;
+
+  const selected = selectedRaw.map((candidate: any, index: number) => {
+    const metrics = candidate.__selection;
+    const group = metrics.alignment >= PERFECT_THRESHOLD ? 'perfect' : 'composite';
+    const rank = index + 1;
+    const formattedAlignment = metrics.alignment.toFixed(1);
+    const formattedRR = metrics.riskReward > 0 ? metrics.riskReward.toFixed(2) : '0.00';
+    const topMisses = metrics.failingFactors.slice(0, 2).join(', ') || 'none';
+
+    const baseReason =
+      group === 'perfect'
+        ? `Perfect IPS alignment (${formattedAlignment}%) with risk/reward ${formattedRR}`
+        : `${perfectCount === 0 ? 'No perfect IPS matches found' : 'Selected after perfect matches'}: IPS ${formattedAlignment}% with risk/reward ${formattedRR}`;
+    const reason =
+      group === 'perfect'
+        ? `${baseReason}.`
+        : `${baseReason}. Key misses: ${topMisses}. Composite score ${metrics.composite.toFixed(1)}.`;
+
+    const cleaned: any = { ...candidate };
+    delete cleaned.__selection;
+
+    if (!cleaned.detailed_analysis) cleaned.detailed_analysis = {};
+    cleaned.detailed_analysis.selection = {
+      group,
+      rank,
+      reason,
+      metrics: {
+        ips_score: Number(metrics.alignment.toFixed(2)),
+        risk_reward: Number(metrics.riskReward.toFixed(4)),
+        composite: Number(metrics.composite.toFixed(2)),
+        weight_missing: Number(metrics.weightMissing.toFixed(4)),
+      },
+      failing_factors: metrics.failingFactors,
+    };
+
+    return cleaned;
+  });
+
   for (const c of selected) {
     console.log(`[SelectTopK] Persisting candidate ${c.symbol}:`, {
       has_detailed_analysis: !!c.detailed_analysis,
       has_ips_factors: !!c.detailed_analysis?.ips_factors,
       ips_factors_count: c.detailed_analysis?.ips_factors?.length || 0,
       ips_name: c.detailed_analysis?.ips_name || 'N/A',
+      selection_group: c.detailed_analysis?.selection?.group || 'composite',
+      selection_rank: c.detailed_analysis?.selection?.rank || null,
     });
     await db.persistCandidate(state.runId, c);
   }
 
   return { selected };
 }
+
 
 // Build graph
 export function buildOptionsAgentGraph() {

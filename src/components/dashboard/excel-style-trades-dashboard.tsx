@@ -11,7 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2, Columns3 } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2, Columns3, TrendingUp, TrendingDown, Clock } from 'lucide-react'
 import { dispatchTradesUpdated } from '@/lib/events'
 import {
   DropdownMenu,
@@ -19,6 +19,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from '@/components/ui/popover'
+import { evaluateExitStrategy, type ExitSignal } from '@/lib/utils/watch-criteria-evaluator'
 
 // Trade data type
 interface Trade {
@@ -52,6 +58,7 @@ interface Trade {
   plDollar?: number
   plPercent?: number
   notes?: string
+  exitSignal?: ExitSignal | null
   [key: string]: any // For dynamic IPS factor columns
 }
 
@@ -211,6 +218,22 @@ export default function ExcelStyleTradesDashboard() {
             })
           } catch {}
         }
+
+        // Fetch IPS configurations with exit strategies
+        let ipsMap: Record<string, any> = {}
+        try {
+          const ipsRes = await fetch('/api/ips', { cache: 'no-store' })
+          const ipsJson = await ipsRes.json()
+          console.log('[Dashboard] Loaded IPS configurations:', ipsJson)
+          if (ipsRes.ok && Array.isArray(ipsJson)) {
+            ipsJson.forEach((ips: any) => {
+              ipsMap[ips.id] = ips
+              console.log(`[Dashboard] IPS ${ips.name} exit_strategies:`, ips.exit_strategies)
+            })
+          }
+        } catch (e) {
+          console.error('Failed to load IPS configurations:', e)
+        }
         const normalized: Trade[] = rows.map((r:any) => {
           const current = (quoteMap[r.symbol] ?? Number(r.current_price ?? 0)) || 0
           const short = Number(r.short_strike ?? 0) || 0
@@ -219,9 +242,34 @@ export default function ExcelStyleTradesDashboard() {
           // WATCH only if IPS score < 75 or % to short < 5%
           const ipsScore = typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined
           const watch = (ipsScore != null && ipsScore < 75) || (percentToShort < 5)
+
+          // Evaluate exit strategy if IPS exists
+          const ips = r.ips_id ? ipsMap[r.ips_id] : null
+          console.log(`[Dashboard] Trade ${r.symbol}: ips_id=${r.ips_id}, ips found=${!!ips}, exit_strategies=${!!ips?.exit_strategies}`)
+
+          const tradeForEval = {
+            current_price: current,
+            entry_price: Number(r.entry_price ?? r.credit_received ?? 0),
+            credit_received: Number(r.credit_received ?? 0),
+            expiration_date: r.expiration_date,
+            max_gain: Number(r.max_gain ?? 0),
+            max_loss: Number(r.max_loss ?? 0),
+          }
+          console.log(`[Dashboard] Trade ${r.symbol} eval data:`, tradeForEval)
+          console.log(`[Dashboard] IPS exit_strategies:`, ips?.exit_strategies)
+
+          const exitSignal = ips?.exit_strategies ? evaluateExitStrategy(tradeForEval, ips.exit_strategies) : null
+          console.log(`[Dashboard] Trade ${r.symbol} exitSignal:`, exitSignal)
+
           let status: 'GOOD' | 'WATCH' | 'EXIT' = 'GOOD'
-          if (watch) status = 'WATCH'
-          else if (percentToShort < 0) status = 'EXIT'
+          if (exitSignal?.shouldExit) {
+            console.log(`[Dashboard] Trade ${r.symbol} marked as EXIT due to: ${exitSignal.reason}`)
+            status = 'EXIT'
+          } else if (watch) {
+            status = 'WATCH'
+          } else if (percentToShort < 0) {
+            status = 'EXIT'
+          }
 
           const obj: Trade = {
             id: r.id,
@@ -248,6 +296,7 @@ export default function ExcelStyleTradesDashboard() {
             ipsScore: typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined,
             ipsName: r.ips_name ?? r.ips_configurations?.name ?? null,
             plPercent: typeof r.pl_percent === 'number' ? Number(r.pl_percent) : undefined,
+            exitSignal,
           }
           return obj
         })
@@ -378,6 +427,41 @@ export default function ExcelStyleTradesDashboard() {
       case 'status': {
         const tag = String(value).toUpperCase()
         const cls = tag === 'GOOD' ? 'bg-green-100 text-green-800 border-green-200' : tag === 'EXIT' ? 'bg-red-100 text-red-800 border-red-200' : 'bg-yellow-100 text-yellow-800 border-yellow-200'
+        const exitSignal = trade.exitSignal
+
+        if (exitSignal?.shouldExit) {
+          const icon = exitSignal.type === 'profit' ? <TrendingUp className="h-3 w-3" /> :
+                      exitSignal.type === 'loss' ? <TrendingDown className="h-3 w-3" /> :
+                      <Clock className="h-3 w-3" />
+
+          return (
+            <Popover>
+              <PopoverTrigger asChild>
+                <Badge className={`${cls} border cursor-pointer hover:opacity-80 flex items-center gap-1`}>
+                  {icon}
+                  {tag}
+                </Badge>
+              </PopoverTrigger>
+              <PopoverContent className="w-64">
+                <div className="space-y-2">
+                  <div className="font-semibold text-sm flex items-center gap-2">
+                    {icon}
+                    {exitSignal.type === 'profit' ? 'Take Profit Signal' :
+                     exitSignal.type === 'loss' ? 'Stop Loss Signal' :
+                     'Time Exit Signal'}
+                  </div>
+                  <div className="text-xs text-gray-600">
+                    {exitSignal.reason}
+                  </div>
+                  <div className="text-xs font-medium text-gray-700 mt-2">
+                    Consider closing this position
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+          )
+        }
+
         return <Badge className={`${cls} border`}>{tag}</Badge>
       }
       case 'deltaShortLeg':

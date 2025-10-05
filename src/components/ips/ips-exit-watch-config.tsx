@@ -107,6 +107,19 @@ export function IPSExitWatchConfig({
     initialWatchCriteria || defaultWatchCriteria
   )
 
+  // Update state when props change (for editing existing IPS)
+  useEffect(() => {
+    if (initialExitStrategies) {
+      setExitStrategies(initialExitStrategies)
+    }
+  }, [initialExitStrategies])
+
+  useEffect(() => {
+    if (initialWatchCriteria) {
+      setWatchCriteria(initialWatchCriteria)
+    }
+  }, [initialWatchCriteria])
+
   // Notify parent of changes
   useEffect(() => {
     onChange(exitStrategies, watchCriteria)

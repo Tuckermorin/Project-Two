@@ -178,6 +178,9 @@ function normalizeIpsRows(rows: unknown): IPSConfiguration[] {
       win_rate,
       avg_roi,
       total_trades,
+      // Include exit strategies and watch criteria
+      exit_strategies: r?.exit_strategies ?? undefined,
+      watch_criteria: r?.watch_criteria ?? undefined,
       // Include any passthrough timestamps if present
       created_at: r?.created_at ?? undefined,
       updated_at: r?.updated_at ?? undefined,
@@ -465,6 +468,9 @@ export default function IPSPage() {
 
   const handleEditIPS = async (ipsId: string) => {
     const ips = allIPSs.find((i) => i.id === ipsId);
+    console.log('[handleEditIPS] Found IPS:', ips);
+    console.log('[handleEditIPS] exit_strategies:', ips?.exit_strategies);
+    console.log('[handleEditIPS] watch_criteria:', ips?.watch_criteria);
     if (!ips) return;
 
     const { data: factors, error } = await supabase
@@ -523,6 +529,8 @@ export default function IPSPage() {
       selectedStrategies: (ips as any).strategies || [],
       selectedFactors: selected,
       factorConfigurations: configurations,
+      exitStrategies: (ips as any).exit_strategies || undefined,
+      watchCriteria: (ips as any).watch_criteria || undefined,
       currentIPSId: ipsId,
     }));
   };
@@ -615,19 +623,19 @@ const handleSaveIPS = async (ipsData: any) => {
         factor_name: factorName,
         weight: config.weight || 1,
         enabled: config.enabled !== false,
-        target_value: config.targetValue || null,
+        target_value: config.targetValue !== '' && config.targetValue !== undefined && config.targetValue !== null ? config.targetValue : null,
         target_operator: config.targetOperator || null,
         preference_direction: config.preferenceDirection || null,
       };
     }
-    
+
     // Return a properly structured factor object
     return {
       factor_id: factorDef.id,
       factor_name: factorDef.name,
       weight: config.weight || 1,
       enabled: config.enabled !== false,
-      target_value: config.targetValue || null,
+      target_value: config.targetValue !== '' && config.targetValue !== undefined && config.targetValue !== null ? config.targetValue : null,
       target_operator: config.targetOperator || null,
       preference_direction: config.preferenceDirection || null,
     };

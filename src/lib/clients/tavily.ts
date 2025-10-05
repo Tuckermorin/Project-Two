@@ -5,7 +5,11 @@ const key = process.env.TAVILY_API_KEY!;
 
 export async function tavilySearch(
   query: string,
-  opts?: { time_range?: string; max_results?: number }
+  opts?: {
+    time_range?: string;
+    max_results?: number;
+    include_domains?: string[];
+  }
 ) {
   // Check if API key is configured
   if (!key || key === "undefined" || key === "null" || !key.trim()) {
@@ -17,16 +21,21 @@ export async function tavilySearch(
     };
   }
 
-  console.log(`[Tavily] Searching for: "${query}" (time_range: ${opts?.time_range ?? "week"}, max_results: ${opts?.max_results ?? 5})`);
+  console.log(`[Tavily] Searching for: "${query}" (time_range: ${opts?.time_range ?? "week"}, max_results: ${opts?.max_results ?? 5}${opts?.include_domains ? `, domains: ${opts.include_domains.join(',')}` : ''})`);
 
   try {
-    const requestBody = {
+    const requestBody: any = {
       api_key: key,
       query,
       include_answer: false,
       max_results: opts?.max_results ?? 5,
       time_range: opts?.time_range ?? "week",
     };
+
+    // Add include_domains if specified
+    if (opts?.include_domains && opts.include_domains.length > 0) {
+      requestBody.include_domains = opts.include_domains;
+    }
 
     console.log(`[Tavily] Request body:`, { ...requestBody, api_key: "[REDACTED]" });
 

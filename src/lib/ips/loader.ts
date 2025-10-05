@@ -4,7 +4,8 @@ type IPSFactor = {
   factor_key: string;           // e.g. "iv_rank", "delta_max", "term_slope"
   weight: number;               // 0..1
   threshold?: number | null;    // optional gating threshold
-  direction?: "gte" | "lte" | null; // how to interpret threshold
+  threshold_max?: number | null; // optional max threshold for range
+  direction?: "gte" | "lte" | "range" | null; // how to interpret threshold
   enabled?: boolean | null;
   // optional meta
   display_name?: string | null;
@@ -131,12 +132,15 @@ export async function loadIPSById(ipsId: string): Promise<IPSConfig> {
         factor_key: f.factor_id,
         weight: Number(f.weight ?? 0) / 10, // Normalize from 1-10 scale to 0-1
         threshold: f.target_value == null ? null : Number(f.target_value),
-        direction: f.target_operator === "gte" ? "gte" : f.target_operator === "lte" ? "lte" : null,
+        threshold_max: f.target_value_max == null ? null : Number(f.target_value_max),
+        direction: f.target_operator === "range" ? "range" :
+                   f.target_operator === "gte" ? "gte" :
+                   f.target_operator === "lte" ? "lte" : null,
         enabled: f.enabled ?? true,
         display_name: f.factor_name ?? null,
         description: null,
       };
-      console.log(`[loadIPSById] Factor: ${factor.display_name}, weight: ${factor.weight}, threshold: ${factor.threshold}, direction: ${factor.direction}`);
+      console.log(`[loadIPSById] Factor: ${factor.display_name}, weight: ${factor.weight}, threshold: ${factor.threshold}, threshold_max: ${factor.threshold_max}, direction: ${factor.direction}`);
       return factor;
     }),
   };

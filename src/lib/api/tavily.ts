@@ -347,7 +347,7 @@ export class TavilyClient {
     });
 
     let shortInterestPercent: number | null = null;
-    let daysTo Cover: number | null = null;
+    let daysToCover: number | null = null;
 
     for (const result of searchResults.results) {
       const content = result.content;
@@ -361,17 +361,17 @@ export class TavilyClient {
       }
 
       // Extract days to cover
-      if (!daysTo Cover) {
+      if (!daysToCover) {
         const daysMatch = content.match(/days to cover[:\s]+(\d+(?:\.\d+)?)/i);
         if (daysMatch) {
-          daysTo Cover = parseFloat(daysMatch[1]);
+          daysToCover = parseFloat(daysMatch[1]);
         }
       }
     }
 
     return {
       shortInterestPercent,
-      daysTo Cover,
+      daysToCover,
     };
   }
 

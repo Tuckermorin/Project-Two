@@ -209,7 +209,7 @@ const QUALITATIVE_FACTORS: FactorDefinition[] = [
 // Options factors (manual input or from options API)
 const OPTIONS_FACTORS: FactorDefinition[] = [
   { id: 'opt-iv', name: 'Implied Volatility', type: 'options', category: 'Options Metrics', data_type: 'percentage', unit: '%' , source: 'alpha_vantage_options' },
-  { id: 'opt-delta', name: 'Delta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' , source: 'alpha_vantage_options' },
+  { id: 'opt-delta', name: 'Delta (Short Leg)', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' , source: 'alpha_vantage_options' },
   { id: 'opt-gamma', name: 'Gamma', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' , source: 'alpha_vantage_options' },
   { id: 'opt-theta', name: 'Theta', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' , source: 'alpha_vantage_options' },
   { id: 'opt-vega', name: 'Vega', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' , source: 'alpha_vantage_options' },

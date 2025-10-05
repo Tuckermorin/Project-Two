@@ -128,6 +128,52 @@ const getFactorInfo = (factorName: string) => {
     return enabledConfigs.length > 0 ? getTotalWeight() / enabledConfigs.length : 0;
   };
 
+  // Helper to get factor unit and data type hints
+  const getFactorHint = (factorName: string): string => {
+    const factor = ALL_FACTORS.find((f: any) => f.name === factorName);
+    if (!factor) return '';
+
+    const hints: Record<string, string> = {
+      // Percentages (enter as decimal, e.g., 4% = 0.04 or 4 for whole number)
+      'Inflation Rate': 'Enter as percentage (e.g., 4 for 4%)',
+      'Dividend Yield': 'Enter as percentage (e.g., 2.5 for 2.5%)',
+      'IV Percentile': 'Enter as percentile (0-100)',
+      'IV Rank': 'Enter as percentile (0-100)',
+
+      // Decimals
+      'Delta (Short Leg)': 'Enter as decimal (e.g., 0.15 for 15 delta)',
+      'Delta': 'Enter as decimal (e.g., 0.15 for 15 delta)',
+      'Theta': 'Enter as decimal (e.g., -0.14)',
+      'Vega': 'Enter as decimal (e.g., 0.08)',
+      'Gamma': 'Enter as decimal',
+      'Implied Volatility': 'Enter as decimal (e.g., 0.51 for 51%)',
+      'Bid-Ask Spread': 'Enter as dollars (e.g., 0.03)',
+
+      // Ratios
+      'Put/Call Ratio': 'Enter as ratio (e.g., 0.85)',
+      'Put/Call OI Ratio': 'Enter as ratio (e.g., 0.90)',
+
+      // Sentiment scores
+      'News Sentiment Score': 'Enter as decimal 0-1 (e.g., 0.5 for neutral)',
+      'Social Media Sentiment': 'Enter as decimal -1 to 1 (0 = neutral)',
+
+      // Whole numbers
+      'News Volume': 'Enter as count (whole number)',
+      'Open Interest': 'Enter as contracts (whole number)',
+      'Volume': 'Enter as shares/contracts (whole number)',
+      'Market Cap Category': 'Enter in dollars (e.g., 2000000000)',
+
+      // Momentum/Moving Averages
+      'Momentum': 'Enter as percentage (e.g., 20 for 20%)',
+      '50 Day Moving Average': 'Enter as ratio (e.g., 1.05 for 5% above)',
+      '200 Day Moving Average': 'Enter as ratio (e.g., 1.10 for 10% above)',
+      '52W Range Position': 'Enter as decimal 0-1 (e.g., 0.8 for 80%)',
+      'Distance from 52W High': 'Enter as percentage (e.g., 15 for 15% below)',
+    };
+
+    return hints[factorName] || (factor.unit ? `Unit: ${factor.unit}` : '');
+  };
+
   const renderFactorConfiguration = (factorName: string) => {
     const config = configurations[factorName];
     if (!config) return null;
@@ -254,7 +300,11 @@ const getFactorInfo = (factorName: string) => {
                         onChange={(e) => updateConfiguration(factorName, 'targetValue', e.target.value)}
                         placeholder="Enter value"
                         className="text-sm"
+                        step="any"
                       />
+                      {getFactorHint(factorName) && (
+                        <p className="text-xs text-gray-500 mt-1">{getFactorHint(factorName)}</p>
+                      )}
                     </div>
                     {config.targetOperator === 'range' && (
                       <div>
