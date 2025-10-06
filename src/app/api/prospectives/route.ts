@@ -65,13 +65,20 @@ export async function POST(req: NextRequest) {
     const long_strike = longLeg?.strike ?? body.long_strike ?? null;
 
     // Numeric economics
+    const numContracts = body.number_of_contracts ?? body.contracts ?? 1;
     const credit_received = body.entry_mid ?? body.credit_received ?? null;
-    const max_gain = body.max_profit ?? null;
-    const max_loss = body.max_loss ?? null;
     const spread_width =
       short_strike != null && long_strike != null
         ? Math.abs(Number(short_strike) - Number(long_strike))
         : body.spread_width ?? null;
+
+    // Calculate max gain and max loss like manual trades: credit * contracts * 100
+    // Max gain = credit received (this is the max profit for a credit spread)
+    // Max loss = (spread width - credit received) * contracts * 100
+    const max_gain = credit_received ? credit_received * numContracts * 100 : null;
+    const max_loss = credit_received && spread_width
+      ? (spread_width - credit_received) * numContracts * 100
+      : null;
 
     // Optional IPS fields
     const ips_id = body.ips_id ?? null;

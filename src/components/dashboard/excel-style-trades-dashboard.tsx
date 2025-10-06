@@ -207,6 +207,7 @@ export default function ExcelStyleTradesDashboard() {
         if (!res.ok) throw new Error(json?.error || 'Failed to load active trades')
         const rows = (json?.data || []) as any[]
         let quoteMap: Record<string, number> = {}
+        let sectorMap: Record<string, string> = {}
         if (rows.length) {
           const symbols = Array.from(new Set(rows.map((r:any)=>r.symbol))).join(',')
           try {
@@ -215,6 +216,7 @@ export default function ExcelStyleTradesDashboard() {
             ;(qJson?.data || []).forEach((q:any)=>{
               const price = Number(q.currentPrice ?? q.last ?? q.close ?? q.price)
               if (!isNaN(price)) quoteMap[q.symbol] = price
+              if (q.sector) sectorMap[q.symbol] = q.sector
             })
           } catch {}
         }
@@ -236,19 +238,22 @@ export default function ExcelStyleTradesDashboard() {
         }
         const normalized: Trade[] = rows.map((r:any) => {
           const current = (quoteMap[r.symbol] ?? Number(r.current_price ?? 0)) || 0
-          const short = Number(r.short_strike ?? 0) || 0
+          const short = Number(r.short_strike ?? r.strike_price_short ?? 0) || 0
           const percentToShort = short > 0 ? ((current - short) / short) * 100 : 0
           const exp = r.expiration_date || ''
           // WATCH only if IPS score < 75 or % to short < 5%
           const ipsScore = typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined
-          const watch = (ipsScore != null && ipsScore < 75) || (percentToShort < 5)
+          const watch = (ipsScore != null && ipsScore < 75) || (short > 0 && percentToShort < 5)
+          console.log(`[Dashboard] Trade ${r.symbol}: current=${current}, short=${short}, percentToShort=${percentToShort.toFixed(2)}%, ipsScore=${ipsScore}, watch=${watch}`)
 
           // Evaluate exit strategy if IPS exists
           const ips = r.ips_id ? ipsMap[r.ips_id] : null
           console.log(`[Dashboard] Trade ${r.symbol}: ips_id=${r.ips_id}, ips found=${!!ips}, exit_strategies=${!!ips?.exit_strategies}`)
 
+          // For credit spreads, we need the spread price, not the underlying price
+          // Until we track spread prices, don't pass current_price to avoid false exit signals
           const tradeForEval = {
-            current_price: current,
+            // current_price: current,  // This is the underlying price, not spread price
             entry_price: Number(r.entry_price ?? r.credit_received ?? 0),
             credit_received: Number(r.credit_received ?? 0),
             expiration_date: r.expiration_date,
@@ -279,7 +284,7 @@ export default function ExcelStyleTradesDashboard() {
             expDate: exp,
             dte: exp ? daysToExpiry(exp) : 0,
             contractType: toTitle(String(r.contract_type || '')),
-            contracts: Number(r.number_of_contracts ?? 0) || 0,
+            contracts: Number(r.number_of_contracts ?? r.contracts ?? 0) || 0,
             shortStrike: Number(r.short_strike ?? 0) || 0,
             longStrike: Number(r.long_strike ?? 0) || 0,
             creditReceived: Number(r.credit_received ?? 0) || 0,
@@ -291,7 +296,7 @@ export default function ExcelStyleTradesDashboard() {
             theta: Number(r.theta ?? 0) || 0,
             vega: Number(r.vega ?? 0) || 0,
             ivAtEntry: Number(r.iv_at_entry ?? 0) || 0,
-            sector: r.sector || '-',
+            sector: r.sector || sectorMap[r.symbol] || '-',
             status,
             ipsScore: typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined,
             ipsName: r.ips_name ?? r.ips_configurations?.name ?? null,
@@ -402,7 +407,7 @@ export default function ExcelStyleTradesDashboard() {
   }
 
   // Format value for display
-  const formatValue = (value: any, column: Column) => {
+  const formatValue = (value: any, column: Column, trade?: any) => {
     if (value === null || value === undefined) return '-'
 
     switch(column.key) {
@@ -625,11 +630,11 @@ export default function ExcelStyleTradesDashboard() {
                   {columnsToShow.map((column) => {
                     const cellValue = trade[column.key]
                     return (
-                      <td 
+                      <td
                         key={column.key}
                         className="border border-gray-200 px-3 py-2"
                       >
-                        {formatValue(cellValue, column)}
+                        {formatValue(cellValue, column, trade)}
                       </td>
                     )
                   })}
