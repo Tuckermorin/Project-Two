@@ -180,17 +180,31 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
       const res = await fetch("/api/agent/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ symbols, mode: "paper", ipsId: selectedIpsId }),
+        body: JSON.stringify({
+          symbols,
+          mode: "paper",
+          ipsId: selectedIpsId,
+          useV3: true  // Use Agent v3 with RAG and reasoning checkpoints
+        }),
       });
 
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Run failed");
 
-      console.log(`[AgentSection] Received ${json.selected?.length || 0} candidates from API`);
+      console.log(`[AgentSection] Agent ${json.version || 'v1'} returned ${json.selected?.length || 0} candidates`);
+
+      // Log reasoning decisions from Agent v3
+      if (json.reasoning_decisions && json.reasoning_decisions.length > 0) {
+        console.log(`[AgentSection] Reasoning decisions:`, json.reasoning_decisions);
+      }
+
       if (json.selected && json.selected.length > 0) {
         const firstCand = json.selected[0];
         console.log(`[AgentSection] First candidate check:`, {
           symbol: firstCand.symbol,
+          composite_score: firstCand.composite_score,
+          ips_score: firstCand.ips_score,
+          has_historical_analysis: !!firstCand.historical_analysis,
           has_detailed_analysis: !!firstCand.detailed_analysis,
           has_ips_factors: !!firstCand.detailed_analysis?.ips_factors,
           ips_factors_count: firstCand.detailed_analysis?.ips_factors?.length || 0,

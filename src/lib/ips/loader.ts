@@ -7,6 +7,7 @@ type IPSFactor = {
   threshold_max?: number | null; // optional max threshold for range
   direction?: "gte" | "lte" | "range" | null; // how to interpret threshold
   enabled?: boolean | null;
+  factor_scope?: "general" | "chain" | null; // scope: general (non-chain) or chain (requires options data)
   // optional meta
   display_name?: string | null;
   description?: string | null;
@@ -112,7 +113,8 @@ export async function loadIPSById(ipsId: string): Promise<IPSConfig> {
       target_operator,
       target_value_max,
       preference_direction,
-      enabled
+      enabled,
+      factor_scope
     `)
     .eq("ips_id", ipsId);
 
@@ -137,6 +139,7 @@ export async function loadIPSById(ipsId: string): Promise<IPSConfig> {
                    f.target_operator === "gte" ? "gte" :
                    f.target_operator === "lte" ? "lte" : null,
         enabled: f.enabled ?? true,
+        factor_scope: f.factor_scope ?? "chain", // Default to 'chain' if not specified
         display_name: f.factor_name ?? null,
         description: null,
       };
