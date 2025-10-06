@@ -10,6 +10,7 @@ import ActionNeededTradesPanel from '@/components/dashboard/action-needed-trades
 import HistoricTradesDashboard from '@/components/dashboard/historic-trades-dashboard'
 import { IPSPerformanceTracker } from '@/components/ips/ips-performance-tracker'
 import { MarketOverview } from '@/components/dashboard/market-overview'
+import TradesSummaryStats from '@/components/dashboard/trades-summary-stats'
 
 // Simplified Quick Start Component
 interface SimplifiedQuickStartProps {
@@ -113,12 +114,12 @@ export default function Dashboard() {
         <div className="space-y-6">
           {/* Market Overview with real Alpha Vantage data */}
           <MarketOverview />
-          
+
           {/* IPS Performance Tracker */}
           <IPSPerformanceTracker />
-          
+
           {/* Simplified Quick Start */}
-          <SimplifiedQuickStart 
+          <SimplifiedQuickStart
             hasIPS={dashboardData.hasIPS}
             watchlistCount={dashboardData.watchlistCount}
             tradeCount={dashboardData.tradeCount}

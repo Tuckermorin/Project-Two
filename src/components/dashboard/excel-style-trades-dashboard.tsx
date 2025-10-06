@@ -25,6 +25,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { evaluateExitStrategy, type ExitSignal } from '@/lib/utils/watch-criteria-evaluator'
+import ActiveTradesSummary from './active-trades-summary'
 
 // Trade data type
 interface Trade {
@@ -32,6 +33,9 @@ interface Trade {
   name: string
   placed: string
   currentPrice: number
+  currentSpreadPrice?: number
+  currentPL?: number
+  currentPLPercent?: number
   expDate: string
   dte: number
   contractType: string
@@ -73,7 +77,10 @@ const allColumns: Column[] = [
   { key: 'status', label: 'Status' },
   { key: 'name', label: 'Name' },
   { key: 'placed', label: 'Date Placed' },
-  { key: 'currentPrice', label: 'Current Price' },
+  { key: 'currentPrice', label: 'Stock Price' },
+  { key: 'currentSpreadPrice', label: 'Spread Price' },
+  { key: 'currentPL', label: 'Current P/L' },
+  { key: 'currentPLPercent', label: 'Current P/L %' },
   { key: 'expDate', label: 'Exp Date' },
   { key: 'dte', label: 'DTE' },
   { key: 'contractType', label: 'Contract Type' },
@@ -102,10 +109,9 @@ const allColumns: Column[] = [
 
 // Default visible columns
 const defaultColumns = [
-  'status', 'name', 'placed', 'currentPrice', 'expDate', 'dte', 'contractType',
-  'contracts', 'shortStrike', 'longStrike', 'creditReceived', 'spreadWidth',
-  'maxGain', 'maxLoss', 'percentCurrentToShort', 'deltaShortLeg',
-  'theta', 'vega', 'ivAtEntry', 'sector'
+  'status', 'name', 'placed', 'currentPrice', 'currentSpreadPrice', 'currentPL',
+  'currentPLPercent', 'expDate', 'dte', 'contractType', 'contracts',
+  'shortStrike', 'longStrike', 'creditReceived', 'percentCurrentToShort'
 ]
 
 export default function ExcelStyleTradesDashboard() {
@@ -276,18 +282,36 @@ export default function ExcelStyleTradesDashboard() {
             status = 'EXIT'
           }
 
+          // Calculate current P/L from spread price
+          const spreadPrice = r.current_spread_price ? Number(r.current_spread_price) : undefined
+          const creditReceived = Number(r.credit_received ?? 0) || 0
+          const contracts = Number(r.number_of_contracts ?? r.contracts ?? 1) || 0
+
+          let currentPL: number | undefined
+          let currentPLPercent: number | undefined
+
+          if (spreadPrice !== undefined && creditReceived > 0) {
+            // For credit spreads: P/L = (credit received - cost to close) * contracts * 100
+            const plPerContract = creditReceived - spreadPrice
+            currentPL = plPerContract * contracts * 100
+            currentPLPercent = (plPerContract / creditReceived) * 100
+          }
+
           const obj: Trade = {
             id: r.id,
             name: r.name || r.symbol,
             placed: r.entry_date || r.created_at || '',
             currentPrice: current,
+            currentSpreadPrice: spreadPrice,
+            currentPL,
+            currentPLPercent,
             expDate: exp,
             dte: exp ? daysToExpiry(exp) : 0,
             contractType: toTitle(String(r.contract_type || '')),
-            contracts: Number(r.number_of_contracts ?? r.contracts ?? 0) || 0,
+            contracts,
             shortStrike: Number(r.short_strike ?? 0) || 0,
             longStrike: Number(r.long_strike ?? 0) || 0,
-            creditReceived: Number(r.credit_received ?? 0) || 0,
+            creditReceived,
             spreadWidth: Number(r.spread_width ?? 0) || 0,
             maxGain: Number(r.max_gain ?? 0) || 0,
             maxLoss: Number(r.max_loss ?? 0) || 0,
@@ -417,7 +441,18 @@ export default function ExcelStyleTradesDashboard() {
       case 'plDollar':
       case 'maxGain':
       case 'maxLoss':
+      case 'currentSpreadPrice':
         return currencyFormatter.format(value)
+      case 'currentPL': {
+        if (typeof value !== 'number') return '-'
+        const className = value >= 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'
+        return <span className={className}>{currencyFormatter.format(value)}</span>
+      }
+      case 'currentPLPercent': {
+        if (typeof value !== 'number') return '-'
+        const className = value >= 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'
+        return <span className={className}>{percentFormatter.format(value)}%</span>
+      }
       case 'percentOfCredit':
       case 'plPercent':
       case 'percentCurrentToShort':
@@ -574,8 +609,11 @@ export default function ExcelStyleTradesDashboard() {
           </Button>
         </div>
       </CardHeader>
-      
+
       <CardContent>
+        {/* Active Trades Summary */}
+        <ActiveTradesSummary />
+
         {/* Filters */}
         <div className="flex gap-4 mb-4">
           <Input
