@@ -72,6 +72,20 @@ export async function POST(request: NextRequest) {
 
     if (error) throw error;
 
+    // Trigger IV cache seeding in background (don't await - fire and forget)
+    const baseUrl = request.nextUrl.origin;
+    fetch(`${baseUrl}/api/watchlist/seed-cache`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ symbol: body.symbol })
+    }).catch(err => {
+      console.warn('IV cache seeding request failed:', err.message);
+    });
+
+    console.log(`[Watchlist] Added ${body.symbol}, triggered IV cache seeding`);
+
     return NextResponse.json({ success: true, data });
   } catch (error: any) {
     console.error('Error adding to watchlist:', error);

@@ -9,7 +9,20 @@ import { StructuredTool } from "@langchain/core/tools";
 import { z } from "zod";
 import { getQuote, getOptionsChain } from "@/lib/clients/alphaVantage";
 import { getAlphaVantageClient } from "@/lib/api/alpha-vantage";
-import { tavilySearch } from "@/lib/clients/tavily";
+import {
+  tavilySearch,
+  tavilyExtract,
+  tavilyMap,
+  tavilyCrawl
+} from "@/lib/clients/tavily";
+import {
+  queryCatalysts,
+  queryAnalystActivity,
+  querySECFilings,
+  queryOperationalRisks,
+  twoStepIngest,
+  queryAllFactors
+} from "@/lib/clients/tavily-queries";
 
 /**
  * Tool: Fetch stock quote
@@ -81,23 +94,28 @@ export class GetCompanyOverviewTool extends StructuredTool {
 }
 
 /**
- * Tool: Search recent news
- * Uses Tavily API to search for recent news and research about a company or topic
+ * Tool: Search recent news (Enhanced with CODEX.md patterns)
+ * Uses Tavily API with advanced search depth, news topic, and domain filtering
  */
 export class SearchNewsTool extends StructuredTool {
   name = "search_news";
-  description = "Searches for recent news articles and research about a company or market topic. Use this to understand current market sentiment, recent events, or news that might affect a trade decision.";
+  description = "Searches for recent news articles and research about a company or market topic. Uses advanced search depth for higher quality results. Returns articles with relevance scores and publication dates.";
 
   schema = z.object({
     query: z.string().describe("The search query (e.g., 'AAPL earnings', 'Federal Reserve interest rates')"),
-    maxResults: z.number().optional().default(5).describe("Maximum number of results to return (default: 5)"),
+    maxResults: z.number().optional().default(8).describe("Maximum number of results to return (default: 8)"),
+    daysBack: z.number().optional().default(7).describe("Number of days to look back (default: 7)"),
+    useAdvanced: z.boolean().optional().default(true).describe("Use advanced search depth for better quality (default: true)"),
   });
 
-  async _call(input: { query: string; maxResults?: number }): Promise<string> {
+  async _call(input: { query: string; maxResults?: number; daysBack?: number; useAdvanced?: boolean }): Promise<string> {
     try {
       const results = await tavilySearch(input.query, {
-        time_range: "week",
-        max_results: input.maxResults || 5,
+        topic: "news",
+        search_depth: input.useAdvanced ? "advanced" : "basic",
+        chunks_per_source: input.useAdvanced ? 3 : undefined,
+        days: input.daysBack || 7,
+        max_results: input.maxResults || 8,
       });
 
       if (results.error) {
@@ -109,9 +127,17 @@ export class SearchNewsTool extends StructuredTool {
         snippet: r.snippet || "",
         url: r.url || "",
         publishedAt: r.publishedAt || null,
+        score: r.score || 0,
       }));
 
-      return JSON.stringify({ articles, count: articles.length });
+      // Sort by score descending
+      articles.sort((a, b) => b.score - a.score);
+
+      return JSON.stringify({
+        articles,
+        count: articles.length,
+        avgScore: articles.length > 0 ? (articles.reduce((sum, a) => sum + a.score, 0) / articles.length).toFixed(2) : 0,
+      });
     } catch (error: any) {
       return JSON.stringify({ error: error.message });
     }
@@ -566,6 +592,251 @@ export class GetTreasuryYieldTool extends StructuredTool {
 }
 
 /**
+ * Tool: Query Catalysts (Factor-aware)
+ * Specialized query for earnings, guidance, product launches
+ */
+export class QueryCatalystsTool extends StructuredTool {
+  name = "query_catalysts";
+  description = "Searches for catalyst events like earnings reports, guidance updates, and product launches. Uses multiple targeted queries with high-quality financial sources. Returns only high-score results.";
+
+  schema = z.object({
+    symbol: z.string().describe("The stock ticker symbol (e.g., AAPL, MSFT)"),
+    daysBack: z.number().optional().default(7).describe("Number of days to look back (default: 7)"),
+  });
+
+  async _call(input: { symbol: string; daysBack?: number }): Promise<string> {
+    try {
+      const results = await queryCatalysts(input.symbol, input.daysBack || 7);
+      return JSON.stringify({
+        symbol: input.symbol,
+        catalysts: results.map(r => ({
+          title: r.title,
+          snippet: r.snippet,
+          url: r.url,
+          publishedAt: r.publishedAt,
+          score: r.score,
+        })),
+        count: results.length,
+      });
+    } catch (error: any) {
+      return JSON.stringify({ error: error.message });
+    }
+  }
+}
+
+/**
+ * Tool: Query Analyst Activity (Factor-aware)
+ * Specialized query for downgrades, upgrades, price targets
+ */
+export class QueryAnalystActivityTool extends StructuredTool {
+  name = "query_analyst_activity";
+  description = "Searches for recent analyst activity including downgrades, upgrades, and price target changes. Uses trusted financial sources only.";
+
+  schema = z.object({
+    symbol: z.string().describe("The stock ticker symbol (e.g., AAPL, MSFT)"),
+    daysBack: z.number().optional().default(7).describe("Number of days to look back (default: 7)"),
+  });
+
+  async _call(input: { symbol: string; daysBack?: number }): Promise<string> {
+    try {
+      const results = await queryAnalystActivity(input.symbol, input.daysBack || 7);
+      return JSON.stringify({
+        symbol: input.symbol,
+        analystActivity: results.map(r => ({
+          title: r.title,
+          snippet: r.snippet,
+          url: r.url,
+          publishedAt: r.publishedAt,
+          score: r.score,
+        })),
+        count: results.length,
+      });
+    } catch (error: any) {
+      return JSON.stringify({ error: error.message });
+    }
+  }
+}
+
+/**
+ * Tool: Query SEC Filings (Factor-aware)
+ * Specialized query for 8-K, 10-Q, 10-K from sec.gov
+ */
+export class QuerySECFilingsTool extends StructuredTool {
+  name = "query_sec_filings";
+  description = "Searches for recent SEC filings (8-K, 10-Q, 10-K) directly from sec.gov. Important for understanding regulatory events and financial reporting.";
+
+  schema = z.object({
+    symbol: z.string().describe("The stock ticker symbol (e.g., AAPL, MSFT)"),
+    daysBack: z.number().optional().default(90).describe("Number of days to look back (default: 90)"),
+  });
+
+  async _call(input: { symbol: string; daysBack?: number }): Promise<string> {
+    try {
+      const results = await querySECFilings(input.symbol, input.daysBack || 90);
+      return JSON.stringify({
+        symbol: input.symbol,
+        secFilings: results.map(r => ({
+          title: r.title,
+          snippet: r.snippet,
+          url: r.url,
+          publishedAt: r.publishedAt,
+        })),
+        count: results.length,
+      });
+    } catch (error: any) {
+      return JSON.stringify({ error: error.message });
+    }
+  }
+}
+
+/**
+ * Tool: Query Operational Risks (Factor-aware)
+ * Specialized query for supply chain, margins, competition, regulatory issues
+ */
+export class QueryOperationalRisksTool extends StructuredTool {
+  name = "query_operational_risks";
+  description = "Searches for operational risk signals including supply chain disruptions, margin pressure, competitive threats, and regulatory investigations.";
+
+  schema = z.object({
+    symbol: z.string().describe("The stock ticker symbol (e.g., AAPL, MSFT)"),
+    daysBack: z.number().optional().default(30).describe("Number of days to look back (default: 30)"),
+  });
+
+  async _call(input: { symbol: string; daysBack?: number }): Promise<string> {
+    try {
+      const results = await queryOperationalRisks(input.symbol, input.daysBack || 30);
+      return JSON.stringify({
+        symbol: input.symbol,
+        risks: results.map(r => ({
+          title: r.title,
+          snippet: r.snippet,
+          url: r.url,
+          publishedAt: r.publishedAt,
+          score: r.score,
+        })),
+        count: results.length,
+      });
+    } catch (error: any) {
+      return JSON.stringify({ error: error.message });
+    }
+  }
+}
+
+/**
+ * Tool: Two-Step Ingest (All factors)
+ * Runs all factor queries, filters by score, extracts content
+ */
+export class TwoStepIngestTool extends StructuredTool {
+  name = "two_step_ingest";
+  description = "Comprehensive two-step research pipeline: (1) searches all factor categories (catalysts, analyst activity, SEC filings, operational risks), (2) extracts full content from high-quality sources. Returns markdown content suitable for deep analysis.";
+
+  schema = z.object({
+    symbol: z.string().describe("The stock ticker symbol (e.g., AAPL, MSFT)"),
+    daysBack: z.number().optional().default(7).describe("Number of days to look back (default: 7)"),
+    scoreThreshold: z.number().optional().default(0.6).describe("Minimum relevance score threshold (0-1, default: 0.6)"),
+  });
+
+  async _call(input: { symbol: string; daysBack?: number; scoreThreshold?: number }): Promise<string> {
+    try {
+      const result = await twoStepIngest(
+        input.symbol,
+        input.daysBack || 7,
+        input.scoreThreshold || 0.6
+      );
+
+      return JSON.stringify({
+        symbol: result.symbol,
+        totalDocuments: result.documents.length,
+        metadata: result.metadata,
+        documents: result.documents.map(d => ({
+          url: d.url,
+          title: d.metadata.title,
+          publishedDate: d.metadata.publishedDate,
+          score: d.metadata.score,
+          contentPreview: d.content.substring(0, 500) + "...",
+          contentLength: d.content.length,
+        })),
+      });
+    } catch (error: any) {
+      return JSON.stringify({ error: error.message });
+    }
+  }
+}
+
+/**
+ * Tool: Extract URL Content
+ * Extracts full content from specific URLs
+ */
+export class ExtractURLTool extends StructuredTool {
+  name = "extract_url_content";
+  description = "Extracts full content from a specific URL or list of URLs. Returns clean markdown content. Use 'advanced' depth for investor relations pages, SEC filings, or complex tables.";
+
+  schema = z.object({
+    urls: z.array(z.string()).describe("Array of URLs to extract content from"),
+    useAdvanced: z.boolean().optional().default(false).describe("Use advanced extraction for complex pages (default: false)"),
+  });
+
+  async _call(input: { urls: string[]; useAdvanced?: boolean }): Promise<string> {
+    try {
+      const result = await tavilyExtract({
+        urls: input.urls,
+        extract_depth: input.useAdvanced ? "advanced" : "basic",
+        format: "markdown",
+        include_images: false,
+      });
+
+      return JSON.stringify({
+        results: result.results.map((r: any) => ({
+          url: r.url,
+          success: r.success,
+          content: r.success ? r.raw_content || r.content : null,
+          error: r.error || null,
+        })),
+        successCount: result.results.filter((r: any) => r.success).length,
+        totalCount: input.urls.length,
+      });
+    } catch (error: any) {
+      return JSON.stringify({ error: error.message });
+    }
+  }
+}
+
+/**
+ * Tool: Map Investor Relations Site
+ * Discovers all pages on a company's IR site
+ */
+export class MapIRSiteTool extends StructuredTool {
+  name = "map_ir_site";
+  description = "Maps out a company's investor relations website to discover press releases, events, and financial pages. Returns a list of discovered URLs without content.";
+
+  schema = z.object({
+    url: z.string().describe("The investor relations base URL (e.g., 'investor.nvidia.com')"),
+    maxDepth: z.number().optional().default(2).describe("Maximum crawl depth (default: 2)"),
+    limit: z.number().optional().default(200).describe("Maximum number of pages to discover (default: 200)"),
+  });
+
+  async _call(input: { url: string; maxDepth?: number; limit?: number }): Promise<string> {
+    try {
+      const result = await tavilyMap({
+        url: input.url,
+        max_depth: input.maxDepth || 2,
+        limit: input.limit || 200,
+        select_paths: ["/press-releases/.*", "/news/.*", "/events/.*", "/financial-info/.*"],
+        exclude_paths: ["/careers/.*", "/governance/.*"],
+      });
+
+      return JSON.stringify({
+        url: input.url,
+        pagesFound: result.results.length,
+        pages: result.results,
+      });
+    } catch (error: any) {
+      return JSON.stringify({ error: error.message });
+    }
+  }
+}
+
+/**
  * Export all tools as an array for easy registration with the LLM
  */
 export const agentTools = [
@@ -594,6 +865,15 @@ export const agentTools = [
   new GetUnemploymentTool(),
   new GetFedFundsRateTool(),
   new GetTreasuryYieldTool(),
+
+  // Enhanced Tavily Research tools (CODEX.md patterns)
+  new QueryCatalystsTool(),
+  new QueryAnalystActivityTool(),
+  new QuerySECFilingsTool(),
+  new QueryOperationalRisksTool(),
+  new TwoStepIngestTool(),
+  new ExtractURLTool(),
+  new MapIRSiteTool(),
 ];
 
 /**

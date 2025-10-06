@@ -1041,6 +1041,143 @@ async function sortAndSelectTop5(state: AgentState): Promise<Partial<AgentState>
 }
 
 // ============================================================================
+// STEP 11.5: Generate AI Trade Rationales
+// ============================================================================
+
+async function generateTradeRationales(state: AgentState): Promise<Partial<AgentState>> {
+  console.log(`[GenerateRationales] Generating AI rationales for ${state.selected.length} selected trades`);
+
+  const enrichedTrades: any[] = [];
+
+  for (const candidate of state.selected) {
+    try {
+      // Build context for rationale generation
+      const prompt = `You are a professional options trading analyst. Generate a clear, concise rationale for this trade opportunity.
+
+TRADE DETAILS:
+Symbol: ${candidate.symbol}
+Strategy: ${candidate.strategy}
+Contract Legs: ${JSON.stringify(candidate.contract_legs, null, 2)}
+Entry Price: $${candidate.entry_mid?.toFixed(2)}
+Max Profit: $${candidate.max_profit?.toFixed(2)}
+Max Loss: $${candidate.max_loss?.toFixed(2)}
+Breakeven: $${candidate.breakeven?.toFixed(2)}
+Probability of Profit: ${candidate.est_pop?.toFixed(0)}%
+
+SCORING:
+Composite Score: ${candidate.composite_score?.toFixed(1)}/100
+IPS Score: ${candidate.ips_score?.toFixed(1)}%
+Yield Score: ${candidate.yield_score?.toFixed(1)}
+${candidate.historical_analysis?.has_data ? `
+Historical Performance:
+- Win Rate: ${(candidate.historical_analysis.win_rate * 100).toFixed(1)}%
+- Similar Trades: ${candidate.historical_analysis.trade_count}
+- Avg ROI: ${candidate.historical_analysis.avg_roi?.toFixed(1)}%
+- Confidence: ${candidate.historical_analysis.confidence}` : ''}
+
+MARKET DATA:
+${state.fundamentalData?.[candidate.symbol] ? `
+Company: ${state.fundamentalData[candidate.symbol].Name || candidate.symbol}
+Sector: ${state.fundamentalData[candidate.symbol].Sector || 'N/A'}
+Industry: ${state.fundamentalData[candidate.symbol].Industry || 'N/A'}
+Market Cap: ${state.fundamentalData[candidate.symbol].MarketCapitalization || 'N/A'}
+P/E Ratio: ${state.fundamentalData[candidate.symbol].PERatio || 'N/A'}
+Beta: ${state.fundamentalData[candidate.symbol].Beta || 'N/A'}` : 'Fundamental data unavailable'}
+
+${state.generalData?.[candidate.symbol]?.news_results ? `
+RECENT NEWS (Top 3):
+${state.generalData[candidate.symbol].news_results.slice(0, 3).map((n: any, i: number) =>
+  `${i + 1}. ${n.title}`
+).join('\n')}` : ''}
+
+Generate a professional trade rationale with these sections:
+
+1. RATIONALE (2-3 sentences): Why this trade makes sense right now
+2. NEWS_SUMMARY (1-2 sentences): Key market context from recent news
+3. MACRO_CONTEXT (1 sentence): Relevant macro/sector trends
+4. OUT_OF_IPS_JUSTIFICATION (if IPS score < 70): Why this trade is still recommended despite lower IPS score
+
+Respond with JSON:
+{
+  "rationale": "string",
+  "news_summary": "string or null",
+  "macro_context": "string or null",
+  "out_of_ips_justification": "string or null (only if IPS score < 70)"
+}`;
+
+      const response = await rationaleLLM(prompt);
+
+      // Parse the LLM response
+      let parsed;
+      try {
+        parsed = JSON.parse(response);
+      } catch (e) {
+        // Try to find JSON in the response
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+        if (jsonMatch) {
+          parsed = JSON.parse(jsonMatch[0]);
+        } else {
+          console.warn(`[GenerateRationales] Failed to parse JSON for ${candidate.symbol}, using fallback`);
+          parsed = {
+            rationale: `${candidate.strategy} on ${candidate.symbol} with ${candidate.composite_score?.toFixed(1)}/100 composite score. Max profit: $${candidate.max_profit?.toFixed(2)}, Max loss: $${candidate.max_loss?.toFixed(2)}, PoP: ${candidate.est_pop?.toFixed(0)}%.`,
+            news_summary: null,
+            macro_context: null,
+            out_of_ips_justification: null,
+          };
+        }
+      }
+
+      // Attach rationale and detailed analysis to candidate
+      candidate.rationale = parsed.rationale;
+      candidate.detailed_analysis = {
+        ...(candidate.detailed_analysis || {}),
+        news_summary: parsed.news_summary,
+        macro_context: parsed.macro_context,
+        out_of_ips_justification: parsed.out_of_ips_justification,
+        ips_name: state.ipsConfig?.name,
+        ips_factors: candidate.ips_factors,
+        api_data: state.fundamentalData?.[candidate.symbol] ? {
+          company_name: state.fundamentalData[candidate.symbol].Name,
+          sector: state.fundamentalData[candidate.symbol].Sector,
+          industry: state.fundamentalData[candidate.symbol].Industry,
+          market_cap: state.fundamentalData[candidate.symbol].MarketCapitalization,
+          pe_ratio: state.fundamentalData[candidate.symbol].PERatio,
+          beta: state.fundamentalData[candidate.symbol].Beta,
+          eps: state.fundamentalData[candidate.symbol].EPS,
+          dividend_yield: state.fundamentalData[candidate.symbol].DividendYield,
+          profit_margin: state.fundamentalData[candidate.symbol].ProfitMargin,
+          roe: state.fundamentalData[candidate.symbol].ReturnOnEquityTTM,
+          week52_high: state.fundamentalData[candidate.symbol]["52WeekHigh"],
+          week52_low: state.fundamentalData[candidate.symbol]["52WeekLow"],
+          analyst_target: state.fundamentalData[candidate.symbol].AnalystTargetPrice,
+        } : null,
+        news_results: state.generalData?.[candidate.symbol]?.news_results || [],
+      };
+
+      enrichedTrades.push(candidate);
+
+      console.log(`[GenerateRationales] ${candidate.symbol}: Rationale generated (${parsed.rationale.length} chars)`);
+
+    } catch (error: any) {
+      console.error(`[GenerateRationales] Error for ${candidate.symbol}:`, error.message);
+
+      // Add fallback rationale
+      candidate.rationale = `${candidate.strategy} on ${candidate.symbol} with ${candidate.composite_score?.toFixed(1)}/100 composite score. Entry at $${candidate.entry_mid?.toFixed(2)} with max profit of $${candidate.max_profit?.toFixed(2)}.`;
+      candidate.detailed_analysis = {
+        ...(candidate.detailed_analysis || {}),
+        news_summary: null,
+        macro_context: null,
+        out_of_ips_justification: null,
+      };
+
+      enrichedTrades.push(candidate);
+    }
+  }
+
+  return { selected: enrichedTrades };
+}
+
+// ============================================================================
 // STEP 12: Diversification Check
 // ============================================================================
 
@@ -1160,6 +1297,7 @@ export function buildAgentV3Graph() {
   graph.addNode("ReasoningCheckpoint3", reasoningCheckpoint3);
   graph.addNode("RAGScoring", ragCorrelationScoring);
   graph.addNode("SortTop5", sortAndSelectTop5);
+  graph.addNode("GenerateRationales", generateTradeRationales);
   graph.addNode("Diversification", diversificationCheck);
   graph.addNode("FinalizeOutput", finalizeOutput);
 
@@ -1213,7 +1351,8 @@ export function buildAgentV3Graph() {
   );
 
   graph.addEdge("RAGScoring", "SortTop5");
-  graph.addEdge("SortTop5", "Diversification");
+  graph.addEdge("SortTop5", "GenerateRationales");
+  graph.addEdge("GenerateRationales", "Diversification");
   graph.addEdge("Diversification", "FinalizeOutput");
   graph.setFinishPoint("FinalizeOutput");
 

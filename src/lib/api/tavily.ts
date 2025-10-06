@@ -338,7 +338,7 @@ export class TavilyClient {
   /**
    * Get short interest data
    */
-  async getShortInterest(symbol: string): Promise<{ shortInterestPercent: number | null; daysToCovet: number | null }> {
+  async getShortInterest(symbol: string): Promise<{ shortInterestPercent: number | null; daysToCover: number | null }> {
     const query = `${symbol} short interest percentage float days to cover`;
     const searchResults = await this.search(query, {
       topic: 'finance',

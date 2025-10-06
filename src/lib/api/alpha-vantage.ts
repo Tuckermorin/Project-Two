@@ -454,6 +454,58 @@ export class AlphaVantageClient {
       });
   }
 
+  /**
+   * Get historical options data for IV caching and analysis
+   * https://www.alphavantage.co/documentation/#historical-options
+   */
+  async getHistoricalOptions(
+    symbol: string,
+    opts: { date?: string } = {}
+  ): Promise<RealtimeOptionContract[]> {
+    const params: Record<string, string> = {
+      function: 'HISTORICAL_OPTIONS',
+      symbol: symbol.toUpperCase(),
+    };
+
+    if (opts.date) {
+      params.date = opts.date;
+    }
+
+    const response = await this.makeRequest<RealtimeOptionsResponse>(params);
+    const rows = Array.isArray(response?.data) ? response.data : [];
+
+    return rows
+      .filter((row) => !!row)
+      .map((row) => {
+        const rowData = row as any;
+        const typeValue = String(rowData?.type ?? '').toLowerCase();
+        const normalisedType: 'call' | 'put' = typeValue === 'put' ? 'put' : 'call';
+
+        return {
+          contractId: String(rowData?.contractID ?? rowData?.contractId ?? ''),
+          symbol: String(rowData?.symbol ?? symbol).toUpperCase(),
+          expiration: String(rowData?.expiration ?? ''),
+          strike: this.parseNumber(rowData?.strike),
+          type: normalisedType,
+          last: this.parseNumber(rowData?.last),
+          mark: this.parseNumber(rowData?.mark),
+          bid: this.parseNumber(rowData?.bid),
+          ask: this.parseNumber(rowData?.ask),
+          bidSize: this.parseNumber(rowData?.bidSize ?? rowData?.bid_size),
+          askSize: this.parseNumber(rowData?.askSize ?? rowData?.ask_size),
+          volume: this.parseNumber(rowData?.volume),
+          openInterest: this.parseNumber(rowData?.openInterest ?? rowData?.open_interest),
+          date: rowData?.date ?? null,
+          impliedVolatility: this.parseNumber(rowData?.impliedVolatility ?? rowData?.implied_volatility),
+          delta: this.parseNumber(rowData?.delta),
+          gamma: this.parseNumber(rowData?.gamma),
+          theta: this.parseNumber(rowData?.theta),
+          vega: this.parseNumber(rowData?.vega),
+          rho: this.parseNumber(rowData?.rho),
+        } satisfies RealtimeOptionContract;
+      });
+  }
+
 
   // ---------- Technical Indicators ----------
   private extractLatestFromTA(obj: any, key: string) {

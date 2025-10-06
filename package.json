@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "server": "node server.js"
+    "server": "node server.js",
+    "seed-iv-cache": "npx tsx scripts/seed-watchlist-iv-cache.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.1",

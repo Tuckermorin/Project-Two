@@ -1,4 +1,5 @@
 ﻿import { getAlphaVantageClient } from "@/lib/api/alpha-vantage";
+import { getIVCacheService } from "@/lib/services/iv-cache-service";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export type TradeFeaturesContext = {
@@ -268,14 +269,60 @@ async function computeVolatilityMetrics(
     const atr14 =
       Number.isFinite(latestAtrPct) && Number.isFinite(lastClose) ? (latestAtrPct as number) * (lastClose as number) : null;
 
+    // Fetch current IV from options data
+    let ivAtm30d: number | null = null;
+    let ivRank: number | null = null;
+
+    try {
+      const alphaVantage = getAlphaVantageClient();
+      const ivCacheService = getIVCacheService();
+
+      // Get realtime options with greeks
+      const options = await alphaVantage.getRealtimeOptions(symbol, { requireGreeks: true });
+
+      if (options.length > 0 && lastClose) {
+        // Find ATM options (30-day expiration)
+        const today = new Date(asOfDate || Date.now());
+        const atmOptions = options.filter(opt => {
+          if (!opt.expiration || !opt.impliedVolatility || !opt.strike) return false;
+
+          const expDate = new Date(opt.expiration);
+          const dte = Math.ceil((expDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+
+          // Target 25-35 DTE and within 2% of current price
+          const withinDTE = dte >= 25 && dte <= 35;
+          const withinStrike = Math.abs(opt.strike - lastClose) <= lastClose * 0.02;
+
+          return withinDTE && withinStrike;
+        });
+
+        if (atmOptions.length > 0) {
+          // Average IV across ATM options
+          const ivValues = atmOptions
+            .map(opt => opt.impliedVolatility)
+            .filter((iv): iv is number => iv !== null && isFinite(iv));
+
+          if (ivValues.length > 0) {
+            ivAtm30d = ivValues.reduce((sum, iv) => sum + iv, 0) / ivValues.length;
+
+            // Calculate IV Rank from cached historical data
+            ivRank = await ivCacheService.calculateIVRank(symbol, ivAtm30d);
+          }
+        }
+      }
+    } catch (ivError) {
+      console.warn(`Failed to fetch IV data for ${symbol}:`, ivError);
+      // Continue with null IV values
+    }
+
     return {
       hv30: Number.isFinite(hv30) ? hv30! : null,
       hv30_rank: Number.isFinite(hv30Rank) ? hv30Rank! : null,
       atr14: Number.isFinite(atr14) ? atr14! : null,
       atr_pct: Number.isFinite(latestAtrPct) ? latestAtrPct! : null,
       atr_pct_rank: Number.isFinite(atrPctRank) ? atrPctRank! : null,
-      iv_atm_30d: null,
-      iv_rank: null,
+      iv_atm_30d: Number.isFinite(ivAtm30d) ? ivAtm30d! : null,
+      iv_rank: Number.isFinite(ivRank) ? ivRank! : null,
     };
   } catch (error) {
     console.error("Failed computing volatility metrics", error);
