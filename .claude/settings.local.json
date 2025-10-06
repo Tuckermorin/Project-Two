@@ -35,7 +35,8 @@
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f supabase/migrations/20251005_enable_pgvector.sql)",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f supabase/migrations/20251005_add_factor_scope.sql)",
       "Bash(curl -X POST http://localhost:3000/api/agent/rag/seed -H \"Content-Type: application/json\" -d \"{}\")",
-      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT table_name FROM information_schema.tables WHERE table_name = ''trade_embeddings'';\")"
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT table_name FROM information_schema.tables WHERE table_name = ''trade_embeddings'';\")",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
