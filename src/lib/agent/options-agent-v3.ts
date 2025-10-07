@@ -13,6 +13,8 @@ import { getSeries } from "@/lib/clients/fred";
 import { tavilySearch } from "@/lib/clients/tavily";
 import { rationaleLLM } from "@/lib/clients/llm";
 import * as db from "@/lib/db/agent";
+import { getMacroData } from "@/lib/api/macro-data";
+import { createClient } from "@/lib/supabase/server-client";
 
 // State interface
 interface AgentState {
@@ -33,6 +35,7 @@ interface AgentState {
 
   // Trade candidates
   candidates: any[];
+  nearMissCandidates?: any[]; // Track top near-miss candidates for display
   scores: any[];
   selected: any[];
 
@@ -57,9 +60,13 @@ const queue = new PQueue({ concurrency: 2, interval: 1000, intervalCap: 2 });
 async function fetchIPS(state: AgentState): Promise<Partial<AgentState>> {
   console.log(`[FetchIPS] Loading IPS configuration: ${state.ipsId || 'none'}`);
 
+  // Fetch macro data for all runs
+  const macroData = await getMacroData();
+  console.log(`[FetchIPS] Loaded macro data: inflation=${macroData.inflation_rate}%`);
+
   if (!state.ipsId) {
     console.log("[FetchIPS] No IPS ID provided, using default");
-    return { ipsConfig: null };
+    return { ipsConfig: null, macroData };
   }
 
   try {
@@ -74,12 +81,14 @@ async function fetchIPS(state: AgentState): Promise<Partial<AgentState>> {
     // Initialize surviving symbols as full watchlist
     return {
       ipsConfig,
+      macroData,
       survivingSymbols: state.symbols
     };
   } catch (error: any) {
     console.error("[FetchIPS] Failed to load IPS config:", error.message);
     return {
       ipsConfig: null,
+      macroData,
       survivingSymbols: state.symbols,
       errors: [...state.errors, `IPS Load: ${error.message}`]
     };
@@ -116,6 +125,32 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
         pRetry(() => avClient.getCompanyOverview(symbol), { retries: 2 })
       );
 
+      // Fetch technical indicators in parallel
+      const [sma200, sma50, momentum] = await Promise.all([
+        queue.add(() => pRetry(() => avClient.getSMA(symbol, 'daily', 200, 'close'), { retries: 2 })),
+        queue.add(() => pRetry(() => avClient.getSMA(symbol, 'daily', 50, 'close'), { retries: 2 })),
+        queue.add(() => pRetry(() => avClient.getMOM(symbol, 'daily', 10, 'close'), { retries: 2 })),
+      ]);
+
+      // Fetch IV Rank and IV Percentile from vol_regime_daily table
+      let ivData = null;
+      try {
+        const supabase = await createClient();
+        const { data, error } = await supabase
+          .from('vol_regime_daily')
+          .select('iv_rank, iv_percentile')
+          .eq('symbol', symbol)
+          .order('as_of_date', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (!error && data) {
+          ivData = data;
+        }
+      } catch (error) {
+        console.warn(`[PreFilterGeneral] Failed to fetch IV data for ${symbol}:`, error);
+      }
+
       // Fetch news sentiment
       const newsSearch = await tavilySearch(
         `${symbol} stock news earnings`,
@@ -124,6 +159,11 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
 
       generalData[symbol] = {
         overview,
+        sma200,
+        sma50,
+        momentum,
+        iv_rank: ivData?.iv_rank || null,
+        iv_percentile: ivData?.iv_percentile || null,
         news: newsSearch.results,
         timestamp: new Date().toISOString()
       };
@@ -358,14 +398,45 @@ async function fetchOptionsChains(state: AgentState): Promise<Partial<AgentState
       );
       apiCallCount++;
 
+      // Calculate Put/Call Ratios from options chain
+      let putCallRatio = null;
+      let putCallOIRatio = null;
+      try {
+        const puts = normalized.filter(c => c.option_type === 'P');
+        const calls = normalized.filter(c => c.option_type === 'C');
+
+        const totalPutVolume = puts.reduce((sum, c) => sum + (c.volume || 0), 0);
+        const totalCallVolume = calls.reduce((sum, c) => sum + (c.volume || 0), 0);
+        const totalPutOI = puts.reduce((sum, c) => sum + (c.oi || 0), 0);
+        const totalCallOI = calls.reduce((sum, c) => sum + (c.oi || 0), 0);
+
+        if (totalCallVolume > 0) {
+          putCallRatio = totalPutVolume / totalCallVolume;
+        }
+        if (totalCallOI > 0) {
+          putCallOIRatio = totalPutOI / totalCallOI;
+        }
+      } catch (error) {
+        console.warn(`[FetchOptionsChains] Failed to calculate Put/Call ratios for ${symbol}:`, error);
+      }
+
       marketData[symbol] = {
         contracts: normalized,
         quote,
         asof: result.asof,
+        putCallRatio,
+        putCallOIRatio,
+        iv_rank: state.generalData[symbol]?.iv_rank || null,
+        iv_percentile: state.generalData[symbol]?.iv_percentile || null,
       };
 
-      // Merge with general data fundamentals if available
-      fundamentalData[symbol] = state.generalData[symbol]?.overview || null;
+      // Merge with general data fundamentals AND technical indicators
+      fundamentalData[symbol] = {
+        ...state.generalData[symbol]?.overview,
+        sma200: state.generalData[symbol]?.sma200,
+        sma50: state.generalData[symbol]?.sma50,
+        momentum: state.generalData[symbol]?.momentum,
+      };
 
       console.log(`[FetchOptionsChains] Got ${normalized.length} contracts for ${symbol}`);
 
@@ -409,6 +480,7 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
   console.log(`[FilterHighWeight] Found ${highWeightChainFactors.length} high-weight chain factors`);
 
   const candidates: any[] = [];
+  const nearMissCandidates: any[] = []; // Track near-miss candidates for top 20 list
 
   for (const symbol of state.survivingSymbols) {
     const data = state.marketData[symbol];
@@ -426,26 +498,38 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
     for (const candidate of symbolCandidates) {
       let passes = true;
       const violations: string[] = [];
+      let violationCount = 0;
 
       for (const factor of highWeightChainFactors) {
         const result = evaluateChainFactor(factor, candidate, data);
         if (!result.pass) {
           passes = false;
           violations.push(`${factor.display_name}: ${result.reason}`);
+          violationCount++;
         }
       }
 
       if (passes || highWeightChainFactors.length === 0) {
         candidates.push(candidate);
       } else {
+        // Track near-miss candidates (with violation count for sorting)
+        nearMissCandidates.push({
+          ...candidate,
+          violation_count: violationCount,
+          violations: violations.join(', ')
+        });
         console.log(`[FilterHighWeight] ✗ ${symbol} candidate filtered: ${violations.join(', ')}`);
       }
     }
   }
 
   console.log(`[FilterHighWeight] ${candidates.length} candidates passed high-weight filters`);
+  console.log(`[FilterHighWeight] ${nearMissCandidates.length} near-miss candidates tracked`);
 
-  return { candidates };
+  return {
+    candidates,
+    nearMissCandidates: nearMissCandidates || []
+  };
 }
 
 // Helper: Generate candidate trades for a symbol
@@ -836,6 +920,54 @@ async function reasoningCheckpoint3(state: AgentState): Promise<Partial<AgentSta
     };
   }
 
+  // No candidates passed - prepare top 20 near-miss candidates with IPS scoring
+  const nearMiss = state.nearMissCandidates || [];
+  console.log(`[ReasoningCheckpoint3] No passing candidates. Processing ${nearMiss.length} near-miss candidates`);
+
+  if (nearMiss.length > 0) {
+    // Sort by violation count (fewest violations first), then by credit received (highest first)
+    const sortedNearMiss = nearMiss
+      .sort((a, b) => {
+        if (a.violation_count !== b.violation_count) {
+          return a.violation_count - b.violation_count;
+        }
+        return (b.entry_mid || 0) - (a.entry_mid || 0);
+      })
+      .slice(0, 20); // Take top 20
+
+    // Calculate IPS scores for these candidates
+    console.log(`[ReasoningCheckpoint3] Calculating IPS scores for top ${sortedNearMiss.length} near-miss candidates`);
+
+    for (const candidate of sortedNearMiss) {
+      const ipsScore = await calculateIPSScore(candidate, state);
+      candidate.ips_score = ipsScore;
+
+      // Classify into tiers based on IPS score
+      if (ipsScore >= 90) {
+        candidate.tier = 'elite';
+      } else if (ipsScore >= 75) {
+        candidate.tier = 'quality';
+      } else if (ipsScore >= 60) {
+        candidate.tier = 'speculative';
+      } else {
+        candidate.tier = null;
+      }
+    }
+
+    // Store these as "selected" so they appear in the UI
+    const decision = {
+      checkpoint: "after_low_weight_filter",
+      decision: "REJECT" as const,
+      reasoning: `No candidates passed all filters. Showing top ${sortedNearMiss.length} near-miss candidates for review.`,
+      timestamp: new Date().toISOString()
+    };
+
+    return {
+      selected: sortedNearMiss, // Make near-miss candidates visible in UI
+      reasoningDecisions: [...(state.reasoningDecisions || []), decision]
+    };
+  }
+
   // Last chance - check if we should suggest cash/wait or proceed with best available
   const prompt = `You are making a final decision on options trades after all filtering.
 
@@ -996,48 +1128,451 @@ function calculateYieldScore(candidate: any): number {
   return Math.min(100, riskReward * 100);
 }
 
-// Helper: Calculate IPS score
+// Helper: Extract actual factor value from candidate
+function getFactorValue(factor: any, candidate: any, state: AgentState): { value: any; target: string } {
+  const shortLeg = candidate.contract_legs?.find((l: any) => l.type === "SELL");
+  const marketData = state.marketData?.[candidate.symbol];
+  const fundamentalData = state.fundamentalData?.[candidate.symbol];
+  const generalData = state.generalData?.[candidate.symbol];
+
+  // Overview is stored directly in fundamentalData[symbol], not nested
+  const overview = fundamentalData;
+
+  // Get current price from quote (moved before debug block)
+  const quote = marketData?.quote?.["Global Quote"];
+  const currentPrice = quote ? parseFloat(quote["05. price"]) : null;
+
+  // Enhanced debug logging for EVERY factor evaluation
+  const debugInfo = {
+    symbol: candidate.symbol,
+    factor_key: factor.factor_key,
+    factor_name: factor.factor_name,
+    display_name: factor.display_name,
+    has_fundamentalData: !!fundamentalData,
+    has_overview: !!overview,
+    current_price: currentPrice,
+    overview_keys: overview ? Object.keys(overview).slice(0, 10) : []
+  };
+
+  console.log(`[getFactorValue] Evaluating:`, JSON.stringify(debugInfo, null, 2));
+
+  // Helper to format target based on direction
+  const formatTarget = (threshold: any, direction: string) => {
+    switch (direction) {
+      case 'gte': return `≥${threshold}`;
+      case 'lte': return `≤${threshold}`;
+      case 'gt': return `>${threshold}`;
+      case 'lt': return `<${threshold}`;
+      case 'eq': return `=${threshold}`;
+      default: return `${threshold}`;
+    }
+  };
+
+  switch (factor.factor_key) {
+    // Options factors - handle both programmatic keys AND database factor names
+    case 'opt-delta':
+    case 'Delta': // Database factor name
+      return { value: Math.abs(shortLeg?.delta || 0), target: formatTarget(factor.threshold, factor.direction) };
+
+    case 'opt-theta':
+    case 'Theta': // Database factor name
+      return { value: shortLeg?.theta || null, target: formatTarget(factor.threshold, factor.direction) };
+
+    case 'opt-vega':
+    case 'Vega': // Database factor name
+      return { value: shortLeg?.vega || null, target: formatTarget(factor.threshold, factor.direction) };
+
+    case 'opt-iv':
+    case 'Implied Volatility': // Database factor name
+      return { value: shortLeg?.iv || null, target: formatTarget(factor.threshold, factor.direction) };
+
+    case 'opt-oi':
+    case 'opt-open-interest':
+    case 'Open Interest': // Database factor name
+      return { value: shortLeg?.oi || null, target: formatTarget(factor.threshold, factor.direction) };
+
+    case 'opt-bid-ask-spread':
+    case 'Bid-Ask Spread': // Database factor name
+      const spread = shortLeg ? Math.abs((shortLeg.ask || 0) - (shortLeg.bid || 0)) : null;
+      return { value: spread, target: formatTarget(factor.threshold, factor.direction) };
+
+    // IV Rank
+    case 'calc-iv-rank':
+    case 'opt-iv-rank':
+    case 'IV Rank': // Database factor name
+      return { value: marketData?.iv_rank || null, target: formatTarget(factor.threshold, factor.direction) };
+
+    // IV Percentile
+    case 'calc-iv-percentile':
+    case 'opt-iv-percentile':
+    case 'IV Percentile': // Database factor name
+      return { value: marketData?.iv_percentile || null, target: formatTarget(factor.threshold, factor.direction) };
+
+    // Put/Call Volume Ratio
+    case 'calc-put-call-volume-ratio':
+    case 'opt-put-call-ratio':
+    case 'Put/Call Ratio': // Database factor name
+      return { value: marketData?.putCallRatio || null, target: formatTarget(factor.threshold, factor.direction) };
+
+    // Put/Call OI Ratio
+    case 'calc-put-call-oi-ratio':
+    case 'opt-put-call-oi-ratio':
+    case 'Put/Call OI Ratio': // Database factor name
+      return { value: marketData?.putCallOIRatio || null, target: formatTarget(factor.threshold, factor.direction) };
+
+    // Stock fundamental factors - calculate from Alpha Vantage data
+    case 'calc-52w-range-position':
+    case '52W Range Position': { // Database factor name
+      const highStr = overview?.["52WeekHigh"];
+      const lowStr = overview?.["52WeekLow"];
+      if (highStr && lowStr && currentPrice) {
+        const high = parseFloat(highStr);
+        const low = parseFloat(lowStr);
+        if (!isNaN(high) && !isNaN(low) && high > low) {
+          const rangePosition = (currentPrice - low) / (high - low);
+          return { value: rangePosition, target: formatTarget(factor.threshold, factor.direction) };
+        }
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    // Distance from 52W High
+    case 'calc-dist-52w-high':
+    case 'Distance from 52W High': { // Database factor name
+      const highStr = overview?.["52WeekHigh"];
+      if (highStr && currentPrice) {
+        const high = parseFloat(highStr);
+        if (!isNaN(high) && high > 0) {
+          // Percentage below 52-week high: ((52W High - Price) / 52W High) * 100
+          const distance = ((high - currentPrice) / high) * 100;
+          return { value: distance, target: formatTarget(factor.threshold, factor.direction) };
+        }
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    // Distance from 52W Low
+    case 'calc-dist-52w-low': {
+      const lowStr = overview?.["52WeekLow"];
+      if (lowStr && currentPrice) {
+        const low = parseFloat(lowStr);
+        if (!isNaN(low) && low > 0) {
+          // Percentage above 52-week low: ((Price - 52W Low) / 52W Low) * 100
+          const distance = ((currentPrice - low) / low) * 100;
+          return { value: distance, target: formatTarget(factor.threshold, factor.direction) };
+        }
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    // Market Cap Category
+    case 'calc-market-cap-category':
+    case 'Market Cap Category': { // Database factor name
+      const mcapStr = overview?.MarketCapitalization;
+      if (mcapStr && mcapStr !== "None" && mcapStr !== "-") {
+        const mcapVal = parseFloat(mcapStr);
+        if (!isNaN(mcapVal)) {
+          // 1=Micro (<$300M), 2=Small ($300M-$2B), 3=Mid ($2B-$10B), 4=Large ($10B-$200B), 5=Mega (>$200B)
+          let category = 1;
+          if (mcapVal >= 200_000_000_000) category = 5; // Mega cap
+          else if (mcapVal >= 10_000_000_000) category = 4; // Large cap
+          else if (mcapVal >= 2_000_000_000) category = 3; // Mid cap
+          else if (mcapVal >= 300_000_000) category = 2; // Small cap
+          return { value: category, target: formatTarget(factor.threshold, factor.direction) };
+        }
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    // Momentum
+    case 'calc-price-momentum-5d':
+    case 'calc-price-momentum-20d':
+    case 'Momentum': { // Database factor name
+      // Use Alpha Vantage MOM indicator fetched in preFilterGeneral
+      const momentum = fundamentalData?.momentum;
+      if (momentum !== null && momentum !== undefined) {
+        return { value: momentum, target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    // 200 Day Moving Average
+    case '200 Day Moving Average': {
+      // Use Alpha Vantage SMA(200) indicator fetched in preFilterGeneral
+      const sma200 = fundamentalData?.sma200;
+      console.log(`[getFactorValue] ${candidate.symbol} 200DMA: sma200=${sma200}, currentPrice=${currentPrice}`);
+      if (sma200 !== null && sma200 !== undefined && currentPrice) {
+        // Return ratio: currentPrice / MA200 (e.g., 1.05 means 5% above MA)
+        const ratio = currentPrice / sma200;
+        console.log(`[getFactorValue] ${candidate.symbol} 200DMA CALCULATED: ratio=${ratio.toFixed(2)}`);
+        return { value: ratio, target: formatTarget(factor.threshold, factor.direction) };
+      }
+      console.log(`[getFactorValue] ${candidate.symbol} 200DMA: Returning NULL`);
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    // 50 Day Moving Average
+    case '50 Day Moving Average': {
+      // Use Alpha Vantage SMA(50) indicator fetched in preFilterGeneral
+      const sma50 = fundamentalData?.sma50;
+      if (sma50 !== null && sma50 !== undefined && currentPrice) {
+        // Return ratio: currentPrice / MA50 (e.g., 1.05 means 5% above MA)
+        const ratio = currentPrice / sma50;
+        return { value: ratio, target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    // Analyst Rating Average
+    case 'calc-dist-target-price':
+    case 'Analyst Rating Average': { // Database factor name
+      const targetStr = overview?.AnalystTargetPrice;
+      if (targetStr && targetStr !== "None" && targetStr !== "-" && currentPrice) {
+        const targetVal = parseFloat(targetStr);
+        if (!isNaN(targetVal) && targetVal > 0) {
+          // Percentage distance from analyst target: ((Target - Price) / Price) * 100
+          const distance = ((targetVal - currentPrice) / currentPrice) * 100;
+          return { value: distance, target: formatTarget(factor.threshold, factor.direction) };
+        }
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    // Legacy keys for backwards compatibility
+    case 'stk-market-cap':
+    case 'market_cap': {
+      // Redirect to new calc-market-cap-category
+      return getFactorValue({ ...factor, factor_key: 'calc-market-cap-category' }, candidate, state);
+    }
+
+    // Macro factors
+    case 'av-inflation':
+    case 'Inflation Rate': // Database factor name
+      return { value: state.macroData?.inflation_rate || null, target: formatTarget(factor.threshold, factor.direction) };
+
+    // News/sentiment factors
+    case 'tavily-news-sentiment-score':
+    case 'News Sentiment Score': { // Database factor name
+      // Calculate average sentiment from news results
+      const newsResults = generalData?.news || [];
+      if (newsResults.length > 0) {
+        // Simple sentiment: 1 for positive words, -1 for negative
+        const avgSentiment = newsResults.reduce((sum: number, n: any) => {
+          const snippet = (n.snippet || '').toLowerCase();
+          let score = 0;
+          if (snippet.match(/\b(strong|growth|upgrade|beat|positive|rally)\b/)) score += 1;
+          if (snippet.match(/\b(weak|decline|downgrade|miss|negative|drop)\b/)) score -= 1;
+          return sum + score;
+        }, 0) / newsResults.length;
+        return { value: avgSentiment, target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    case 'tavily-news-volume':
+    case 'News Volume': // Database factor name
+      return { value: generalData?.news?.length || null, target: formatTarget(factor.threshold, factor.direction) };
+
+    case 'tavily-analyst-rating-avg': {
+      const targetStr = overview?.AnalystTargetPrice;
+      if (targetStr && targetStr !== "None" && targetStr !== "-") {
+        const targetVal = parseFloat(targetStr);
+        if (!isNaN(targetVal)) {
+          // Convert price target to 1-5 rating scale (simplified)
+          // This is a placeholder - real analyst ratings would come from Tavily API
+          return { value: 3.5, target: formatTarget(factor.threshold, factor.direction) };
+        }
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    case 'tavily-social-sentiment':
+    case 'Social Media Sentiment': // Database factor name
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) }; // Not available
+
+    default:
+      console.log(`[getFactorValue] UNMATCHED factor_key: "${factor.factor_key}" (name: ${factor.factor_name || factor.display_name})`);
+      return { value: null, target: formatTarget(factor.threshold || 'see IPS', factor.direction || 'gte') };
+  }
+}
+
+// Helper: Evaluate if a factor passes based on its value and threshold
+function evaluateFactor(factor: any, value: any): boolean {
+  if (value === null || value === undefined) return false;
+
+  const threshold = factor.threshold;
+  const direction = factor.direction;
+
+  switch (direction) {
+    case 'gte':
+      return value >= threshold;
+    case 'lte':
+      return value <= threshold;
+    case 'eq':
+      return value === threshold;
+    case 'gt':
+      return value > threshold;
+    case 'lt':
+      return value < threshold;
+    default:
+      return true;
+  }
+}
+
+// Helper: Calculate IPS score (re-evaluates all factors for accurate pass/fail)
 async function calculateIPSScore(candidate: any, state: AgentState): Promise<number> {
   if (!state.ipsConfig || !state.ipsConfig.factors) return 50;
 
   let totalWeight = 0;
   let weightedScore = 0;
+  const passedFactors: any[] = [];
+  const minorMisses: any[] = [];
+  const majorMisses: any[] = [];
 
   for (const factor of state.ipsConfig.factors) {
+    if (!factor.enabled) continue;
+
     totalWeight += factor.weight;
 
-    // Check if factor passed (from previous filtering steps)
-    const highWeightScore = candidate.high_weight_factor_scores?.find((s: any) => s.factor === factor.factor_key);
-    const lowWeightScore = candidate.low_weight_factor_scores?.find((s: any) => s.factor === factor.factor_key);
+    // Extract actual value from candidate data
+    const { value, target } = getFactorValue(factor, candidate, state);
 
-    const passed = highWeightScore?.pass || lowWeightScore?.pass || false;
-    const factorScore = passed ? 100 : 50; // Binary for now
+    // Re-evaluate the factor based on actual value and threshold
+    const passed = evaluateFactor(factor, value);
 
+    // Debug: Log first few factors with values
+    if (totalWeight <= factor.weight * 5) {
+      console.log(`[IPS Factor] ${factor.factor_name}: value=${value}, target=${target}, passed=${passed}`);
+    }
+
+    // For now, use simplified scoring until we have granular data
+    const factorScore = passed ? 100 : 50;
     weightedScore += factorScore * factor.weight;
+
+    const factorDetail = {
+      factor_key: factor.factor_key,
+      factor_name: factor.display_name || factor.factor_name,
+      value,
+      target,
+      passed,
+      weight: factor.weight,
+      distance: 0, // Calculate distance if needed
+      severity: passed ? 'pass' : 'major_miss' as const,
+    };
+
+    if (passed) {
+      passedFactors.push(factorDetail);
+    } else {
+      majorMisses.push(factorDetail);
+    }
   }
 
-  return totalWeight > 0 ? (weightedScore / totalWeight) : 50;
+  const ipsScore = totalWeight > 0 ? (weightedScore / totalWeight) : 50;
+
+  // Classify into tiers
+  const tier =
+    ipsScore >= 90 ? 'elite' :
+    ipsScore >= 75 ? 'quality' :
+    ipsScore >= 60 ? 'speculative' :
+    null;
+
+  // Build enhanced result
+  const result = {
+    ips_score: ipsScore,
+    tier,
+    factor_details: [...passedFactors, ...minorMisses, ...majorMisses],
+    passed_factors: passedFactors,
+    minor_misses: minorMisses,
+    major_misses: majorMisses,
+    total_weight_passed: passedFactors.reduce((sum, f) => sum + f.weight, 0),
+    total_weight_minor: 0,
+    total_weight_major: majorMisses.reduce((sum, f) => sum + f.weight, 0),
+  };
+
+  // Attach to candidate
+  candidate.ips_factor_details = result;
+  candidate.tier = tier;
+
+  console.log(
+    `[IPS] ${candidate.symbol}: Score=${ipsScore.toFixed(1)}%, ` +
+    `Tier=${tier || 'none'}, ` +
+    `Passed=${passedFactors.length}, ` +
+    `Failed=${majorMisses.length}`
+  );
+
+  return ipsScore;
 }
 
 // ============================================================================
-// STEP 11: Sort Highest to Lowest Yield (Top 5)
+// STEP 11: Tiered Selection with Diversification (Elite/Quality/Speculative)
 // ============================================================================
 
-async function sortAndSelectTop5(state: AgentState): Promise<Partial<AgentState>> {
-  console.log(`[SortTop5] Sorting ${state.candidates.length} candidates by composite score`);
+async function sortAndSelectTiered(state: AgentState): Promise<Partial<AgentState>> {
+  console.log(`[TieredSelection] Sorting ${state.candidates.length} candidates by tier and composite score`);
 
+  const { applyDiversificationFilters, calculateDiversityScore } = await import("./ips-enhanced-scoring");
+
+  // Sort by tier first, then by composite score within tier
   const sorted = [...state.candidates].sort((a, b) => {
+    // Tier priority: elite > quality > speculative > null
+    const tierOrder = { elite: 4, quality: 3, speculative: 2 };
+    const aTier = tierOrder[a.tier as keyof typeof tierOrder] || 1;
+    const bTier = tierOrder[b.tier as keyof typeof tierOrder] || 1;
+
+    if (aTier !== bTier) return bTier - aTier;
+
+    // Within same tier, sort by composite score
     return (b.composite_score || 0) - (a.composite_score || 0);
   });
 
-  const top5 = sorted.slice(0, 5);
+  // Select candidates by tier with limits
+  const eliteCandidates = sorted.filter(c => c.tier === 'elite').slice(0, 5);
+  const qualityCandidates = sorted.filter(c => c.tier === 'quality').slice(0, 10);
+  const speculativeCandidates = sorted.filter(c => c.tier === 'speculative').slice(0, 5);
 
-  console.log(`[SortTop5] Selected top 5:`);
-  top5.forEach((c, i) => {
-    console.log(`  ${i + 1}. ${c.symbol}: Composite=${c.composite_score?.toFixed(1)}`);
+  // Combine all tiers
+  let combined = [...eliteCandidates, ...qualityCandidates, ...speculativeCandidates];
+
+  console.log(`[TieredSelection] Before diversification: Elite=${eliteCandidates.length}, Quality=${qualityCandidates.length}, Speculative=${speculativeCandidates.length}`);
+
+  // Calculate diversity scores for each candidate
+  const selectedCandidates: any[] = [];
+  for (const candidate of combined) {
+    const diversityScore = calculateDiversityScore(selectedCandidates, candidate);
+    candidate.diversity_score = diversityScore;
+  }
+
+  // Apply diversification filters (max 3 per sector, 2 per symbol)
+  const diversified = applyDiversificationFilters(combined, {
+    maxPerSector: 3,
+    maxPerSymbol: 2,
+    maxPerStrategy: 10, // More lenient for strategies
   });
 
-  return { selected: top5 };
+  console.log(`[TieredSelection] After diversification: ${diversified.length} selected`);
+
+  // Log tier breakdown
+  const finalElite = diversified.filter(c => c.tier === 'elite');
+  const finalQuality = diversified.filter(c => c.tier === 'quality');
+  const finalSpeculative = diversified.filter(c => c.tier === 'speculative');
+
+  console.log(`[TieredSelection] Final breakdown:`);
+  console.log(`  Elite (IPS≥90): ${finalElite.length} trades`);
+  console.log(`  Quality (IPS 75-89): ${finalQuality.length} trades`);
+  console.log(`  Speculative (IPS 60-74): ${finalSpeculative.length} trades`);
+  console.log(`  Total: ${diversified.length} trades`);
+
+  // Log details for each selected trade
+  diversified.forEach((c, i) => {
+    console.log(
+      `  ${i + 1}. [${c.tier?.toUpperCase()}] ${c.symbol}: ` +
+      `Composite=${c.composite_score?.toFixed(1)}, ` +
+      `IPS=${c.ips_score?.toFixed(1)}%, ` +
+      `Diversity=${c.diversity_score?.toFixed(0)}`
+    );
+  });
+
+  return { selected: diversified };
 }
 
 // ============================================================================
@@ -1235,13 +1770,19 @@ async function finalizeOutput(state: AgentState): Promise<Partial<AgentState>> {
   console.log(`[FinalizeOutput] Preparing final output for ${state.selected.length} trades`);
 
   for (const candidate of state.selected) {
-    // Persist to database
+    // Persist to database with enhanced IPS details
     await db.persistCandidate(state.runId, {
       ...candidate,
+      tier: candidate.tier,
+      diversity_score: candidate.diversity_score,
+      ips_factor_scores: candidate.ips_factor_details,
       detailed_analysis: {
         composite_score: candidate.composite_score,
         yield_score: candidate.yield_score,
         ips_score: candidate.ips_score,
+        tier: candidate.tier,
+        ips_factor_details: candidate.ips_factor_details,
+        diversity_score: candidate.diversity_score,
         historical_win_rate: candidate.historical_win_rate,
         diversification_warnings: candidate.diversification_warnings,
         reasoning_decisions: state.reasoningDecisions,
@@ -1296,7 +1837,7 @@ export function buildAgentV3Graph() {
   graph.addNode("FilterLowWeightFactors", filterLowWeightFactors);
   graph.addNode("ReasoningCheckpoint3", reasoningCheckpoint3);
   graph.addNode("RAGScoring", ragCorrelationScoring);
-  graph.addNode("SortTop5", sortAndSelectTop5);
+  graph.addNode("SortTop5", sortAndSelectTiered);
   graph.addNode("GenerateRationales", generateTradeRationales);
   graph.addNode("Diversification", diversificationCheck);
   graph.addNode("FinalizeOutput", finalizeOutput);
@@ -1342,10 +1883,15 @@ export function buildAgentV3Graph() {
     "ReasoningCheckpoint3",
     (state: AgentState) => {
       const lastDecision = state.reasoningDecisions?.[state.reasoningDecisions.length - 1];
+      // If we have near-miss candidates in "selected", continue to FinalizeOutput to display them
+      if (lastDecision?.decision === "REJECT" && state.selected && state.selected.length > 0) {
+        return "finalize_near_miss";
+      }
       return lastDecision?.decision === "REJECT" ? "end" : "continue";
     },
     {
       continue: "RAGScoring",
+      finalize_near_miss: "FinalizeOutput",
       end: "__end__"
     }
   );

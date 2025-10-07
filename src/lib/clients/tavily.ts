@@ -158,9 +158,20 @@ export async function tavilySearch(
             body: requestBody,
           });
 
+          // Debug: Check if response is undefined/null
+          if (r === undefined || r === null) {
+            console.error(`[Tavily Search] ERROR: Received ${r} response from API`);
+            console.error(`[Tavily Search] Request body:`, JSON.stringify(requestBody, null, 2));
+            throw new Error(`Tavily API returned ${r} response`);
+          }
+
           // Validate response schema
           const validation = validateSearchResponse(r);
           if (!validation.success) {
+            console.error(`[Tavily Search] Schema validation failed for query: "${query}"`);
+            console.error(`[Tavily Search] Validation errors:`, JSON.stringify(validation.error, null, 2));
+            console.error(`[Tavily Search] Actual response type:`, typeof r);
+            console.error(`[Tavily Search] Actual response:`, JSON.stringify(r, null, 2));
             throw new Error(`Invalid search response schema: ${JSON.stringify(validation.error)}`);
           }
 

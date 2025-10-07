@@ -154,6 +154,10 @@ export async function POST(req: NextRequest) {
       vega: body.vega ?? null,
       iv_at_entry: body.iv_at_entry ?? null,
       sector: body.sector ?? null,
+      // Enhanced IPS tracking
+      tier: body.tier ?? null,
+      ips_factor_scores: body.ips_factor_details ?? null,
+      diversity_score: body.diversity_score ?? null,
       // leave exit fields null
     };
 

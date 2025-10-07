@@ -6,6 +6,9 @@ import { MarketDataProvider } from '@/components/data/MarketDataProvider'
 import { AuthProvider } from '@/components/auth/auth-provider'
 import { Toaster } from "@/components/ui/sonner"
 
+// Initialize scheduler on server startup
+import '@/lib/init-scheduler'
+
 const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {

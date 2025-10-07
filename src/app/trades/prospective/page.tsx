@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Plus } from "lucide-react";
+import { Plus, ChevronDown, ChevronUp } from "lucide-react";
+import { FactorScorecard } from "@/components/trades/factor-scorecard";
 
 type TradeRow = {
   id: string;
@@ -21,6 +22,9 @@ type TradeRow = {
   max_gain?: number | null;
   max_loss?: number | null;
   ips_score?: number | null;
+  tier?: 'elite' | 'quality' | 'speculative' | null;
+  ips_factor_scores?: any;
+  diversity_score?: number | null;
   created_at: string;
   ips_configurations?: { name?: string | null } | null;
 };
@@ -37,6 +41,7 @@ export default function ProspectiveTradesPage() {
   const [rows, setRows] = useState<TradeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("");
+  const [expandedRow, setExpandedRow] = useState<string | null>(null);
 
   async function fetchProspective() {
     try {
@@ -113,35 +118,94 @@ export default function ProspectiveTradesPage() {
               <table className="w-full text-sm">
                 <thead className="text-left text-gray-600">
                   <tr>
+                    <th className="py-2 pr-4"></th>
                     <th className="py-2 pr-4">Name</th>
+                    <th className="py-2 pr-4">Tier</th>
                     <th className="py-2 pr-4">Exp. Date</th>
                     <th className="py-2 pr-4">DTE</th>
                     <th className="py-2 pr-4">Contract Type</th>
                     <th className="py-2 pr-4">Max Gain</th>
                     <th className="py-2 pr-4">Max Loss</th>
                     <th className="py-2 pr-4">IPS Score</th>
-                    <th className="py-2 pr-4">Status</th>
+                    <th className="py-2 pr-4">Diversity</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((r) => {
                     const d = dte(r.expiration_date);
+                    const isExpanded = expandedRow === r.id;
+                    const tierConfig = {
+                      elite: { label: 'Elite', color: 'bg-green-500 text-white' },
+                      quality: { label: 'Quality', color: 'bg-blue-500 text-white' },
+                      speculative: { label: 'Spec', color: 'bg-orange-500 text-white' },
+                    };
+                    const tierInfo = r.tier ? tierConfig[r.tier] : null;
+
                     return (
-                      <tr key={r.id} className="border-t">
-                        <td className="py-2 pr-4">
-                          <div className="font-medium">{r.name || r.symbol}</div>
-                          <div className="text-xs text-gray-500">{r.symbol} — {r.ips_configurations?.name || ""}</div>
-                        </td>
-                        <td className="py-2 pr-4">{r.expiration_date ? new Date(r.expiration_date).toLocaleDateString() : "—"}</td>
-                        <td className={`py-2 pr-4 ${d != null && d <= 0 ? "text-red-600" : ""}`}>{d != null ? d : "—"}</td>
-                        <td className="py-2 pr-4">{r.contract_type?.replace(/-/g, " ")}</td>
-                        <td className="py-2 pr-4">{r.max_gain != null ? `$${r.max_gain.toFixed(2)}` : "—"}</td>
-                        <td className="py-2 pr-4">{r.max_loss != null ? `$${r.max_loss.toFixed(2)}` : "—"}</td>
-                        <td className="py-2 pr-4">{r.ips_score != null ? `${Math.round(r.ips_score)}/100` : "—"}</td>
-                        <td className="py-2 pr-4">
-                          <Badge className="bg-blue-50 text-blue-700">{r.status?.toUpperCase()}</Badge>
-                        </td>
-                      </tr>
+                      <>
+                        <tr key={r.id} className="border-t hover:bg-gray-50">
+                          <td className="py-2 pr-2">
+                            {r.ips_factor_scores && (
+                              <button
+                                onClick={() => setExpandedRow(isExpanded ? null : r.id)}
+                                className="text-gray-500 hover:text-gray-700"
+                              >
+                                {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              </button>
+                            )}
+                          </td>
+                          <td className="py-2 pr-4">
+                            <div className="font-medium">{r.name || r.symbol}</div>
+                            <div className="text-xs text-gray-500">{r.symbol} — {r.ips_configurations?.name || ""}</div>
+                          </td>
+                          <td className="py-2 pr-4">
+                            {tierInfo ? (
+                              <Badge className={`${tierInfo.color} text-xs`}>
+                                {tierInfo.label}
+                              </Badge>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
+                          </td>
+                          <td className="py-2 pr-4">{r.expiration_date ? new Date(r.expiration_date).toLocaleDateString() : "—"}</td>
+                          <td className={`py-2 pr-4 ${d != null && d <= 0 ? "text-red-600" : ""}`}>{d != null ? d : "—"}</td>
+                          <td className="py-2 pr-4">{r.contract_type?.replace(/-/g, " ")}</td>
+                          <td className="py-2 pr-4 text-green-600 font-medium">{r.max_gain != null ? `$${r.max_gain.toFixed(2)}` : "—"}</td>
+                          <td className="py-2 pr-4 text-red-600">{r.max_loss != null ? `$${r.max_loss.toFixed(2)}` : "—"}</td>
+                          <td className="py-2 pr-4">
+                            <div className="flex items-center gap-1">
+                              <span className="font-medium">{r.ips_score != null ? `${Math.round(r.ips_score)}` : "—"}</span>
+                              {r.ips_factor_scores && (
+                                <div className="flex gap-1 text-xs">
+                                  <span className="text-green-600">✓{r.ips_factor_scores.passed_factors?.length || 0}</span>
+                                  {(r.ips_factor_scores.minor_misses?.length || 0) > 0 && (
+                                    <span className="text-yellow-600">⚠{r.ips_factor_scores.minor_misses.length}</span>
+                                  )}
+                                  {(r.ips_factor_scores.major_misses?.length || 0) > 0 && (
+                                    <span className="text-red-600">✗{r.ips_factor_scores.major_misses.length}</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2 pr-4">
+                            {r.diversity_score != null ? (
+                              <span className={`font-medium ${r.diversity_score >= 80 ? 'text-green-600' : r.diversity_score >= 50 ? 'text-yellow-600' : 'text-orange-600'}`}>
+                                {Math.round(r.diversity_score)}
+                              </span>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        </tr>
+                        {isExpanded && r.ips_factor_scores && (
+                          <tr>
+                            <td colSpan={10} className="py-4 px-4 bg-gray-50">
+                              <FactorScorecard ipsFactorDetails={r.ips_factor_scores} />
+                            </td>
+                          </tr>
+                        )}
+                      </>
                     );
                   })}
                 </tbody>

@@ -10,7 +10,13 @@
     "server": "node server.js",
     "seed-iv-cache": "npx tsx scripts/seed-watchlist-iv-cache.ts",
     "spread-scheduler": "npx tsx scripts/spread-price-scheduler.ts",
-    "update-spreads": "curl -X GET http://localhost:3000/api/trades/spread-prices"
+    "update-spreads": "curl -X GET http://localhost:3000/api/trades/spread-prices",
+    "scheduler": "npx tsx scripts/start-all-schedulers.ts",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop tenxiv-scheduler",
+    "pm2:restart": "pm2 restart tenxiv-scheduler",
+    "pm2:logs": "pm2 logs tenxiv-scheduler",
+    "pm2:status": "pm2 status"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.1",

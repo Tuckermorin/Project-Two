@@ -135,6 +135,38 @@ interface RealtimeOptionsResponse {
   data?: RealtimeOptionsApiEntry[];
 }
 
+interface TechnicalIndicatorDataPoint {
+  [date: string]: {
+    [indicator: string]: string;
+  };
+}
+
+interface SMAResponse {
+  'Meta Data': {
+    '1: Symbol': string;
+    '2: Indicator': string;
+    '3: Last Refreshed': string;
+    '4: Interval': string;
+    '5: Time Period': number;
+    '6: Series Type': string;
+    '7: Time Zone': string;
+  };
+  'Technical Analysis: SMA': TechnicalIndicatorDataPoint;
+}
+
+interface MOMResponse {
+  'Meta Data': {
+    '1: Symbol': string;
+    '2: Indicator': string;
+    '3: Last Refreshed': string;
+    '4: Interval': string;
+    '5: Time Period': number;
+    '6: Series Type': string;
+    '7: Time Zone': string;
+  };
+  'Technical Analysis: MOM': TechnicalIndicatorDataPoint;
+}
+
 export interface RealtimeOptionContract {
   contractId: string;
   symbol: string;
@@ -328,13 +360,97 @@ export class AlphaVantageClient {
 
   async getQuote(symbol: string): Promise<QuoteData> {
     console.log(`Fetching quote for ${symbol}`);
-    
+
     const response = await this.makeRequest<{ 'Global Quote': QuoteData }>({
       function: 'GLOBAL_QUOTE',
       symbol: symbol.toUpperCase()
     });
 
     return response['Global Quote'];
+  }
+
+  /**
+   * Get Simple Moving Average (SMA) technical indicator
+   * @param symbol Stock symbol
+   * @param interval Time interval (daily, weekly, monthly)
+   * @param timePeriod Number of data points (e.g., 50, 200)
+   * @param seriesType Price type (close, open, high, low)
+   * @returns Latest SMA value or null
+   */
+  async getSMA(
+    symbol: string,
+    interval: 'daily' | 'weekly' | 'monthly' = 'daily',
+    timePeriod: number = 200,
+    seriesType: 'close' | 'open' | 'high' | 'low' = 'close'
+  ): Promise<number | null> {
+    console.log(`Fetching SMA(${timePeriod}) for ${symbol}`);
+
+    try {
+      const response = await this.makeRequest<SMAResponse>({
+        function: 'SMA',
+        symbol: symbol.toUpperCase(),
+        interval,
+        time_period: String(timePeriod),
+        series_type: seriesType
+      });
+
+      const technicalData = response['Technical Analysis: SMA'];
+      if (!technicalData) return null;
+
+      // Get the most recent date's SMA value
+      const dates = Object.keys(technicalData).sort().reverse();
+      if (dates.length === 0) return null;
+
+      const latestDate = dates[0];
+      const smaValue = technicalData[latestDate]['SMA'];
+
+      return smaValue ? parseFloat(smaValue) : null;
+    } catch (error) {
+      console.error(`Failed to fetch SMA(${timePeriod}) for ${symbol}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Get Momentum (MOM) technical indicator
+   * @param symbol Stock symbol
+   * @param interval Time interval (daily, weekly, monthly)
+   * @param timePeriod Number of periods (default: 10)
+   * @param seriesType Price type (close, open, high, low)
+   * @returns Latest momentum value or null
+   */
+  async getMOM(
+    symbol: string,
+    interval: 'daily' | 'weekly' | 'monthly' = 'daily',
+    timePeriod: number = 10,
+    seriesType: 'close' | 'open' | 'high' | 'low' = 'close'
+  ): Promise<number | null> {
+    console.log(`Fetching MOM(${timePeriod}) for ${symbol}`);
+
+    try {
+      const response = await this.makeRequest<MOMResponse>({
+        function: 'MOM',
+        symbol: symbol.toUpperCase(),
+        interval,
+        time_period: String(timePeriod),
+        series_type: seriesType
+      });
+
+      const technicalData = response['Technical Analysis: MOM'];
+      if (!technicalData) return null;
+
+      // Get the most recent date's momentum value
+      const dates = Object.keys(technicalData).sort().reverse();
+      if (dates.length === 0) return null;
+
+      const latestDate = dates[0];
+      const momValue = technicalData[latestDate]['MOM'];
+
+      return momValue ? parseFloat(momValue) : null;
+    } catch (error) {
+      console.error(`Failed to fetch MOM(${timePeriod}) for ${symbol}:`, error);
+      return null;
+    }
   }
 
   async getCompleteFundamentalData(symbol: string): Promise<FundamentalData> {

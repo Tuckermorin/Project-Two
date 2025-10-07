@@ -456,11 +456,16 @@ async function riskGuardrails(state: AgentState): Promise<Partial<AgentState>> {
     // Initialize detailed_analysis if not exists
     if (!c.detailed_analysis) c.detailed_analysis = {};
 
-    // Check for earnings in next 10 days and store news results
+    // ENHANCED: Check for earnings in next 10 days with advanced search
     try {
       const tav = await tavilySearch(
-        `${c.symbol} earnings date next 10 days`,
-        { time_range: "week", max_results: 5 }
+        `${c.symbol} earnings date announcement`,
+        {
+          topic: "news",
+          search_depth: "advanced", // Advanced depth for better accuracy
+          days: 14, // Look ahead 2 weeks
+          max_results: 10, // More results for better coverage
+        }
       );
       c.guardrail_flags.earnings_risk = tav.results.some((r: any) =>
         r.snippet.toLowerCase().includes("earnings")
@@ -472,45 +477,61 @@ async function riskGuardrails(state: AgentState): Promise<Partial<AgentState>> {
       c.guardrail_flags.earnings_risk = false;
     }
 
-    // Fetch 7-day news for sentiment and volume
+    // ENHANCED: Fetch 7-day news for sentiment and volume with advanced search
     try {
       const newsSearch7d = await tavilySearch(
         `${c.symbol} stock news analysis`,
-        { time_range: "week", max_results: 15 }
+        {
+          topic: "news",
+          search_depth: "advanced", // Advanced depth for quality
+          chunks_per_source: 3, // More context per article
+          days: 7,
+          max_results: 15 // Keep at 15 for comprehensive coverage
+        }
       );
       if (!c.detailed_analysis.news_results) c.detailed_analysis.news_results = [];
       c.detailed_analysis.news_results.push(...newsSearch7d.results);
       c.detailed_analysis.news_count_7d = newsSearch7d.results.length;
-      console.log(`[RiskGuardrails] ${c.symbol}: Found ${newsSearch7d.results.length} news articles (7d)`);
+      console.log(`[RiskGuardrails] ${c.symbol}: Found ${newsSearch7d.results.length} news articles (7d, advanced)`);
     } catch (error) {
       console.warn(`[RiskGuardrails] Failed to fetch 7-day news for ${c.symbol}:`, error);
       c.detailed_analysis.news_count_7d = 0;
     }
 
-    // Fetch 90-day news count for z-score baseline
+    // ENHANCED: Fetch 90-day news count for z-score baseline with advanced search
     try {
       const newsSearch90d = await tavilySearch(
         `${c.symbol} stock news`,
-        { time_range: "month", max_results: 50 }
+        {
+          topic: "news",
+          search_depth: "advanced", // Advanced for better quality
+          days: 30, // Tavily max is ~30 days
+          max_results: 50
+        }
       );
       // Tavily "month" returns ~30 days, so we'll multiply by 3 for an estimate
       // This is an approximation since Tavily doesn't support custom date ranges
       const estimatedCount90d = newsSearch90d.results.length * 3;
       c.detailed_analysis.news_count_90d = estimatedCount90d;
-      console.log(`[RiskGuardrails] ${c.symbol}: Estimated 90-day news count: ${estimatedCount90d} (based on ${newsSearch90d.results.length} in 30d)`);
+      console.log(`[RiskGuardrails] ${c.symbol}: Estimated 90-day news count: ${estimatedCount90d} (based on ${newsSearch90d.results.length} in 30d, advanced)`);
     } catch (error) {
       console.warn(`[RiskGuardrails] Failed to fetch 90-day news estimate for ${c.symbol}:`, error);
       c.detailed_analysis.news_count_90d = 0;
     }
 
-    // Check macro events
+    // ENHANCED: Check macro events with advanced search
     try {
       const macroSearch = await tavilySearch(
-        "FOMC schedule next 10 days CPI NFP calendar",
-        { time_range: "month", max_results: 5 }
+        "FOMC Federal Reserve meeting schedule CPI NFP economic calendar",
+        {
+          topic: "news",
+          search_depth: "advanced", // Advanced for accuracy
+          days: 30, // Look ahead 30 days
+          max_results: 8 // More results for comprehensive coverage
+        }
       );
       c.guardrail_flags.macro_event = macroSearch.results.some((r: any) =>
-        r.snippet.toLowerCase().includes("fomc")
+        r.snippet.toLowerCase().includes("fomc") || r.snippet.toLowerCase().includes("federal reserve")
       );
     } catch (error) {
       c.guardrail_flags.macro_event = false;
@@ -1246,10 +1267,16 @@ async function llmRationale(state: AgentState): Promise<Partial<AgentState>> {
 
   for (const c of candidates) {
     try {
-      // Fetch recent news
+      // ENHANCED: Use advanced depth search with more results for better signal quality
       const res = await tavilySearch(
-        `${c.symbol} company news last 3 days`,
-        { time_range: "week", max_results: 3 }
+        `${c.symbol} stock news analysis outlook`,
+        {
+          topic: "news",
+          search_depth: "advanced", // Use advanced depth (2 credits vs 1 credit)
+          chunks_per_source: 3, // Get more context per article
+          days: 7, // Last 7 days
+          max_results: 12 // Increase from 3 to 12 for better coverage
+        }
       );
 
       // Store news results in detailed_analysis
@@ -1260,14 +1287,20 @@ async function llmRationale(state: AgentState): Promise<Partial<AgentState>> {
         c.detailed_analysis.tavily_error = res.error;
         c.detailed_analysis.news_results = [];
       } else {
-        c.detailed_analysis.news_results = res.results.map((r: any) => ({
+        // Sort by score and filter for quality (score >= 0.6)
+        const qualityResults = (res.results || [])
+          .filter((r: any) => (r.score || 0) >= 0.6)
+          .sort((a: any, b: any) => (b.score || 0) - (a.score || 0));
+
+        c.detailed_analysis.news_results = qualityResults.map((r: any) => ({
           title: r.title || "No title",
           snippet: r.snippet || "",
           url: r.url || "",
           published_at: r.publishedAt || null,
+          score: r.score || 0,
         }));
         c.detailed_analysis.tavily_error = null;
-        console.log(`[LLM_Rationale] Found ${res.results.length} news articles for ${c.symbol}`);
+        console.log(`[LLM_Rationale] Found ${qualityResults.length} high-quality articles for ${c.symbol} (advanced search)`);
       }
 
       const newsContext = res.results

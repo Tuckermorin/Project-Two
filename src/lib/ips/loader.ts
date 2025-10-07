@@ -143,7 +143,7 @@ export async function loadIPSById(ipsId: string): Promise<IPSConfig> {
         display_name: f.factor_name ?? null,
         description: null,
       };
-      console.log(`[loadIPSById] Factor: ${factor.display_name}, weight: ${factor.weight}, threshold: ${factor.threshold}, threshold_max: ${factor.threshold_max}, direction: ${factor.direction}`);
+      console.log(`[loadIPSById] Factor: ${factor.display_name} (factor_id: ${factor.factor_key}), weight: ${factor.weight}, threshold: ${factor.threshold}, threshold_max: ${factor.threshold_max}, direction: ${factor.direction}`);
       return factor;
     }),
   };

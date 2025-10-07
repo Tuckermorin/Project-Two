@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Checkbox } from "@/components/ui/checkbox";
 import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight, List } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
+import { FactorScorecard } from "@/components/trades/factor-scorecard";
 
 type Candidate = {
   id: string;
@@ -30,6 +31,11 @@ type Candidate = {
   rationale?: string;
   guardrail_flags?: Record<string, boolean>;
   score?: number;
+  tier?: 'elite' | 'quality' | 'speculative' | null;
+  ips_factor_details?: any;
+  ips_score?: number;
+  composite_score?: number;
+  diversity_score?: number;
   detailed_analysis?: {
     ips_name?: string;
     ips_factors?: Array<{
@@ -40,6 +46,7 @@ type Candidate = {
       weight?: string;
       status: "pass" | "fail" | "warning";
     }>;
+    ips_factor_details?: any;
     api_data?: {
       company_name?: string;
       sector?: string;
@@ -204,6 +211,9 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
           symbol: firstCand.symbol,
           composite_score: firstCand.composite_score,
           ips_score: firstCand.ips_score,
+          tier: firstCand.tier,
+          has_ips_factor_details: !!firstCand.ips_factor_details,
+          ips_factor_details_keys: firstCand.ips_factor_details ? Object.keys(firstCand.ips_factor_details) : [],
           has_historical_analysis: !!firstCand.historical_analysis,
           has_detailed_analysis: !!firstCand.detailed_analysis,
           has_ips_factors: !!firstCand.detailed_analysis?.ips_factors,
@@ -542,8 +552,20 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                 </CardContent>
               </Card>
 
-              {/* IPS Criteria Comparison */}
-              {selectedCandidate.detailed_analysis?.ips_factors && (
+              {/* Enhanced IPS Factor Scorecard */}
+              {(selectedCandidate.ips_factor_details || selectedCandidate.detailed_analysis?.ips_factor_details) && (
+                <>
+                  {console.log('[AgentSection] Rendering FactorScorecard with data:', selectedCandidate.ips_factor_details || selectedCandidate.detailed_analysis?.ips_factor_details)}
+                  <FactorScorecard
+                    ipsFactorDetails={selectedCandidate.ips_factor_details || selectedCandidate.detailed_analysis?.ips_factor_details}
+                    compact={false}
+                  />
+                </>
+              )}
+
+              {/* Fallback: Old IPS Criteria Comparison */}
+              {!selectedCandidate.ips_factor_details && !selectedCandidate.detailed_analysis?.ips_factor_details &&
+               selectedCandidate.detailed_analysis?.ips_factors && (
                 <Card>
                   <CardHeader>
                     <CardTitle className="text-base">
