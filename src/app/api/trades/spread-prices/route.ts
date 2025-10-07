@@ -12,6 +12,10 @@ const supabase = createClient(
 // Allow long-running requests (up to 5 minutes for updating all trades)
 export const maxDuration = 300
 
+/**
+ * GET: Fetch spread prices (and optionally update them)
+ * POST: Manually trigger spread price update
+ */
 export async function GET(request: NextRequest) {
   try {
     const searchParams = request.nextUrl.searchParams
@@ -56,6 +60,103 @@ export async function GET(request: NextRequest) {
         successful: successful.length,
         failed: failed.length,
         results
+      })
+    }
+  } catch (error) {
+    console.error('[Spread Prices API] Error:', error)
+    return NextResponse.json(
+      { error: 'Internal server error' },
+      { status: 500 }
+    )
+  }
+}
+
+/**
+ * POST: Manual trigger for spread price updates
+ */
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json().catch(() => ({}))
+    const tradeId = body.tradeId
+    const tradeIds = body.tradeIds
+
+    if (tradeId) {
+      // Update a specific trade
+      const { data: trade, error } = await supabase
+        .from('trades')
+        .select('*')
+        .eq('id', tradeId)
+        .eq('status', 'active')
+        .single()
+
+      if (error || !trade) {
+        return NextResponse.json({ error: 'Trade not found' }, { status: 404 })
+      }
+
+      const result = await calculateAndUpdateSpreadPrice(trade)
+      return NextResponse.json(result)
+    } else if (tradeIds && Array.isArray(tradeIds) && tradeIds.length > 0) {
+      // Update specific trades by IDs
+      const { data: trades, error } = await supabase
+        .from('trades')
+        .select('*')
+        .in('id', tradeIds)
+        .eq('status', 'active')
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+
+      // Add a small delay between each update to respect rate limits
+      const results = []
+      for (const trade of trades || []) {
+        const result = await calculateAndUpdateSpreadPrice(trade)
+        results.push(result)
+        // 100ms delay = 600 calls per minute (within Alpha Vantage limit)
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+
+      const successful = results.filter(r => r.success)
+      const failed = results.filter(r => !r.success)
+
+      return NextResponse.json({
+        success: true,
+        total: results.length,
+        successful: successful.length,
+        failed: failed.length,
+        results,
+        updatedAt: new Date().toISOString()
+      })
+    } else {
+      // Update all active trades
+      const { data: trades, error } = await supabase
+        .from('trades')
+        .select('*')
+        .eq('status', 'active')
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 })
+      }
+
+      // Add a small delay between each update to respect rate limits
+      const results = []
+      for (const trade of trades || []) {
+        const result = await calculateAndUpdateSpreadPrice(trade)
+        results.push(result)
+        // 100ms delay = 600 calls per minute (within Alpha Vantage limit)
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+
+      const successful = results.filter(r => r.success)
+      const failed = results.filter(r => !r.success)
+
+      return NextResponse.json({
+        success: true,
+        total: results.length,
+        successful: successful.length,
+        failed: failed.length,
+        results,
+        updatedAt: new Date().toISOString()
       })
     }
   } catch (error) {

@@ -125,12 +125,8 @@ async function updateAllSpreadPrices() {
 }
 
 /**
- * Schedule spread price updates at market hours
- * - 9:30 AM EST (Market Open)
- * - 10:00 AM EST
- * - 12:00 PM EST (Midday)
- * - 2:00 PM EST
- * - 4:00 PM EST (Market Close)
+ * Schedule spread price updates every 5 minutes during market hours
+ * Runs Monday-Friday from 9:30 AM to 4:00 PM EST
  */
 export function startSpreadPriceScheduler() {
   // Check if we're in a server environment
@@ -141,72 +137,45 @@ export function startSpreadPriceScheduler() {
 
   console.log('[Spread Updater] Starting scheduler...')
 
-  // Market Open: 9:30 AM EST (14:30 UTC)
-  const marketOpen = new CronJob(
-    '30 14 * * 1-5', // Mon-Fri at 9:30 AM EST
-    updateAllSpreadPrices,
-    null,
-    true,
-    'America/New_York'
-  )
+  // Every 5 minutes during market hours (9:30 AM - 4:00 PM EST)
+  // Cron: */5 * * * 1-5 runs every 5 minutes, Mon-Fri
+  // We'll check inside the function if we're within market hours
+  const everyFiveMinutes = new CronJob(
+    '*/5 * * * 1-5', // Every 5 minutes, Mon-Fri
+    async () => {
+      const now = new Date()
+      const hour = now.getHours()
+      const minute = now.getMinutes()
 
-  // 10:00 AM EST (15:00 UTC)
-  const morning = new CronJob(
-    '0 15 * * 1-5', // Mon-Fri at 10:00 AM EST
-    updateAllSpreadPrices,
-    null,
-    true,
-    'America/New_York'
-  )
+      // Market hours: 9:30 AM (9:30) to 4:00 PM (16:00) EST
+      // Convert to 24-hour format: 9:30 = 9*60+30 = 570 minutes, 16:00 = 960 minutes
+      const currentMinutes = hour * 60 + minute
+      const marketOpen = 9 * 60 + 30  // 9:30 AM = 570 minutes
+      const marketClose = 16 * 60      // 4:00 PM = 960 minutes
 
-  // 12:00 PM EST (17:00 UTC)
-  const midday = new CronJob(
-    '0 17 * * 1-5', // Mon-Fri at 12:00 PM EST
-    updateAllSpreadPrices,
-    null,
-    true,
-    'America/New_York'
-  )
-
-  // 2:00 PM EST (19:00 UTC)
-  const afternoon = new CronJob(
-    '0 19 * * 1-5', // Mon-Fri at 2:00 PM EST
-    updateAllSpreadPrices,
-    null,
-    true,
-    'America/New_York'
-  )
-
-  // Market Close: 4:00 PM EST (21:00 UTC)
-  const marketClose = new CronJob(
-    '0 21 * * 1-5', // Mon-Fri at 4:00 PM EST
-    updateAllSpreadPrices,
+      if (currentMinutes >= marketOpen && currentMinutes <= marketClose) {
+        console.log(`[Spread Updater] Running scheduled update at ${now.toLocaleTimeString('en-US', { timeZone: 'America/New_York' })} EST`)
+        await updateAllSpreadPrices()
+      } else {
+        console.log(`[Spread Updater] Skipping update outside market hours (${now.toLocaleTimeString('en-US', { timeZone: 'America/New_York' })} EST)`)
+      }
+    },
     null,
     true,
     'America/New_York'
   )
 
   console.log('[Spread Updater] Scheduled updates:')
-  console.log('  - 9:30 AM EST (Market Open)')
-  console.log('  - 10:00 AM EST')
-  console.log('  - 12:00 PM EST (Midday)')
-  console.log('  - 2:00 PM EST')
-  console.log('  - 4:00 PM EST (Market Close)')
+  console.log('  - Every 5 minutes during market hours')
+  console.log('  - Monday-Friday, 9:30 AM - 4:00 PM EST')
+  console.log('  - Approximately 78 updates per day')
 
-  // Return jobs for cleanup if needed
+  // Return job for cleanup if needed
   return {
-    marketOpen,
-    morning,
-    midday,
-    afternoon,
-    marketClose,
+    everyFiveMinutes,
     stopAll: () => {
-      marketOpen.stop()
-      morning.stop()
-      midday.stop()
-      afternoon.stop()
-      marketClose.stop()
-      console.log('[Spread Updater] All schedulers stopped')
+      everyFiveMinutes.stop()
+      console.log('[Spread Updater] Scheduler stopped')
     }
   }
 }

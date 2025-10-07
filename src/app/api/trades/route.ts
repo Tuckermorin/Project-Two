@@ -275,6 +275,16 @@ export async function PATCH(request: NextRequest) {
 
     if (error) throw new Error(error.message);
 
+    // If activating trades, trigger spread price calculation asynchronously
+    if (targetStatus === 'active' && ids.length > 0) {
+      // Don't await - let it run in background
+      fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/trades/spread-prices`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tradeIds: ids })
+      }).catch(err => console.error('Failed to trigger spread price update:', err));
+    }
+
     return NextResponse.json({ success: true });
   } catch (err) {
     console.error('Error PATCH /api/trades:', err);

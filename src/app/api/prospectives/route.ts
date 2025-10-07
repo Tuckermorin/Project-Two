@@ -56,7 +56,9 @@ export async function POST(req: NextRequest) {
 
     // Extract contract legs
     const legs: Array<{ type: "BUY" | "SELL"; right: "P" | "C"; strike: number; expiry: string }> = body.contract_legs || [];
-    const expiry = body.expiration_date || body.exp || legs[0]?.expiry || null;
+    const expiryRaw = body.expiration_date || body.exp || legs[0]?.expiry || null;
+    // Parse expiry as date-only string (YYYY-MM-DD) to avoid timezone shifts
+    const expiry = expiryRaw ? expiryRaw.split('T')[0] : null;
 
     // Derive short/long strikes (typical 2-leg vertical)
     const shortLeg = legs.find((l) => l.type === "SELL");
@@ -125,7 +127,7 @@ export async function POST(req: NextRequest) {
       symbol,
       strategy_type,
       entry_date: null, // keep null so status 'prospective' list shows it
-      expiration_date: expiry ? new Date(expiry) : null,
+      expiration_date: expiry, // Store as date string to avoid timezone issues
       status: "prospective",
       quantity: body.quantity ?? 1,
       contracts: body.contracts ?? 1,

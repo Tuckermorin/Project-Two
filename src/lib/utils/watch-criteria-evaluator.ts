@@ -182,17 +182,18 @@ export function evaluateExitStrategy(
   if (!exitStrategies) return null
 
   // Check profit target
-  if (exitStrategies.profit?.enabled && trade.max_gain && trade.credit_received && trade.current_price) {
-    // For credit spreads: profit = credit_received - current_price (cost to buy back)
+  if (exitStrategies.profit?.enabled && trade.credit_received && trade.current_price) {
+    // For credit spreads: profit % = (credit - current_price) / credit * 100
+    // This gives us the percentage of the credit that has been captured as profit
     const currentProfit = trade.credit_received - trade.current_price
-    const profitPercent = (currentProfit / trade.max_gain) * 100
+    const profitPercent = (currentProfit / trade.credit_received) * 100
 
     const profitTarget = exitStrategies.profit.value // This is the percentage (e.g., 50 for 50%)
 
     if (profitPercent >= profitTarget) {
       return {
         shouldExit: true,
-        reason: `Profit target reached: ${profitPercent.toFixed(0)}% of max gain (target: ${profitTarget}%)`,
+        reason: `Profit target reached: ${profitPercent.toFixed(1)}% of credit (target: ${profitTarget}%)`,
         type: 'profit'
       }
     }

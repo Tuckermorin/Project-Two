@@ -256,10 +256,11 @@ export default function ExcelStyleTradesDashboard() {
           const ips = r.ips_id ? ipsMap[r.ips_id] : null
           console.log(`[Dashboard] Trade ${r.symbol}: ips_id=${r.ips_id}, ips found=${!!ips}, exit_strategies=${!!ips?.exit_strategies}`)
 
-          // For credit spreads, we need the spread price, not the underlying price
-          // Until we track spread prices, don't pass current_price to avoid false exit signals
+          // For credit spreads, use the spread price (current_spread_price) for exit evaluation
+          // This is the actual cost to close the spread, not the underlying stock price
+          const spreadPrice = r.current_spread_price ? Number(r.current_spread_price) : undefined
           const tradeForEval = {
-            // current_price: current,  // This is the underlying price, not spread price
+            current_price: spreadPrice,  // Use spread price for exit evaluation
             entry_price: Number(r.entry_price ?? r.credit_received ?? 0),
             credit_received: Number(r.credit_received ?? 0),
             expiration_date: r.expiration_date,
@@ -282,8 +283,7 @@ export default function ExcelStyleTradesDashboard() {
             status = 'EXIT'
           }
 
-          // Calculate current P/L from spread price
-          const spreadPrice = r.current_spread_price ? Number(r.current_spread_price) : undefined
+          // Calculate current P/L from spread price (spreadPrice already declared above)
           const creditReceived = Number(r.credit_received ?? 0) || 0
           const contracts = Number(r.number_of_contracts ?? r.contracts ?? 1) || 0
 
@@ -466,8 +466,23 @@ export default function ExcelStyleTradesDashboard() {
         return typeof value === 'number' ? `${value.toFixed(1)}/100` : '-'
       case 'status': {
         const tag = String(value).toUpperCase()
-        const cls = tag === 'GOOD' ? 'bg-green-100 text-green-800 border-green-200' : tag === 'EXIT' ? 'bg-red-100 text-red-800 border-red-200' : 'bg-yellow-100 text-yellow-800 border-yellow-200'
         const exitSignal = trade.exitSignal
+
+        // Determine color based on status and exit signal type
+        let cls: string
+        if (exitSignal?.shouldExit && exitSignal.type === 'profit') {
+          // Exit at profit: green
+          cls = 'bg-green-100 text-green-800 border-green-200'
+        } else if (tag === 'EXIT') {
+          // Exit (loss or other): red
+          cls = 'bg-red-100 text-red-800 border-red-200'
+        } else if (tag === 'GOOD') {
+          // Good status: light blue
+          cls = 'bg-blue-100 text-blue-800 border-blue-200'
+        } else {
+          // Watch: yellow
+          cls = 'bg-yellow-100 text-yellow-800 border-yellow-200'
+        }
 
         if (exitSignal?.shouldExit) {
           const icon = exitSignal.type === 'profit' ? <TrendingUp className="h-3 w-3" /> :

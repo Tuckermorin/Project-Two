@@ -2,9 +2,11 @@
 
 "use client"
 
-import React, { useState, useEffect } from 'react'
-import { AlertCircle, Eye } from 'lucide-react'
+import React, { useState, useEffect, useCallback } from 'react'
+import { AlertCircle, Eye, RefreshCw } from 'lucide-react'
 import { evaluateExitStrategy, type ExitSignal } from '@/lib/utils/watch-criteria-evaluator'
+import { toast } from 'sonner'
+import { TRADES_UPDATED_EVENT, dispatchTradesUpdated } from '@/lib/events'
 
 interface ActiveTradesSummary {
   totalActive: number
@@ -15,14 +17,15 @@ interface ActiveTradesSummary {
   totalMaxProfit: number
   totalMaxLoss: number
   totalAtRisk: number
+  lastPriceUpdate: Date | null
 }
 
 export default function ActiveTradesSummary() {
   const [summary, setSummary] = useState<ActiveTradesSummary | null>(null)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
 
-  useEffect(() => {
-    const loadSummary = async () => {
+  const loadSummary = useCallback(async () => {
       try {
         setLoading(true)
 
@@ -60,15 +63,24 @@ export default function ActiveTradesSummary() {
           }
         }
 
-        // Calculate status counts
+        // Calculate status counts and find last price update
         let tradesOnWatch = 0
         let tradesGood = 0
         let tradesExit = 0
         let totalCurrentPL = 0
         let totalMaxProfit = 0
         let totalMaxLoss = 0
+        let lastPriceUpdate: Date | null = null
 
         activeTrades.forEach((trade: any) => {
+          // Track the most recent spread price update
+          if (trade.spread_price_updated_at) {
+            const updateTime = new Date(trade.spread_price_updated_at)
+            if (!lastPriceUpdate || updateTime > lastPriceUpdate) {
+              lastPriceUpdate = updateTime
+            }
+          }
+
           // Determine status based on IPS score and price to short
           const ipsScore = typeof trade.ips_score === 'number' ? Number(trade.ips_score) : undefined
           // Get current price from quote map or fallback to stored price (same as dashboard)
@@ -94,7 +106,7 @@ export default function ActiveTradesSummary() {
           // Evaluate exit strategy if IPS exists (same logic as dashboard)
           const ips = trade.ips_id ? ipsMap[trade.ips_id] : null
           const tradeForEval = {
-            // current_price: current,  // This is the underlying price, not spread price
+            current_price: spreadPrice > 0 ? spreadPrice : undefined,  // Use spread price for exit evaluation
             entry_price: Number(trade.entry_price ?? trade.credit_received ?? 0),
             credit_received: creditReceived,
             expiration_date: trade.expiration_date,
@@ -137,7 +149,8 @@ export default function ActiveTradesSummary() {
           totalCurrentPL,
           totalMaxProfit,
           totalMaxLoss,
-          totalAtRisk
+          totalAtRisk,
+          lastPriceUpdate
         })
 
       } catch (error) {
@@ -145,16 +158,89 @@ export default function ActiveTradesSummary() {
       } finally {
         setLoading(false)
       }
+    }, [])
+
+  useEffect(() => {
+    loadSummary()
+
+    // Listen for trades updated events
+    const handleTradesUpdated = () => {
+      console.log('[ActiveTradesSummary] Trades updated, refreshing...')
+      loadSummary()
     }
 
-    loadSummary()
-  }, [])
+    window.addEventListener(TRADES_UPDATED_EVENT, handleTradesUpdated)
+
+    return () => {
+      window.removeEventListener(TRADES_UPDATED_EVENT, handleTradesUpdated)
+    }
+  }, [loadSummary])
+
+  const handleManualRefresh = async () => {
+    try {
+      setRefreshing(true)
+      toast.info('Updating options prices...', {
+        description: 'This may take a few moments',
+        duration: 3000
+      })
+
+      const response = await fetch('/api/trades/spread-prices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      })
+
+      const data = await response.json()
+
+      if (response.ok && data.success) {
+        toast.success(`Updated ${data.successful} of ${data.total} trades`, {
+          description: data.updatedAt ? `Last updated: ${new Date(data.updatedAt).toLocaleTimeString()}` : undefined
+        })
+
+        // Reload the summary with fresh data (no full page reload)
+        await loadSummary()
+
+        // Notify other components that trades were updated
+        dispatchTradesUpdated({ type: 'spread_prices_updated' })
+      } else {
+        toast.error('Failed to update prices', {
+          description: data.error || 'Please try again'
+        })
+      }
+    } catch (error) {
+      console.error('Manual refresh error:', error)
+      toast.error('Failed to update prices', {
+        description: 'Network error occurred'
+      })
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   const currencyFormatter = new Intl.NumberFormat('en-US', {
     style: 'currency',
     currency: 'USD',
     maximumFractionDigits: 0,
   })
+
+  const formatLastUpdate = (date: Date | null) => {
+    if (!date) return 'Never'
+
+    const now = new Date()
+    const diffMs = now.getTime() - date.getTime()
+    const diffMins = Math.floor(diffMs / 60000)
+
+    if (diffMins < 1) return 'Just now'
+    if (diffMins < 60) return `${diffMins}m ago`
+    if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`
+
+    return date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit'
+    })
+  }
 
   if (loading || !summary) {
     return null
@@ -220,6 +306,24 @@ export default function ActiveTradesSummary() {
           </div>
           <div className="text-xs text-red-600 font-medium">Max Loss</div>
         </div>
+      </div>
+
+      {/* Last Update Info and Manual Refresh */}
+      <div className="mt-3 pt-3 border-t border-blue-200 flex items-center justify-between text-xs">
+        <div className="text-gray-600">
+          <span className="font-medium">Options Pricing Last Updated:</span>{' '}
+          <span className={summary.lastPriceUpdate ? 'text-gray-800' : 'text-red-600'}>
+            {formatLastUpdate(summary.lastPriceUpdate)}
+          </span>
+        </div>
+        <button
+          onClick={handleManualRefresh}
+          disabled={refreshing}
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        >
+          <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
+          {refreshing ? 'Updating...' : 'Update Now'}
+        </button>
       </div>
     </div>
   )

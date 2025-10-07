@@ -48,7 +48,11 @@
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251006_add_spread_price_tracking.sql\")",
       "Bash(curl:*)",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT id, symbol, strategy_type, short_strike, long_strike, expiration_date, contract_type FROM trades WHERE status = ''active'' LIMIT 3;\")",
-      "Bash(npm run:*)"
+      "Bash(npm run:*)",
+      "Bash(tasklist)",
+      "Read(//c/**)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT id, symbol, current_spread_price, spread_price_updated_at FROM trades WHERE status = ''active'' ORDER BY spread_price_updated_at DESC NULLS LAST LIMIT 5;\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ''trades'' AND column_name LIKE ''%spread%'' ORDER BY column_name;\")"
     ],
     "deny": [],
     "ask": []

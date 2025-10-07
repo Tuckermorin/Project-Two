@@ -122,7 +122,8 @@ export function IPSPerformanceTracker() {
         store.totalPL += realized
         if (realized > 0) store.wins += 1
         if (realized > store.best) store.best = realized
-        if (realized < store.worst) store.worst = realized
+        // Only track losses (negative values) for worst
+        if (realized < 0 && realized < store.worst) store.worst = realized
 
         acc.set(ipsId, store)
         return acc

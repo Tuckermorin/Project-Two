@@ -268,6 +268,9 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Failed to add prospective trade");
 
+      // Remove the candidate from the list
+      setCands(prevCands => prevCands.filter(c => c.id !== candidate.id));
+
       // Navigate to trades page with highlight
       router.push(`/trades?highlight=${encodeURIComponent(json.id)}`);
       setDetailsDialogOpen(false);
