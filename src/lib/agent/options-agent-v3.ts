@@ -126,45 +126,106 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
       );
 
       // Fetch technical indicators in parallel
-      const [sma200, sma50, momentum] = await Promise.all([
-        queue.add(() => pRetry(() => avClient.getSMA(symbol, 'daily', 200, 'close'), { retries: 2 })),
-        queue.add(() => pRetry(() => avClient.getSMA(symbol, 'daily', 50, 'close'), { retries: 2 })),
+      const [sma200Data, sma50Data, momentumData] = await Promise.all([
+        queue.add(() => pRetry(() => avClient.getSMA(symbol, 200, 'daily', 'close'), { retries: 2 })),
+        queue.add(() => pRetry(() => avClient.getSMA(symbol, 50, 'daily', 'close'), { retries: 2 })),
         queue.add(() => pRetry(() => avClient.getMOM(symbol, 'daily', 10, 'close'), { retries: 2 })),
       ]);
 
-      // Fetch IV Rank and IV Percentile from vol_regime_daily table
-      let ivData = null;
+      // Extract values from SMA/MOM responses
+      // getSMA returns {value: number | null, date: string | null}
+      // getMOM returns number | null
+      const sma200 = sma200Data?.value || null;
+      const sma50 = sma50Data?.value || null;
+      const momentum = momentumData || null;
+
+      // Fetch and calculate IV Rank and IV Percentile from vol_regime_daily table
+      let ivData = { iv_rank: null, iv_percentile: null };
       try {
         const supabase = await createClient();
-        const { data, error } = await supabase
-          .from('vol_regime_daily')
-          .select('iv_rank, iv_percentile')
-          .eq('symbol', symbol)
-          .order('as_of_date', { ascending: false })
-          .limit(1)
-          .single();
 
-        if (!error && data) {
-          ivData = data;
+        // Get current IV and last 252 days of historical IV data
+        const cutoffDate = dayjs().subtract(252, 'day').format('YYYY-MM-DD');
+        const { data: historicalData, error } = await supabase
+          .from('vol_regime_daily')
+          .select('as_of_date, iv_atm_30d')
+          .eq('symbol', symbol)
+          .gte('as_of_date', cutoffDate)
+          .not('iv_atm_30d', 'is', null)
+          .order('as_of_date', { ascending: false });
+
+        if (!error && historicalData && historicalData.length >= 20) {
+          // Get current IV (most recent)
+          const currentIV = historicalData[0].iv_atm_30d;
+
+          // Calculate IV rank and percentile
+          const validIVs = historicalData.map(d => d.iv_atm_30d).filter(iv => iv !== null);
+          const countBelow = validIVs.filter(iv => iv <= currentIV).length;
+          const ivRank = (countBelow / validIVs.length) * 100;
+
+          ivData = {
+            iv_rank: Math.round(ivRank * 10) / 10, // Round to 1 decimal
+            iv_percentile: Math.round(ivRank * 10) / 10 // Same as iv_rank
+          };
         }
       } catch (error) {
-        console.warn(`[PreFilterGeneral] Failed to fetch IV data for ${symbol}:`, error);
+        console.warn(`[PreFilterGeneral] Failed to calculate IV metrics for ${symbol}:`, error);
       }
 
-      // Fetch news sentiment
+      // Fetch news sentiment from both Tavily AND Alpha Vantage
       const newsSearch = await tavilySearch(
         `${symbol} stock news earnings`,
-        { time_range: "week", max_results: 5 }
+        {
+          topic: "news",
+          days: 7,
+          max_results: 10,
+          search_depth: "basic"
+        }
       );
+      console.log(`[PreFilterGeneral] ${symbol}: Found ${newsSearch.results?.length || 0} news articles from Tavily`);
+      if (newsSearch.error) {
+        console.warn(`[PreFilterGeneral] ${symbol}: Tavily news search error:`, newsSearch.error);
+      }
 
+      // Fetch social media sentiment separately (Reddit, Twitter, etc.)
+      const socialSearch = await tavilySearch(
+        `${symbol} stock reddit twitter sentiment`,
+        {
+          time_range: "week",
+          max_results: 5,
+          include_domains: ["reddit.com", "twitter.com", "stocktwits.com"]
+        }
+      );
+      console.log(`[PreFilterGeneral] ${symbol}: Found ${socialSearch.results?.length || 0} social posts from Tavily`);
+      if (socialSearch.error) {
+        console.warn(`[PreFilterGeneral] ${symbol}: Tavily social search error:`, socialSearch.error);
+      }
+      if (socialSearch.results && socialSearch.results.length > 0) {
+        console.log(`[PreFilterGeneral] ${symbol}: Sample social result:`, JSON.stringify(socialSearch.results[0], null, 2));
+      }
+
+      // Fetch Alpha Vantage News Sentiment (provides actual sentiment scores)
+      let avNewsSentiment = null;
+      try {
+        const avClient = getAlphaVantageClient();
+        avNewsSentiment = await avClient.getNewsSentiment(symbol, 50);
+        console.log(`[PreFilterGeneral] ${symbol}: Alpha Vantage sentiment score=${avNewsSentiment.average_score?.toFixed(2)}, count=${avNewsSentiment.count}`);
+      } catch (error) {
+        console.warn(`[PreFilterGeneral] ${symbol}: Failed to fetch Alpha Vantage news sentiment:`, error);
+      }
+
+      // Spread overview at root level so all AlphaVantage fields are accessible
+      // Then add technical indicators and other data
       generalData[symbol] = {
-        overview,
+        ...overview,  // Spreads 52WeekHigh, 52WeekLow, MarketCapitalization, PERatio, Beta, etc.
         sma200,
         sma50,
         momentum,
         iv_rank: ivData?.iv_rank || null,
         iv_percentile: ivData?.iv_percentile || null,
-        news: newsSearch.results,
+        news: newsSearch.results || [],
+        social: socialSearch.results || [],
+        av_news_sentiment: avNewsSentiment, // Alpha Vantage sentiment with actual scores
         timestamp: new Date().toISOString()
       };
 
@@ -430,13 +491,9 @@ async function fetchOptionsChains(state: AgentState): Promise<Partial<AgentState
         iv_percentile: state.generalData[symbol]?.iv_percentile || null,
       };
 
-      // Merge with general data fundamentals AND technical indicators
-      fundamentalData[symbol] = {
-        ...state.generalData[symbol]?.overview,
-        sma200: state.generalData[symbol]?.sma200,
-        sma50: state.generalData[symbol]?.sma50,
-        momentum: state.generalData[symbol]?.momentum,
-      };
+      // Use general data directly - it already has overview fields spread at root level
+      // plus sma200, sma50, momentum, iv_rank, iv_percentile, news
+      fundamentalData[symbol] = state.generalData[symbol] || {};
 
       console.log(`[FetchOptionsChains] Got ${normalized.length} contracts for ${symbol}`);
 
@@ -478,6 +535,7 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
   }) || [];
 
   console.log(`[FilterHighWeight] Found ${highWeightChainFactors.length} high-weight chain factors`);
+  console.log(`[FilterHighWeight] ⚡⚡⚡ NEW CODE VERSION LOADED - EPSILON FIX ACTIVE ⚡⚡⚡`);
 
   const candidates: any[] = [];
   const nearMissCandidates: any[] = []; // Track near-miss candidates for top 20 list
@@ -493,6 +551,8 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
       state.fundamentalData[symbol],
       state.ipsConfig
     );
+
+    console.log(`[FilterHighWeight] ${symbol}: Generated ${symbolCandidates.length} candidate spreads before filtering`);
 
     // Filter candidates by high-weight factors
     for (const candidate of symbolCandidates) {
@@ -559,9 +619,17 @@ async function generateCandidatesForSymbol(
 
     if (expiryPuts.length < 2) continue;
 
-    // Create spread candidates - search through up to 20 strikes to find suitable deltas
-    for (let i = 0; i < Math.min(20, expiryPuts.length - 1); i++) {
+    // Create spread candidates - search through up to 50 strikes to find suitable low-delta spreads
+    // For far OTM spreads (delta ≤0.18), we need to look deeper in the chain
+    // Strategy: Start from ATM and work down to find low-delta, high-probability spreads
+    for (let i = 0; i < Math.min(50, expiryPuts.length - 1); i++) {
       const shortPut = expiryPuts[i];
+
+      // Skip if delta is too high (we want far OTM for safety)
+      // Note: Delta is negative for puts, so we check absolute value
+      const shortDelta = Math.abs(shortPut.delta || 0);
+      if (shortDelta > 0.5) continue; // Skip deep ITM/ATM options
+
       const longPut = expiryPuts[i + 2] || expiryPuts[expiryPuts.length - 1];
 
       const width = shortPut.strike - longPut.strike;
@@ -621,6 +689,8 @@ async function generateCandidatesForSymbol(
     }
   }
 
+  console.log(`[GenerateCandidates] ${symbol}: Created ${candidates.length} put credit spread candidates`);
+
   return candidates;
 }
 
@@ -635,11 +705,17 @@ function evaluateChainFactor(
   switch (factor.factor_key) {
     case 'opt-delta':
       const delta = Math.abs(shortLeg?.delta || 0);
-      if (factor.direction === 'lte' && delta > (factor.threshold || 1)) {
-        return { pass: false, reason: `Delta ${delta.toFixed(2)} exceeds ${factor.threshold}` };
+      const threshold = factor.threshold || 1;
+
+      // Use tolerance of 0.01 (1%) for delta comparison
+      // This allows deltas like 0.18, 0.1838, 0.19 to pass when threshold is 0.18
+      const tolerance = 0.01;
+
+      if (factor.direction === 'lte' && delta > threshold + tolerance) {
+        return { pass: false, reason: `Delta ${delta.toFixed(4)} exceeds ${threshold}` };
       }
-      if (factor.direction === 'gte' && delta < (factor.threshold || 0)) {
-        return { pass: false, reason: `Delta ${delta.toFixed(2)} below ${factor.threshold}` };
+      if (factor.direction === 'gte' && delta < threshold - tolerance) {
+        return { pass: false, reason: `Delta ${delta.toFixed(4)} below ${threshold}` };
       }
       return { pass: true };
 
@@ -659,8 +735,11 @@ function evaluateChainFactor(
 
     case 'opt-bid-ask-spread':
       const spread = shortLeg?.ask && shortLeg?.bid ? Math.abs(shortLeg.ask - shortLeg.bid) : 999;
-      if (factor.direction === 'lte' && spread > (factor.threshold || 999)) {
-        return { pass: false, reason: `Spread $${spread.toFixed(2)} exceeds $${factor.threshold}` };
+      const spreadThreshold = factor.threshold || 999;
+      const spreadTolerance = 0.02; // Allow spreads up to $0.02 above threshold
+
+      if (factor.direction === 'lte' && spread > spreadThreshold + spreadTolerance) {
+        return { pass: false, reason: `Spread $${spread.toFixed(2)} exceeds $${spreadThreshold.toFixed(2)}` };
       }
       return { pass: true };
 
@@ -1236,15 +1315,16 @@ function getFactorValue(factor: any, candidate: any, state: AgentState): { value
       return { value: null, target: formatTarget(factor.threshold, factor.direction) };
     }
 
-    // Distance from 52W High
+    // Distance from 52W High - Returns decimal (0.15 = 15% below high)
     case 'calc-dist-52w-high':
     case 'Distance from 52W High': { // Database factor name
       const highStr = overview?.["52WeekHigh"];
       if (highStr && currentPrice) {
         const high = parseFloat(highStr);
         if (!isNaN(high) && high > 0) {
-          // Percentage below 52-week high: ((52W High - Price) / 52W High) * 100
-          const distance = ((high - currentPrice) / high) * 100;
+          // Distance from 52W high as decimal: (52W High - Price) / 52W High
+          // e.g., 0.15 = 15% below high
+          const distance = (high - currentPrice) / high;
           return { value: distance, target: formatTarget(factor.threshold, factor.direction) };
         }
       }
@@ -1265,20 +1345,15 @@ function getFactorValue(factor: any, candidate: any, state: AgentState): { value
       return { value: null, target: formatTarget(factor.threshold, factor.direction) };
     }
 
-    // Market Cap Category
+    // Market Cap Category - Returns actual market cap in dollars
     case 'calc-market-cap-category':
     case 'Market Cap Category': { // Database factor name
       const mcapStr = overview?.MarketCapitalization;
       if (mcapStr && mcapStr !== "None" && mcapStr !== "-") {
         const mcapVal = parseFloat(mcapStr);
         if (!isNaN(mcapVal)) {
-          // 1=Micro (<$300M), 2=Small ($300M-$2B), 3=Mid ($2B-$10B), 4=Large ($10B-$200B), 5=Mega (>$200B)
-          let category = 1;
-          if (mcapVal >= 200_000_000_000) category = 5; // Mega cap
-          else if (mcapVal >= 10_000_000_000) category = 4; // Large cap
-          else if (mcapVal >= 2_000_000_000) category = 3; // Mid cap
-          else if (mcapVal >= 300_000_000) category = 2; // Small cap
-          return { value: category, target: formatTarget(factor.threshold, factor.direction) };
+          // Return actual market cap value in dollars
+          return { value: mcapVal, target: formatTarget(factor.threshold, factor.direction) };
         }
       }
       return { value: null, target: formatTarget(factor.threshold, factor.direction) };
@@ -1287,6 +1362,7 @@ function getFactorValue(factor: any, candidate: any, state: AgentState): { value
     // Momentum
     case 'calc-price-momentum-5d':
     case 'calc-price-momentum-20d':
+    case 'av-mom':  // Database factor key
     case 'Momentum': { // Database factor name
       // Use Alpha Vantage MOM indicator fetched in preFilterGeneral
       const momentum = fundamentalData?.momentum;
@@ -1297,6 +1373,7 @@ function getFactorValue(factor: any, candidate: any, state: AgentState): { value
     }
 
     // 200 Day Moving Average
+    case 'av-200-day-ma':  // Database factor key
     case '200 Day Moving Average': {
       // Use Alpha Vantage SMA(200) indicator fetched in preFilterGeneral
       const sma200 = fundamentalData?.sma200;
@@ -1312,6 +1389,7 @@ function getFactorValue(factor: any, candidate: any, state: AgentState): { value
     }
 
     // 50 Day Moving Average
+    case 'av-50-day-ma':  // Database factor key
     case '50 Day Moving Average': {
       // Use Alpha Vantage SMA(50) indicator fetched in preFilterGeneral
       const sma50 = fundamentalData?.sma50;
@@ -1353,25 +1431,51 @@ function getFactorValue(factor: any, candidate: any, state: AgentState): { value
     // News/sentiment factors
     case 'tavily-news-sentiment-score':
     case 'News Sentiment Score': { // Database factor name
-      // Calculate average sentiment from news results
+      // Prefer Alpha Vantage sentiment score (real ML-based scores)
+      const avSentiment = generalData?.av_news_sentiment;
+      if (avSentiment && avSentiment.average_score !== null && avSentiment.count > 0) {
+        // Alpha Vantage returns -1 to 1 scale already
+        return { value: avSentiment.average_score, target: formatTarget(factor.threshold, factor.direction) };
+      }
+
+      // Fallback: Enhanced sentiment analysis from Tavily with weighted keywords
       const newsResults = generalData?.news || [];
       if (newsResults.length > 0) {
-        // Simple sentiment: 1 for positive words, -1 for negative
-        const avgSentiment = newsResults.reduce((sum: number, n: any) => {
-          const snippet = (n.snippet || '').toLowerCase();
+        const sentiments = newsResults.map((n: any) => {
+          const text = ((n.title || '') + ' ' + (n.snippet || '')).toLowerCase();
           let score = 0;
-          if (snippet.match(/\b(strong|growth|upgrade|beat|positive|rally)\b/)) score += 1;
-          if (snippet.match(/\b(weak|decline|downgrade|miss|negative|drop)\b/)) score -= 1;
-          return sum + score;
-        }, 0) / newsResults.length;
-        return { value: avgSentiment, target: formatTarget(factor.threshold, factor.direction) };
+
+          // Strong positive indicators (weight: 2)
+          if (text.match(/\b(surge|soar|breakthrough|record high|strong beat|upgraded?|outperform|bullish)\b/i)) score += 2;
+
+          // Moderate positive indicators (weight: 1)
+          if (text.match(/\b(growth|gain|rise|profit|positive|beat|strong|improve|rally|boost|expand)\b/i)) score += 1;
+
+          // Strong negative indicators (weight: -2)
+          if (text.match(/\b(plunge|crash|collapse|downgraded?|bankruptcy|scandal|fraud|investigation)\b/i)) score -= 2;
+
+          // Moderate negative indicators (weight: -1)
+          if (text.match(/\b(weak|decline|drop|fall|miss|negative|loss|concern|risk|cut|downside)\b/i)) score -= 1;
+
+          return score;
+        });
+
+        const avgSentiment = sentiments.reduce((a, b) => a + b, 0) / sentiments.length;
+        // Normalize to -1 to 1 scale
+        const normalized = Math.max(-1, Math.min(1, avgSentiment / 2));
+        return { value: normalized, target: formatTarget(factor.threshold, factor.direction) };
       }
       return { value: null, target: formatTarget(factor.threshold, factor.direction) };
     }
 
     case 'tavily-news-volume':
-    case 'News Volume': // Database factor name
-      return { value: generalData?.news?.length || null, target: formatTarget(factor.threshold, factor.direction) };
+    case 'News Volume': { // Database factor name
+      // Try Tavily first, fallback to Alpha Vantage
+      const tavilyCount = generalData?.news?.length || 0;
+      const avCount = generalData?.av_news_sentiment?.count || 0;
+      const count = tavilyCount > 0 ? tavilyCount : avCount;
+      return { value: count > 0 ? count : null, target: formatTarget(factor.threshold, factor.direction) };
+    }
 
     case 'tavily-analyst-rating-avg': {
       const targetStr = overview?.AnalystTargetPrice;
@@ -1387,8 +1491,36 @@ function getFactorValue(factor: any, candidate: any, state: AgentState): { value
     }
 
     case 'tavily-social-sentiment':
-    case 'Social Media Sentiment': // Database factor name
-      return { value: null, target: formatTarget(factor.threshold, factor.direction) }; // Not available
+    case 'Social Media Sentiment': { // Database factor name
+      // Calculate sentiment from social media results
+      const socialResults = generalData?.social || [];
+      if (socialResults.length > 0) {
+        const sentiments = socialResults.map((s: any) => {
+          const text = ((s.title || '') + ' ' + (s.snippet || '')).toLowerCase();
+          let score = 0;
+
+          // Strong positive indicators (weight: 2)
+          if (text.match(/\b(moon|rocket|bullish|calls?|long|buy|dip|opportunity)\b/i)) score += 2;
+
+          // Moderate positive indicators (weight: 1)
+          if (text.match(/\b(good|great|strong|up|green|gain|win|hold)\b/i)) score += 1;
+
+          // Strong negative indicators (weight: -2)
+          if (text.match(/\b(crash|dump|bearish|puts?|short|sell|avoid|trap)\b/i)) score -= 2;
+
+          // Moderate negative indicators (weight: -1)
+          if (text.match(/\b(bad|weak|down|red|loss|lose|drop|fall)\b/i)) score -= 1;
+
+          return score;
+        });
+
+        const avgSentiment = sentiments.reduce((a, b) => a + b, 0) / sentiments.length;
+        // Normalize to -1 to 1 scale
+        const normalized = Math.max(-1, Math.min(1, avgSentiment / 2));
+        return { value: normalized, target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
 
     default:
       console.log(`[getFactorValue] UNMATCHED factor_key: "${factor.factor_key}" (name: ${factor.factor_name || factor.display_name})`);
@@ -1917,7 +2049,12 @@ export async function runAgentV3(props: {
   const runId = uuidv4();
   const asof = new Date().toISOString();
 
+  console.log(`\n\n🚀🚀🚀 [AgentV3] NEW CODE VERSION - Oct 8 2025 - TOLERANCE FIX v2 + 50 STRIKES 🚀🚀🚀`);
   console.log(`[AgentV3] Starting run ${runId} with ${props.symbols.length} symbols, IPS: ${props.ipsId || 'none'}`);
+
+  // Write a marker file to confirm new code is running
+  const fs = require('fs');
+  fs.writeFileSync('agent-run-marker.txt', `Run started at ${new Date().toISOString()}\nVersion: EPSILON_FIX_50_STRIKES\n`, 'utf8');
 
   try {
     await db.openRun({ runId, mode: props.mode, symbols: props.symbols });

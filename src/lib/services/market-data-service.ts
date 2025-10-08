@@ -221,7 +221,7 @@ class MarketDataService {
         peRatio: fundamentals?.pbRatio,
         week52High: fundamentals?.week52High,
         week52Low: fundamentals?.week52Low,
-        marketCap: undefined,
+        marketCap: fundamentals?.marketCap,
         lastUpdated: new Date(),
         fundamentals
         };

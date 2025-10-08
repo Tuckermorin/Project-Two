@@ -57,7 +57,8 @@
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT symbol, COUNT(*) as days_cached, MIN(as_of_date) as earliest_date, MAX(as_of_date) as latest_date FROM vol_regime_daily WHERE symbol IN (''BWXT'', ''VST'', ''LEU'') GROUP BY symbol ORDER BY symbol;\")",
       "Read(//c//**)",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT factor_id, factor_name, category FROM factor_definitions WHERE category IN (''stock'', ''calculated'') ORDER BY factor_id;\")",
-      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT ips_id, factor_id, factor_name FROM ips_factors WHERE ips_id = ''20edfe58-2e44-4234-96cd-503011577cf4'' ORDER BY factor_name;\")"
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT ips_id, factor_id, factor_name FROM ips_factors WHERE ips_id = ''20edfe58-2e44-4234-96cd-503011577cf4'' ORDER BY factor_name;\")",
+      "Bash(npx supabase:*)"
     ],
     "deny": [],
     "ask": []

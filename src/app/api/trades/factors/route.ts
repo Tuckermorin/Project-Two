@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server-client';
 import { getMarketDataService } from '@/lib/services/market-data-service';
 import type { OptionsRequestContext } from '@/lib/types/market-data';
+import { getAlphaVantageClient } from '@/lib/api/alpha-vantage';
+import { tavilySearch } from '@/lib/clients/tavily';
 
 export async function GET(request: NextRequest) {
   try {
@@ -97,7 +99,45 @@ export async function GET(request: NextRequest) {
     // Fetch real market data
     const marketDataService = getMarketDataService();
     const stockData = await marketDataService.getUnifiedStockData(symbol, true);
-    
+
+    // Fetch technical indicators in parallel
+    const avClient = getAlphaVantageClient();
+    const [sma200Data, sma50Data, momData] = await Promise.all([
+      avClient.getSMA(symbol, 'daily', 200, 'close').catch(() => null),
+      avClient.getSMA(symbol, 'daily', 50, 'close').catch(() => null),
+      avClient.getMOM(symbol, 'daily', 10, 'close').catch(() => null),
+    ]);
+
+    // Fetch IV Rank and IV Percentile from vol_regime_daily table
+    let ivData = null;
+    try {
+      const { data, error } = await supabase
+        .from('vol_regime_daily')
+        .select('iv_rank, iv_percentile')
+        .eq('symbol', symbol)
+        .order('as_of_date', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (!error && data) {
+        ivData = data;
+      }
+    } catch (error) {
+      console.warn(`Failed to fetch IV data for ${symbol}:`, error);
+    }
+
+    // Fetch news sentiment
+    let newsResults: any[] = [];
+    try {
+      const newsSearch = await tavilySearch(
+        `${symbol} stock news earnings`,
+        { time_range: "week", max_results: 5 }
+      );
+      newsResults = newsSearch.results || [];
+    } catch (error) {
+      console.warn(`Failed to fetch news for ${symbol}:`, error);
+    }
+
     type OptionLeg = OptionsRequestContext['legs'][number];
 
     const optionFactorNames = new Set<string>([
@@ -322,6 +362,94 @@ export async function GET(request: NextRequest) {
           case 'Intrinsic Value': {
             const optionData = selectOptionData();
             value = toNumber(optionData?.intrinsicValue);
+            break;
+          }
+          case '52W Range Position': {
+            const high = stockData.week52High;
+            const low = stockData.week52Low;
+            const currentPrice = stockData.currentPrice;
+            if (high && low && currentPrice && high > low) {
+              value = (currentPrice - low) / (high - low);
+            }
+            break;
+          }
+          case 'Distance from 52W High': {
+            const high = stockData.week52High;
+            const currentPrice = stockData.currentPrice;
+            if (high && currentPrice && high > 0) {
+              value = ((high - currentPrice) / high) * 100;
+            }
+            break;
+          }
+          case '200 Day Moving Average': {
+            const sma200 = sma200Data;
+            const currentPrice = stockData.currentPrice;
+            if (sma200 && currentPrice && sma200 > 0) {
+              value = currentPrice / sma200;
+            }
+            break;
+          }
+          case '50 Day Moving Average': {
+            const sma50 = sma50Data;
+            const currentPrice = stockData.currentPrice;
+            if (sma50 && currentPrice && sma50 > 0) {
+              value = currentPrice / sma50;
+            }
+            break;
+          }
+          case 'Momentum': {
+            value = momData !== null && momData !== undefined ? momData : undefined;
+            break;
+          }
+          case 'Market Cap Category': {
+            const marketCap = stockData.marketCap;
+            if (marketCap && marketCap > 0) {
+              // 1=Micro (<$300M), 2=Small ($300M-$2B), 3=Mid ($2B-$10B), 4=Large ($10B-$200B), 5=Mega (>$200B)
+              let category = 1;
+              if (marketCap >= 200_000_000_000) category = 5;
+              else if (marketCap >= 10_000_000_000) category = 4;
+              else if (marketCap >= 2_000_000_000) category = 3;
+              else if (marketCap >= 300_000_000) category = 2;
+              value = category;
+            }
+            break;
+          }
+          case 'Analyst Rating Average': {
+            const targetPrice = (stockData.fundamentals as any)?.analystTargetPrice;
+            const currentPrice = stockData.currentPrice;
+            if (targetPrice && currentPrice && currentPrice > 0) {
+              value = ((targetPrice - currentPrice) / currentPrice) * 100;
+            }
+            break;
+          }
+          case 'IV Rank': {
+            value = ivData?.iv_rank || undefined;
+            break;
+          }
+          case 'IV Percentile': {
+            value = ivData?.iv_percentile || undefined;
+            break;
+          }
+          case 'News Sentiment Score': {
+            if (newsResults.length > 0) {
+              const avgSentiment = newsResults.reduce((sum: number, n: any) => {
+                const snippet = (n.snippet || '').toLowerCase();
+                let score = 0;
+                if (snippet.match(/\b(strong|growth|upgrade|beat|positive|rally)\b/)) score += 1;
+                if (snippet.match(/\b(weak|decline|downgrade|miss|negative|drop)\b/)) score -= 1;
+                return sum + score;
+              }, 0) / newsResults.length;
+              value = avgSentiment;
+            }
+            break;
+          }
+          case 'News Volume': {
+            value = newsResults.length;
+            break;
+          }
+          case 'Social Media Sentiment': {
+            // Not available - return undefined to mark as failed
+            value = undefined;
             break;
           }
           default:

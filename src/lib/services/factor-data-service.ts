@@ -357,7 +357,10 @@ class FactorDataService {
     const apiFactorNames = [
       'P/E Ratio', 'Beta', 'Revenue Growth YoY', 'Return on Equity',
       'Debt to Equity', 'Dividend Yield', 'Market Cap', 'Volume',
-      'Implied Volatility', 'Delta', 'Theta', 'Vega', 'Gamma', 'Rho', 'Option Volume', 'Open Interest', 'Bid-Ask Spread', 'Time Value', 'Intrinsic Value'
+      'Implied Volatility', 'Delta', 'Theta', 'Vega', 'Gamma', 'Rho', 'Option Volume', 'Open Interest', 'Bid-Ask Spread', 'Time Value', 'Intrinsic Value',
+      '52W Range Position', 'Distance from 52W High', '200 Day Moving Average', '50 Day Moving Average',
+      'Momentum', 'Market Cap Category', 'Analyst Rating Average',
+      'IV Rank', 'IV Percentile', 'News Sentiment Score', 'News Volume', 'Social Media Sentiment'
     ];
     return apiFactorNames.includes(factorName);
   }
