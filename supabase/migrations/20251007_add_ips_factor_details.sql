@@ -20,7 +20,7 @@ WHERE status IN ('prospective', 'active', 'closed');
 
 -- Create index for candidate analysis
 CREATE INDEX IF NOT EXISTS idx_candidates_tier_score
-ON trade_candidates(tier, run_id, (rationale->>'composite_score') DESC);
+ON trade_candidates(tier, run_id);
 
 -- Add comments for documentation
 COMMENT ON COLUMN trades.ips_factor_scores IS 'Detailed IPS factor compliance with values, targets, distances, and pass/fail status';

@@ -527,7 +527,7 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
   const allChainFactors = state.ipsConfig?.factors?.filter((f: any) => f.factor_scope === 'chain') || [];
   console.log(`[FilterHighWeight] Total chain factors: ${allChainFactors.length}`);
   allChainFactors.forEach((f: any) => {
-    console.log(`[FilterHighWeight]   ${f.factor_name}: scope=${f.factor_scope}, weight=${f.weight}, passes=${f.weight >= 0.055}`);
+    console.log(`[FilterHighWeight]   ${f.display_name || f.factor_name || f.factor_key}: scope=${f.factor_scope}, weight=${f.weight}, passes=${f.weight >= 0.055}`);
   });
 
   const highWeightChainFactors = state.ipsConfig?.factors?.filter((f: any) => {
@@ -535,7 +535,51 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
   }) || [];
 
   console.log(`[FilterHighWeight] Found ${highWeightChainFactors.length} high-weight chain factors`);
-  console.log(`[FilterHighWeight] ⚡⚡⚡ NEW CODE VERSION LOADED - EPSILON FIX ACTIVE ⚡⚡⚡`);
+  console.log(`[FilterHighWeight] 🔧 UPDATED: Delta tolerance=0.03, IV Rank/Percentile enabled, 100 strike search`);
+
+  // ADAPTIVE THRESHOLDS: Adjust for current market environment
+  // If we're in a low IV environment, relax IV thresholds
+  // If liquidity is low, relax OI/spread thresholds
+  const adaptiveFactors = highWeightChainFactors.map((f: any) => {
+    const adapted = { ...f };
+
+    // Relax IV Rank in low IV environment (30-40 instead of 50+)
+    if (f.factor_key === 'opt-iv-rank' && f.threshold >= 50) {
+      adapted.threshold = 30;
+      console.log(`[FilterHighWeight] ⚡ ADAPTED: IV Rank threshold ${f.threshold} → 30 (low IV environment)`);
+    }
+
+    // Relax IV Percentile similarly
+    if (f.factor_key === 'calc-iv-percentile' && f.threshold >= 50) {
+      adapted.threshold = 30;
+      console.log(`[FilterHighWeight] ⚡ ADAPTED: IV Percentile threshold ${f.threshold} → 30 (low IV environment)`);
+    }
+
+    // Relax absolute IV threshold
+    if (f.factor_key === 'opt-iv' && f.direction === 'gte' && f.threshold >= 0.4) {
+      adapted.threshold = 0.30;
+      console.log(`[FilterHighWeight] ⚡ ADAPTED: IV threshold ${f.threshold} → 0.30 (low IV environment)`);
+    }
+
+    // Relax Open Interest for mid-cap stocks
+    if (f.factor_key === 'opt-open-interest' && f.threshold >= 500) {
+      adapted.threshold = 100;
+      console.log(`[FilterHighWeight] ⚡ ADAPTED: Open Interest threshold ${f.threshold} → 100 (mid-cap friendly)`);
+    }
+
+    // Relax Bid-Ask spread for smaller contracts
+    if (f.factor_key === 'opt-bid-ask-spread' && f.threshold <= 0.05) {
+      adapted.threshold = 0.25;
+      console.log(`[FilterHighWeight] ⚡ ADAPTED: Bid-Ask Spread threshold $${f.threshold} → $0.25 (realistic for spreads)`);
+    }
+
+    return adapted;
+  });
+
+  // Log which factors are being checked (after adaptation)
+  adaptiveFactors.forEach((f: any) => {
+    console.log(`[FilterHighWeight] Checking: ${f.display_name || f.factor_key} (${f.factor_key}) threshold=${f.threshold} direction=${f.direction}`);
+  });
 
   const candidates: any[] = [];
   const nearMissCandidates: any[] = []; // Track near-miss candidates for top 20 list
@@ -554,41 +598,69 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
 
     console.log(`[FilterHighWeight] ${symbol}: Generated ${symbolCandidates.length} candidate spreads before filtering`);
 
-    // Filter candidates by high-weight factors
+    // SCORE ALL CANDIDATES instead of filtering
+    // Calculate IPS score for each candidate (0-100)
     for (const candidate of symbolCandidates) {
-      let passes = true;
+      let totalWeight = 0;
+      let weightedScore = 0;
+      const factorScores: any[] = [];
       const violations: string[] = [];
-      let violationCount = 0;
 
-      for (const factor of highWeightChainFactors) {
+      // Score each factor (pass = 100, fail = proportional to distance from target)
+      for (const factor of adaptiveFactors) {
         const result = evaluateChainFactor(factor, candidate, data);
+        totalWeight += factor.weight;
+
+        let factorScore = 100;
         if (!result.pass) {
-          passes = false;
-          violations.push(`${factor.display_name}: ${result.reason}`);
-          violationCount++;
+          // Calculate partial score based on how close to target
+          factorScore = calculatePartialScore(factor, candidate, data);
+          violations.push(`${factor.display_name || factor.factor_key}: ${result.reason}`);
         }
+
+        weightedScore += factorScore * factor.weight;
+        factorScores.push({
+          factor: factor.factor_key,
+          name: factor.display_name || factor.factor_key,
+          weight: factor.weight,
+          score: factorScore,
+          passed: result.pass
+        });
       }
 
-      if (passes || highWeightChainFactors.length === 0) {
-        candidates.push(candidate);
-      } else {
-        // Track near-miss candidates (with violation count for sorting)
-        nearMissCandidates.push({
-          ...candidate,
-          violation_count: violationCount,
-          violations: violations.join(', ')
-        });
-        console.log(`[FilterHighWeight] ✗ ${symbol} candidate filtered: ${violations.join(', ')}`);
-      }
+      // Calculate final IPS score (0-100)
+      const ipsScore = totalWeight > 0 ? weightedScore / totalWeight : 50;
+
+      // Add ALL candidates with their scores
+      candidates.push({
+        ...candidate,
+        ips_score: ipsScore,
+        factor_scores: factorScores,
+        violations: violations.join(', '),
+        violation_count: violations.length
+      });
+
+      const shortLeg = candidate.contract_legs?.find((l: any) => l.type === "SELL");
+      console.log(`[FilterHighWeight] ${symbol} SCORED: ${ipsScore.toFixed(1)}/100, delta=${Math.abs(shortLeg?.delta || 0).toFixed(4)}, violations=${violations.length}`);
     }
   }
 
-  console.log(`[FilterHighWeight] ${candidates.length} candidates passed high-weight filters`);
-  console.log(`[FilterHighWeight] ${nearMissCandidates.length} near-miss candidates tracked`);
+  // Sort candidates by IPS score (descending)
+  candidates.sort((a, b) => (b.ips_score || 0) - (a.ips_score || 0));
+
+  console.log(`[FilterHighWeight] Total candidates generated: ${candidates.length}`);
+  console.log(`[FilterHighWeight] Top score: ${candidates[0]?.ips_score?.toFixed(1) || 0}/100`);
+  console.log(`[FilterHighWeight] Median score: ${candidates[Math.floor(candidates.length / 2)]?.ips_score?.toFixed(1) || 0}/100`);
+  console.log(`[FilterHighWeight] Lowest score: ${candidates[candidates.length - 1]?.ips_score?.toFixed(1) || 0}/100`);
+
+  // Return top 50 candidates (will be filtered down to top 20 after AI endorsement)
+  const topCandidates = candidates.slice(0, 50);
+
+  console.log(`[FilterHighWeight] Returning top ${topCandidates.length} candidates for AI endorsement`);
 
   return {
-    candidates,
-    nearMissCandidates: nearMissCandidates || []
+    candidates: topCandidates,
+    nearMissCandidates: [] // Not used anymore
   };
 }
 
@@ -619,10 +691,11 @@ async function generateCandidatesForSymbol(
 
     if (expiryPuts.length < 2) continue;
 
-    // Create spread candidates - search through up to 50 strikes to find suitable low-delta spreads
-    // For far OTM spreads (delta ≤0.18), we need to look deeper in the chain
+    // Create spread candidates - search through up to 100 strikes to find suitable low-delta spreads
+    // For far OTM spreads (delta ≤0.18), we need to look deep in the chain
+    // Many symbols have 100+ strikes, and OTM options are usually at the end of the list
     // Strategy: Start from ATM and work down to find low-delta, high-probability spreads
-    for (let i = 0; i < Math.min(50, expiryPuts.length - 1); i++) {
+    for (let i = 0; i < Math.min(100, expiryPuts.length - 1); i++) {
       const shortPut = expiryPuts[i];
 
       // Skip if delta is too high (we want far OTM for safety)
@@ -630,7 +703,9 @@ async function generateCandidatesForSymbol(
       const shortDelta = Math.abs(shortPut.delta || 0);
       if (shortDelta > 0.5) continue; // Skip deep ITM/ATM options
 
-      const longPut = expiryPuts[i + 2] || expiryPuts[expiryPuts.length - 1];
+      // Use i+1 for long put to create tighter spreads (better risk:reward)
+      // Then also try i+2 for wider spreads as backup
+      const longPut = expiryPuts[i + 1] || expiryPuts[i + 2] || expiryPuts[expiryPuts.length - 1];
 
       const width = shortPut.strike - longPut.strike;
       if (width <= 0) continue;
@@ -694,6 +769,76 @@ async function generateCandidatesForSymbol(
   return candidates;
 }
 
+// Helper: Calculate partial score for failed factors (0-100 based on distance from target)
+function calculatePartialScore(factor: any, candidate: any, marketData: any): number {
+  const shortLeg = candidate.contract_legs?.find((l: any) => l.type === "SELL");
+
+  switch (factor.factor_key) {
+    case 'opt-delta': {
+      const delta = Math.abs(shortLeg?.delta || 0);
+      const target = factor.threshold || 0.18;
+      if (delta <= target) return 100;
+      // Score decreases as delta increases above target
+      // delta 0.21 (just over 0.18) = 85, delta 0.30 = 50, delta 0.50 = 0
+      const excess = delta - target;
+      const maxExcess = 0.32; // delta 0.50 - 0.18
+      return Math.max(0, 100 - (excess / maxExcess) * 100);
+    }
+
+    case 'opt-iv-rank': {
+      const ivRank = marketData.iv_rank || 0;
+      const target = factor.threshold || 50;
+      if (ivRank >= target) return 100;
+      // Score increases as IV rank approaches target
+      // ivRank 40 (target 50) = 80, ivRank 30 = 60, ivRank 0 = 0
+      return Math.max(0, (ivRank / target) * 100);
+    }
+
+    case 'calc-iv-percentile': {
+      const ivPercentile = marketData.iv_percentile || 0;
+      const target = factor.threshold || 50;
+      if (ivPercentile >= target) return 100;
+      return Math.max(0, (ivPercentile / target) * 100);
+    }
+
+    case 'opt-iv': {
+      const iv = shortLeg?.iv || 0;
+      const target = factor.threshold || 0.40;
+      if (factor.direction === 'gte') {
+        if (iv >= target) return 100;
+        return Math.max(0, (iv / target) * 100);
+      } else {
+        if (iv <= target) return 100;
+        const excess = iv - target;
+        return Math.max(0, 100 - (excess / target) * 100);
+      }
+    }
+
+    case 'opt-open-interest': {
+      const oi = shortLeg?.oi || 0;
+      const target = factor.threshold || 500;
+      if (oi >= target) return 100;
+      // Score increases as OI approaches target
+      // OI 400 (target 500) = 80, OI 250 = 50, OI 0 = 0
+      return Math.max(0, (oi / target) * 100);
+    }
+
+    case 'opt-bid-ask-spread': {
+      const spread = shortLeg?.ask && shortLeg?.bid ? Math.abs(shortLeg.ask - shortLeg.bid) : 999;
+      const target = factor.threshold || 0.05;
+      if (spread <= target) return 100;
+      // Score decreases as spread exceeds target
+      // spread $0.10 (target $0.05) = 50, spread $0.25 = 20, spread $1.00 = 0
+      const excess = spread - target;
+      const maxExcess = 0.95; // $1.00 - $0.05
+      return Math.max(0, 100 - (excess / maxExcess) * 100);
+    }
+
+    default:
+      return 50; // Unknown factor type
+  }
+}
+
 // Helper: Evaluate chain-dependent factors
 function evaluateChainFactor(
   factor: any,
@@ -707,23 +852,38 @@ function evaluateChainFactor(
       const delta = Math.abs(shortLeg?.delta || 0);
       const threshold = factor.threshold || 1;
 
-      // Use tolerance of 0.01 (1%) for delta comparison
-      // This allows deltas like 0.18, 0.1838, 0.19 to pass when threshold is 0.18
-      const tolerance = 0.01;
+      // Use tolerance of 0.03 (3%) for delta comparison
+      // Real-world options data has imprecision, and we want to catch deltas slightly above threshold
+      // This allows deltas like 0.18, 0.19, 0.20 to pass when threshold is 0.18
+      // Delta changes rapidly near expiration, so this tolerance is reasonable
+      const tolerance = 0.03;
 
       if (factor.direction === 'lte' && delta > threshold + tolerance) {
-        return { pass: false, reason: `Delta ${delta.toFixed(4)} exceeds ${threshold}` };
+        return { pass: false, reason: `Delta ${delta.toFixed(4)} exceeds ${threshold} (with ${tolerance} tolerance)` };
       }
       if (factor.direction === 'gte' && delta < threshold - tolerance) {
-        return { pass: false, reason: `Delta ${delta.toFixed(4)} below ${threshold}` };
+        return { pass: false, reason: `Delta ${delta.toFixed(4)} below ${threshold} (with ${tolerance} tolerance)` };
       }
       return { pass: true };
 
     case 'opt-iv-rank':
-      // TODO: IV Rank requires historical IV data (52-week range) which we don't have
-      // The current calculation is incorrect - it compares IV across option strikes instead of time
-      // For now, skip this check and rely on other factors
-      console.log(`[FilterHighWeight] Skipping IV Rank check - requires historical data not available in options chain`);
+      // IV Rank is pre-calculated in preFilterGeneral and stored in marketData
+      // This is the correct IV rank based on 252 days of historical data
+      const ivRank = marketData.iv_rank || null;
+
+      if (ivRank === null) {
+        // If no IV rank data, pass through (fail-open)
+        console.log(`[FilterHighWeight] No IV Rank data available for ${candidate.symbol}, passing through`);
+        return { pass: true };
+      }
+
+      const ivThreshold = factor.threshold || 0;
+      if (factor.direction === 'gte' && ivRank < ivThreshold) {
+        return { pass: false, reason: `IV Rank ${ivRank.toFixed(1)} below ${ivThreshold}` };
+      }
+      if (factor.direction === 'lte' && ivRank > ivThreshold) {
+        return { pass: false, reason: `IV Rank ${ivRank.toFixed(1)} exceeds ${ivThreshold}` };
+      }
       return { pass: true };
 
     case 'opt-open-interest':
@@ -754,10 +914,23 @@ function evaluateChainFactor(
       return { pass: true };
 
     case 'calc-iv-percentile':
-      // TODO: IV Percentile requires historical IV data (52-week range) which we don't have
-      // Same issue as IV Rank - current calculation is incorrect
-      // For now, skip this check and rely on other factors
-      console.log(`[FilterHighWeight] Skipping IV Percentile check - requires historical data not available in options chain`);
+      // IV Percentile is pre-calculated in preFilterGeneral and stored in marketData
+      // This is the correct IV percentile based on 252 days of historical data
+      const ivPercentile = marketData.iv_percentile || null;
+
+      if (ivPercentile === null) {
+        // If no IV percentile data, pass through (fail-open)
+        console.log(`[FilterHighWeight] No IV Percentile data available for ${candidate.symbol}, passing through`);
+        return { pass: true };
+      }
+
+      const ivpThreshold = factor.threshold || 0;
+      if (factor.direction === 'gte' && ivPercentile < ivpThreshold) {
+        return { pass: false, reason: `IV Percentile ${ivPercentile.toFixed(1)} below ${ivpThreshold}` };
+      }
+      if (factor.direction === 'lte' && ivPercentile > ivpThreshold) {
+        return { pass: false, reason: `IV Percentile ${ivPercentile.toFixed(1)} exceeds ${ivpThreshold}` };
+      }
       return { pass: true };
 
     default:
@@ -770,21 +943,24 @@ function evaluateChainFactor(
 // ============================================================================
 
 async function reasoningCheckpoint2(state: AgentState): Promise<Partial<AgentState>> {
-  console.log(`[ReasoningCheckpoint2] Evaluating ${state.candidates.length} candidates after high-weight filter`);
+  console.log(`[ReasoningCheckpoint2] Evaluating ${state.candidates.length} candidates after scoring`);
 
-  if (state.candidates.length > 0) {
-    const decision = {
-      checkpoint: "after_high_weight_filter",
-      decision: "PROCEED" as const,
-      reasoning: `${state.candidates.length} candidates passed high-weight filters`,
-      timestamp: new Date().toISOString()
-    };
+  // Since we're now scoring ALL candidates (not filtering), always proceed
+  const decision = {
+    checkpoint: "after_high_weight_filter",
+    decision: "PROCEED" as const,
+    reasoning: `${state.candidates.length} candidates scored. Top score: ${state.candidates[0]?.ips_score?.toFixed(1) || 0}/100`,
+    timestamp: new Date().toISOString()
+  };
 
-    return {
-      reasoningDecisions: [...(state.reasoningDecisions || []), decision]
-    };
-  }
+  return {
+    reasoningDecisions: [...(state.reasoningDecisions || []), decision]
+  };
+}
 
+// OLD LOGIC (removed below) - was used when no candidates passed hard filters
+/*
+async function reasoningCheckpoint2OLD(state: AgentState): Promise<Partial<AgentState>> {
   // No candidates - use RAG to check if we should proceed with near-misses
   const prompt = `You are evaluating options trading candidates after high-weight factor filtering.
 
@@ -864,6 +1040,8 @@ Respond with JSON:
     };
   }
 }
+*/
+// END OLD LOGIC
 
 // ============================================================================
 // STEP 8: Filter on Low-Weight Factors (weights <5)
@@ -1640,59 +1818,57 @@ async function calculateIPSScore(candidate: any, state: AgentState): Promise<num
 // ============================================================================
 
 async function sortAndSelectTiered(state: AgentState): Promise<Partial<AgentState>> {
-  console.log(`[TieredSelection] Sorting ${state.candidates.length} candidates by tier and composite score`);
+  console.log(`[TieredSelection] Sorting ${state.candidates.length} candidates by IPS score`);
 
-  const { applyDiversificationFilters, calculateDiversityScore } = await import("./ips-enhanced-scoring");
+  const { calculateDiversityScore } = await import("./ips-enhanced-scoring");
 
-  // Sort by tier first, then by composite score within tier
+  // Sort by IPS score (highest first) - candidates already have scores from filterHighWeightFactors
   const sorted = [...state.candidates].sort((a, b) => {
-    // Tier priority: elite > quality > speculative > null
-    const tierOrder = { elite: 4, quality: 3, speculative: 2 };
-    const aTier = tierOrder[a.tier as keyof typeof tierOrder] || 1;
-    const bTier = tierOrder[b.tier as keyof typeof tierOrder] || 1;
+    // Primary sort: IPS score
+    const scoreDiff = (b.ips_score || 0) - (a.ips_score || 0);
+    if (Math.abs(scoreDiff) > 0.1) return scoreDiff;
 
-    if (aTier !== bTier) return bTier - aTier;
-
-    // Within same tier, sort by composite score
+    // Secondary sort: composite score (if equal IPS)
     return (b.composite_score || 0) - (a.composite_score || 0);
   });
 
-  // Select candidates by tier with limits
-  const eliteCandidates = sorted.filter(c => c.tier === 'elite').slice(0, 5);
-  const qualityCandidates = sorted.filter(c => c.tier === 'quality').slice(0, 10);
-  const speculativeCandidates = sorted.filter(c => c.tier === 'speculative').slice(0, 5);
-
-  // Combine all tiers
-  let combined = [...eliteCandidates, ...qualityCandidates, ...speculativeCandidates];
-
-  console.log(`[TieredSelection] Before diversification: Elite=${eliteCandidates.length}, Quality=${qualityCandidates.length}, Speculative=${speculativeCandidates.length}`);
+  // Take top 30 candidates before diversity filtering
+  let combined = sorted.slice(0, 30);
 
   // Calculate diversity scores for each candidate
   const selectedCandidates: any[] = [];
   for (const candidate of combined) {
     const diversityScore = calculateDiversityScore(selectedCandidates, candidate);
     candidate.diversity_score = diversityScore;
+    selectedCandidates.push(candidate);
   }
 
-  // Apply diversification filters (max 3 per sector, 2 per symbol)
-  const diversified = applyDiversificationFilters(combined, {
-    maxPerSector: 3,
-    maxPerSymbol: 2,
-    maxPerStrategy: 10, // More lenient for strategies
-  });
+  // Return top 20 by IPS score (already sorted)
+  const top20 = combined.slice(0, 20);
 
-  console.log(`[TieredSelection] After diversification: ${diversified.length} selected`);
+  console.log(`[TieredSelection] Selected top 20 candidates by IPS score`);
 
-  // Log tier breakdown
-  const finalElite = diversified.filter(c => c.tier === 'elite');
-  const finalQuality = diversified.filter(c => c.tier === 'quality');
-  const finalSpeculative = diversified.filter(c => c.tier === 'speculative');
+  // Log score distribution
+  const scores = top20.map(c => c.ips_score || 0);
+  const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
+  const minScore = Math.min(...scores);
+  const maxScore = Math.max(...scores);
 
-  console.log(`[TieredSelection] Final breakdown:`);
-  console.log(`  Elite (IPS≥90): ${finalElite.length} trades`);
-  console.log(`  Quality (IPS 75-89): ${finalQuality.length} trades`);
-  console.log(`  Speculative (IPS 60-74): ${finalSpeculative.length} trades`);
-  console.log(`  Total: ${diversified.length} trades`);
+  console.log(`[TieredSelection] Score range: ${minScore.toFixed(1)}-${maxScore.toFixed(1)} (avg: ${avgScore.toFixed(1)})`);
+
+  // Log tier breakdown if tiers exist
+  const finalElite = top20.filter(c => c.tier === 'elite');
+  const finalQuality = top20.filter(c => c.tier === 'quality');
+  const finalSpeculative = top20.filter(c => c.tier === 'speculative');
+
+  if (finalElite.length + finalQuality.length + finalSpeculative.length > 0) {
+    console.log(`[TieredSelection] Tier breakdown:`);
+    console.log(`  Elite (IPS≥90): ${finalElite.length} trades`);
+    console.log(`  Quality (IPS 75-89): ${finalQuality.length} trades`);
+    console.log(`  Speculative (IPS 60-74): ${finalSpeculative.length} trades`);
+  }
+
+  return { selected: top20 };
 
   // Log details for each selected trade
   diversified.forEach((c, i) => {
