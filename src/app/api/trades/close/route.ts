@@ -154,6 +154,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to finalize trade close' }, { status: 500 });
     }
 
+    // Automatically create RAG embedding for the closed trade
+    try {
+      console.log(`[RAG] Creating embedding for closed trade ${tradeId}`);
+
+      // Fetch the complete trade data with closure info
+      const { data: closedTrade, error: fetchError } = await supabase
+        .from('trades')
+        .select('*, trade_closures(*)')
+        .eq('id', tradeId)
+        .single();
+
+      if (!fetchError && closedTrade) {
+        // Import and run embedding creation (don't await - run in background)
+        import('@/lib/agent/rag-embeddings')
+          .then(({ embedTradeOutcome }) => embedTradeOutcome(closedTrade))
+          .then(() => console.log(`[RAG] ✓ Embedding created for trade ${tradeId}`))
+          .catch((err) => console.error(`[RAG] Failed to embed trade ${tradeId}:`, err.message));
+      }
+    } catch (ragError) {
+      // Don't fail the request if RAG fails
+      console.error('[RAG] Embedding creation failed (non-critical):', ragError);
+    }
+
     return NextResponse.json({ success: true, data: { tradeId, realizedPL, realizedPLPercent } });
   } catch (e) {
     console.error('POST /api/trades/close failed:', e);

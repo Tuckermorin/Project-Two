@@ -36,6 +36,15 @@ type Candidate = {
   ips_score?: number;
   composite_score?: number;
   diversity_score?: number;
+  metadata?: {
+    reddit?: {
+      sentiment_score: number;
+      mention_count: number;
+      trending_rank: number | null;
+      mention_velocity: number;
+      confidence: 'low' | 'medium' | 'high';
+    } | null;
+  };
   detailed_analysis?: {
     ips_name?: string;
     ips_factors?: Array<{
@@ -720,6 +729,84 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                     ) : (
                       <div className="text-sm text-muted-foreground">No recent news found</div>
                     )}
+                  </CardContent>
+                </Card>
+              )}
+
+              {/* Social Media Sentiment */}
+              {selectedCandidate.metadata?.reddit && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <Users className="h-4 w-4" />
+                      Social Media Sentiment
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {(() => {
+                      const reddit = selectedCandidate.metadata.reddit;
+                      const sentimentLabel =
+                        reddit.sentiment_score > 0.3 ? "Bullish" :
+                        reddit.sentiment_score < -0.3 ? "Bearish" : "Neutral";
+                      const sentimentColor =
+                        reddit.sentiment_score > 0.3 ? "text-green-600" :
+                        reddit.sentiment_score < -0.3 ? "text-red-600" : "text-gray-600";
+                      const velocityLabel =
+                        reddit.mention_velocity > 50 ? "🔥 High" :
+                        reddit.mention_velocity > 0 ? "📈 Rising" :
+                        reddit.mention_velocity < -50 ? "❄️ Declining" : "➡️ Stable";
+
+                      return (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                          <div>
+                            <div className="text-xs text-muted-foreground mb-1">Sentiment</div>
+                            <div className={`font-bold ${sentimentColor}`}>
+                              {sentimentLabel}
+                            </div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              Score: {reddit.sentiment_score.toFixed(2)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-xs text-muted-foreground mb-1">Mentions (24h)</div>
+                            <div className="font-bold">{reddit.mention_count.toLocaleString()}</div>
+                            <Badge variant={reddit.confidence === 'high' ? 'default' : reddit.confidence === 'medium' ? 'secondary' : 'outline'} className="mt-1 text-xs">
+                              {reddit.confidence} confidence
+                            </Badge>
+                          </div>
+                          <div>
+                            <div className="text-xs text-muted-foreground mb-1">Trending Rank</div>
+                            <div className="font-bold">
+                              {reddit.trending_rank !== null ? (
+                                <>
+                                  #{reddit.trending_rank}
+                                  {reddit.trending_rank <= 10 && <span className="ml-1 text-red-600">⚠️</span>}
+                                </>
+                              ) : (
+                                <span className="text-muted-foreground">Not trending</span>
+                              )}
+                            </div>
+                            {reddit.trending_rank !== null && reddit.trending_rank <= 10 && (
+                              <div className="text-xs text-red-600 mt-1">
+                                Meme stock risk
+                              </div>
+                            )}
+                          </div>
+                          <div>
+                            <div className="text-xs text-muted-foreground mb-1">Mention Velocity</div>
+                            <div className="font-bold">{velocityLabel}</div>
+                            <div className="text-xs text-muted-foreground mt-1">
+                              {reddit.mention_velocity > 0 ? '+' : ''}{reddit.mention_velocity}%
+                            </div>
+                            {reddit.mention_velocity > 50 && (
+                              <div className="text-xs text-amber-600 mt-1">
+                                Wait for IV expansion
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
                   </CardContent>
                 </Card>
               )}

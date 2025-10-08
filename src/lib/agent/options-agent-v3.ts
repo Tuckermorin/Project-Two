@@ -204,6 +204,38 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
         console.log(`[PreFilterGeneral] ${symbol}: Sample social result:`, JSON.stringify(socialSearch.results[0], null, 2));
       }
 
+      // Fetch Reddit sentiment data
+      let redditData = null;
+      try {
+        const { getRedditClient } = await import('../clients/reddit');
+        const redditClient = getRedditClient();
+
+        if (redditClient.isConfigured()) {
+          redditData = await redditClient.getSentimentAnalysis({ symbol });
+          console.log(`[PreFilterGeneral] ${symbol}: Reddit sentiment=${redditData.sentiment_score.toFixed(2)}, mentions=${redditData.mention_count}, velocity=${redditData.mention_velocity}%`);
+
+          // Store in Supabase for historical tracking
+          const supabase = await createClient();
+          const { data: { user } } = await supabase.auth.getUser();
+
+          if (user) {
+            await supabase.from('reddit_sentiment').insert({
+              symbol,
+              sentiment_score: redditData.sentiment_score,
+              mention_count: redditData.mention_count,
+              trending_rank: redditData.trending_rank,
+              mention_velocity: redditData.mention_velocity,
+              confidence: redditData.confidence,
+              user_id: user.id,
+            });
+          }
+        } else {
+          console.log(`[PreFilterGeneral] ${symbol}: Reddit client not configured, skipping`);
+        }
+      } catch (error) {
+        console.warn(`[PreFilterGeneral] ${symbol}: Failed to fetch Reddit sentiment:`, error);
+      }
+
       // Fetch Alpha Vantage News Sentiment (provides actual sentiment scores)
       let avNewsSentiment = null;
       try {
@@ -226,6 +258,7 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
         news: newsSearch.results || [],
         social: socialSearch.results || [],
         av_news_sentiment: avNewsSentiment, // Alpha Vantage sentiment with actual scores
+        reddit: redditData, // Reddit sentiment, mentions, velocity, trending rank
         timestamp: new Date().toISOString()
       };
 
@@ -598,6 +631,50 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
 
     console.log(`[FilterHighWeight] ${symbol}: Generated ${symbolCandidates.length} candidate spreads before filtering`);
 
+    // MEME STOCK DETECTION GUARDRAIL
+    // Check for viral meme stock activity before scoring
+    const generalData = state.generalData[symbol];
+    const reddit = generalData?.reddit;
+    const avNews = generalData?.av_news_sentiment;
+
+    if (reddit) {
+      // Guardrail 1: Viral Meme Stock Detection
+      const isMemeStock = reddit.trending_rank !== null && reddit.trending_rank <= 10 && reddit.mention_velocity > 100;
+
+      if (isMemeStock) {
+        console.log(`[FilterHighWeight] ⚠️  MEME STOCK DETECTED: ${symbol} (Rank: ${reddit.trending_rank}, Velocity: +${reddit.mention_velocity}%) - SKIPPING ALL CANDIDATES`);
+        continue; // Skip all candidates for this symbol
+      }
+
+      // Guardrail 2: Sentiment Divergence Warning
+      if (avNews && reddit.sentiment_score !== null) {
+        const newsSentiment = avNews.average_score || 0;
+        const redditSentiment = reddit.sentiment_score;
+        const divergence = Math.abs(newsSentiment - redditSentiment);
+
+        if (divergence > 0.5) {
+          console.log(`[FilterHighWeight] ⚠️  SENTIMENT DIVERGENCE: ${symbol} (News: ${newsSentiment.toFixed(2)}, Reddit: ${redditSentiment.toFixed(2)}) - Lowering scores by 10 points`);
+
+          // Mark all candidates with divergence warning
+          for (const candidate of symbolCandidates) {
+            candidate.sentiment_divergence = true;
+            candidate.sentiment_divergence_amount = divergence;
+          }
+        }
+      }
+
+      // Guardrail 3: High Velocity IV Expansion Signal
+      if (reddit.mention_velocity > 50) {
+        console.log(`[FilterHighWeight] 📈 IV EXPANSION SIGNAL: ${symbol} (+${reddit.mention_velocity}% mentions) - Wait 24-48h for better premium`);
+
+        // Add timing recommendation to all candidates
+        for (const candidate of symbolCandidates) {
+          candidate.reddit_timing_signal = 'WAIT_FOR_IV_EXPANSION';
+          candidate.reddit_velocity = reddit.mention_velocity;
+        }
+      }
+    }
+
     // SCORE ALL CANDIDATES instead of filtering
     // Calculate IPS score for each candidate (0-100)
     for (const candidate of symbolCandidates) {
@@ -629,7 +706,12 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
       }
 
       // Calculate final IPS score (0-100)
-      const ipsScore = totalWeight > 0 ? weightedScore / totalWeight : 50;
+      let ipsScore = totalWeight > 0 ? weightedScore / totalWeight : 50;
+
+      // Apply sentiment divergence penalty
+      if (candidate.sentiment_divergence) {
+        ipsScore = Math.max(0, ipsScore - 10);
+      }
 
       // Add ALL candidates with their scores
       candidates.push({
@@ -1316,14 +1398,21 @@ async function ragCorrelationScoring(state: AgentState): Promise<Partial<AgentSt
       // Calculate composite score
       const yieldScore = calculateYieldScore(candidate);
       const ipsScore = await calculateIPSScore(candidate, state);
+      const redditScore = calculateRedditScore(candidate, state);
 
+      // Composite score weights:
+      // - Reddit: 20% (sentiment + velocity signals)
+      // - Yield: 20% (ROI potential)
+      // - IPS: 30% (factor compliance)
+      // - RAG: 30% (historical win rate)
       const compositeScore = historicalAnalysis.has_data
-        ? (yieldScore * 0.4) + (ipsScore * 0.3) + (historicalAnalysis.win_rate * 100 * 0.3)
-        : (yieldScore * 0.6) + (ipsScore * 0.4);
+        ? (redditScore * 0.2) + (yieldScore * 0.2) + (ipsScore * 0.3) + (historicalAnalysis.win_rate * 100 * 0.3)
+        : (redditScore * 0.2) + (yieldScore * 0.3) + (ipsScore * 0.5); // No RAG: increase yield + IPS weight
 
       candidate.composite_score = compositeScore;
       candidate.yield_score = yieldScore;
       candidate.ips_score = ipsScore;
+      candidate.reddit_score = redditScore;
       candidate.historical_analysis = {
         has_data: historicalAnalysis.has_data,
         trade_count: historicalAnalysis.trade_count,
@@ -1353,11 +1442,13 @@ async function ragCorrelationScoring(state: AgentState): Promise<Partial<AgentSt
       // Fall back to scoring without RAG
       const yieldScore = calculateYieldScore(candidate);
       const ipsScore = await calculateIPSScore(candidate, state);
-      const compositeScore = (yieldScore * 0.6) + (ipsScore * 0.4);
+      const redditScore = calculateRedditScore(candidate, state);
+      const compositeScore = (redditScore * 0.2) + (yieldScore * 0.3) + (ipsScore * 0.5);
 
       candidate.composite_score = compositeScore;
       candidate.yield_score = yieldScore;
       candidate.ips_score = ipsScore;
+      candidate.reddit_score = redditScore;
       candidate.historical_analysis = {
         has_data: false,
         trade_count: 0,
@@ -1383,6 +1474,53 @@ function calculateYieldScore(candidate: any): number {
   const riskReward = candidate.max_profit / (candidate.max_loss || 1);
   // Normalize to 0-100 scale
   return Math.min(100, riskReward * 100);
+}
+
+// Helper: Calculate Reddit score
+function calculateRedditScore(candidate: any, state: AgentState): number {
+  const generalData = state.generalData?.[candidate.symbol];
+  const reddit = generalData?.reddit;
+
+  // If no Reddit data, return neutral score
+  if (!reddit) {
+    return 50;
+  }
+
+  let score = 50; // Start at neutral
+
+  // Component 1: Sentiment Score (±20 points)
+  // sentiment_score ranges from -1 (bearish) to +1 (bullish)
+  score += reddit.sentiment_score * 20;
+
+  // Component 2: Mention Count (0-15 points)
+  // More mentions = more confidence in sentiment
+  // Scale: 0 mentions = 0 pts, 50+ mentions = 15 pts
+  const mentionPoints = Math.min(15, (reddit.mention_count / 50) * 15);
+  score += mentionPoints;
+
+  // Component 3: Trending Rank (0-15 points)
+  // Lower rank = more points (rank 1 = 15 pts, rank 100 = 0 pts)
+  if (reddit.trending_rank !== null) {
+    const trendingPoints = Math.max(0, 15 - (reddit.trending_rank / 100) * 15);
+    score += trendingPoints;
+  }
+
+  // Component 4: Confidence Multiplier
+  // Adjust final score based on sample size confidence
+  const confidenceMultiplier =
+    reddit.confidence === 'high' ? 1.0 :
+    reddit.confidence === 'medium' ? 0.9 :
+    0.75; // low confidence
+
+  score *= confidenceMultiplier;
+
+  // Penalty: High velocity (>50%) suggests waiting for IV expansion
+  if (reddit.mention_velocity > 50) {
+    score -= 10; // Discourage entry now, wait for better premium
+  }
+
+  // Ensure score stays in 0-100 range
+  return Math.max(0, Math.min(100, score));
 }
 
 // Helper: Extract actual factor value from candidate
@@ -2078,22 +2216,38 @@ async function finalizeOutput(state: AgentState): Promise<Partial<AgentState>> {
   console.log(`[FinalizeOutput] Preparing final output for ${state.selected.length} trades`);
 
   for (const candidate of state.selected) {
-    // Persist to database with enhanced IPS details
+    // Get Reddit data for this symbol
+    const generalData = state.generalData?.[candidate.symbol];
+    const reddit = generalData?.reddit;
+
+    // Persist to database with enhanced IPS details + Reddit metadata
     await db.persistCandidate(state.runId, {
       ...candidate,
       tier: candidate.tier,
       diversity_score: candidate.diversity_score,
       ips_factor_scores: candidate.ips_factor_details,
+      metadata: {
+        reddit: reddit ? {
+          sentiment_score: reddit.sentiment_score,
+          mention_count: reddit.mention_count,
+          trending_rank: reddit.trending_rank,
+          mention_velocity: reddit.mention_velocity,
+          confidence: reddit.confidence,
+        } : null,
+      },
       detailed_analysis: {
         composite_score: candidate.composite_score,
         yield_score: candidate.yield_score,
         ips_score: candidate.ips_score,
+        reddit_score: candidate.reddit_score,
         tier: candidate.tier,
         ips_factor_details: candidate.ips_factor_details,
         diversity_score: candidate.diversity_score,
         historical_win_rate: candidate.historical_win_rate,
         diversification_warnings: candidate.diversification_warnings,
         reasoning_decisions: state.reasoningDecisions,
+        reddit_timing_signal: candidate.reddit_timing_signal,
+        sentiment_divergence: candidate.sentiment_divergence,
       }
     });
 

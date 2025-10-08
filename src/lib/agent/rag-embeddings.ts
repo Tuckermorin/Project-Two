@@ -181,6 +181,32 @@ function buildTradeContext(trade: any): string {
     lines.push(`Notes: ${trade.evaluation_notes}`);
   }
 
+  // Add Reddit context from metadata if available
+  if (trade.metadata?.reddit) {
+    const reddit = trade.metadata.reddit;
+
+    if (reddit.sentiment_score != null) {
+      const sentimentLabel =
+        reddit.sentiment_score > 0.3 ? "bullish" :
+        reddit.sentiment_score < -0.3 ? "bearish" :
+        "neutral";
+      lines.push(`Reddit Sentiment: ${sentimentLabel} (${reddit.sentiment_score.toFixed(2)})`);
+    }
+
+    if (reddit.mention_count != null) {
+      lines.push(`Reddit Mentions: ${reddit.mention_count}`);
+    }
+
+    if (reddit.trending_rank != null) {
+      lines.push(`Reddit Trending: Rank #${reddit.trending_rank}`);
+    }
+
+    if (reddit.mention_velocity != null) {
+      const velocityLabel = reddit.mention_velocity > 0 ? "increasing" : "decreasing";
+      lines.push(`Reddit Velocity: ${velocityLabel} (${reddit.mention_velocity}%)`);
+    }
+  }
+
   return lines.join("\n");
 }
 
