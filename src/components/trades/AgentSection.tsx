@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight, List } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { FactorScorecard } from "@/components/trades/factor-scorecard";
+import { AITradeScoreCard } from "@/components/trades/AITradeScoreCard";
 
 type Candidate = {
   id: string;
@@ -424,83 +425,44 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                   Sorted by IPS fit score
                 </div>
               </div>
-              <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {cands.slice(0, 10).map((c) => (
-                  <div key={c.id} className="border rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                    <div className="flex items-center justify-between gap-4">
-                      {/* Left: Symbol and Strategy */}
-                      <div className="flex items-center gap-3 flex-1">
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-lg font-bold">{c.symbol}</span>
-                            <Badge variant="outline" className="text-xs">
-                              {c.strategy.replace(/_/g, " ")}
-                            </Badge>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {c.contract_legs.map((l, i) => (
-                              <span key={i}>
-                                {i > 0 && " / "}
-                                {l.type} {l.right} ${l.strike}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
+              <div className="space-y-3 max-h-[600px] overflow-y-auto">
+                {cands.slice(0, 10).map((c) => {
+                  // Extract IPS factor information for gamification
+                  const ipsFactors = c.detailed_analysis?.ips_factors || [];
+                  const passedFactors = ipsFactors
+                    .filter(f => f.status === 'pass')
+                    .map(f => f.name || f.factor_key || 'Unknown');
+                  const failedFactors = ipsFactors
+                    .filter(f => f.status === 'fail')
+                    .map(f => f.name || f.factor_key || 'Unknown');
 
-                      {/* Middle: Quick Stats */}
-                      <div className="flex items-center gap-6 text-sm">
-                        <div className="text-center">
-                          <div className="text-xs text-muted-foreground">Entry</div>
-                          <div className="font-medium">${c.entry_mid?.toFixed(2) ?? "—"}</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-xs text-muted-foreground">Max P</div>
-                          <div className="font-medium text-green-600">${c.max_profit?.toFixed(2) ?? "—"}</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-xs text-muted-foreground">POP</div>
-                          <div className="font-medium">{c.est_pop ? `${(c.est_pop * 100).toFixed(0)}%` : "—"}</div>
-                        </div>
-                      </div>
-
-                      {/* Right: IPS Fit and Actions */}
-                      <div className="flex items-center gap-3">
-                        {c.score !== undefined && (
-                          <div className="text-center">
-                            <div className="text-xs text-muted-foreground mb-1">IPS Fit</div>
-                            <Badge
-                              className={
-                                c.score >= 70
-                                  ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                                  : c.score >= 50
-                                  ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-                                  : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                              }
-                            >
-                              {c.score.toFixed(0)}%
-                            </Badge>
-                          </div>
-                        )}
-                        {c.guardrail_flags && Object.values(c.guardrail_flags).some((v) => v) && (
-                          <AlertCircle className="h-5 w-5 text-amber-600" />
-                        )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setSelectedCandidate(c);
-                            setNumberOfContracts("1");
-                            setDetailsDialogOpen(true);
-                          }}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          View Details
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  return (
+                    <AITradeScoreCard
+                      key={c.id}
+                      score={c.score || c.ips_score || c.composite_score || 0}
+                      symbol={c.symbol}
+                      strategy={c.strategy}
+                      contractType={c.contract_legs?.map((l: any) =>
+                        `${l.type} ${l.right === 'P' ? 'Put' : 'Call'} $${l.strike}`
+                      ).join(' / ') || 'N/A'}
+                      entryPrice={c.entry_mid}
+                      maxProfit={c.max_profit}
+                      maxLoss={c.max_loss}
+                      probabilityOfProfit={c.est_pop ? c.est_pop * 100 : undefined}
+                      ipsFactors={{
+                        passed: passedFactors,
+                        failed: failedFactors,
+                      }}
+                      rationale={c.rationale}
+                      contractLegs={c.contract_legs}
+                      onViewDetails={() => {
+                        setSelectedCandidate(c);
+                        setNumberOfContracts("1");
+                        setDetailsDialogOpen(true);
+                      }}
+                    />
+                  );
+                })}
               </div>
             </div>
           )}
