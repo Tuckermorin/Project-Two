@@ -233,7 +233,7 @@ export default function ScoreTradePage() {
   if (loading) {
     return (
       <div className="max-w-5xl mx-auto p-6">
-        <div className="text-gray-600">Scoring trade…</div>
+        <div style={{ color: 'var(--text-secondary)' }}>Scoring trade…</div>
       </div>
     );
   }
@@ -244,7 +244,7 @@ export default function ScoreTradePage() {
         <Card>
           <CardContent className="py-10 text-center">
             <AlertCircle className="h-8 w-8 text-red-500 mx-auto mb-3" />
-            <div className="text-gray-800 font-medium mb-2">{error || "Unable to score this trade."}</div>
+            <div className="font-medium mb-2" style={{ color: 'var(--text-primary)' }}>{error || "Unable to score this trade."}</div>
             <Button variant="outline" onClick={() => router.push("/trades")}>Back to Trades</Button>
           </CardContent>
         </Card>
@@ -265,10 +265,10 @@ export default function ScoreTradePage() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
-              <CardTitle className="text-2xl font-bold text-gray-900">
+              <CardTitle className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>
                 {draft.trade?.symbol || "Symbol"} — Trade Score
               </CardTitle>
-              <p className="text-gray-600 mt-1">IPS: {ipsDisplayName ?? draft.ipsName ?? draft.ipsId}</p>
+              <p className="mt-1" style={{ color: 'var(--text-secondary)' }}>IPS: {ipsDisplayName ?? draft.ipsName ?? draft.ipsId}</p>
             </div>
             <div className="text-right">
               <div className="text-4xl font-bold text-blue-600 mb-1">{score?.score?.toFixed(1) ?? "0.0"}</div>
@@ -282,21 +282,21 @@ export default function ScoreTradePage() {
               <div className="text-xl font-bold text-green-600">
                 {score?.breakdown.targetsMetCount ?? 0}/{score?.breakdown.factorScores.length ?? 0}
               </div>
-              <div className="text-xs text-gray-600">Targets Met</div>
+              <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Targets Met</div>
             </div>
             <div className="text-center">
               <div className="text-xl font-bold text-purple-600">{score?.breakdown.totalWeight ?? 0}</div>
-              <div className="text-xs text-gray-600">Total Weight</div>
+              <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Total Weight</div>
             </div>
             <div className="text-center">
               <div className="text-xl font-bold text-orange-600">
                 {Math.round((score?.breakdown.targetPercentage ?? 0))}%
               </div>
-              <div className="text-xs text-gray-600">Target Coverage</div>
+              <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Target Coverage</div>
             </div>
             <div className="text-center">
               <div className="text-xl font-bold text-blue-600">{new Date(score!.timestamp).toLocaleString()}</div>
-              <div className="text-xs text-gray-600">Timestamp</div>
+              <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Timestamp</div>
             </div>
           </div>
 
@@ -321,7 +321,8 @@ export default function ScoreTradePage() {
             {score?.breakdown.factorScores.map((f) => (
               <div
                 key={f.factorName}
-                className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                className="flex items-center justify-between p-3 rounded-lg"
+                style={{ background: 'var(--glass-bg)' }}
               >
                 <div className="flex items-center gap-3">
                   {f.targetMet ? (
@@ -331,14 +332,14 @@ export default function ScoreTradePage() {
                   )}
                   <div>
                     <div className="font-medium text-sm">{f.factorName}</div>
-                    <div className="text-xs text-gray-500">Weight: {f.weight}</div>
+                    <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Weight: {f.weight}</div>
                   </div>
                 </div>
                 <div className="text-right">
                   <div className={`font-bold ${f.individualScore >= 70 ? "text-green-600" : f.individualScore >= 50 ? "text-yellow-600" : "text-red-600"}`}>
                     {Math.round(f.individualScore)} / 100
                   </div>
-                  <div className="text-xs text-gray-500">Value: {String(f.value)}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>Value: {String(f.value)}</div>
                 </div>
               </div>
             ))}
@@ -349,7 +350,7 @@ export default function ScoreTradePage() {
       {/* AI Analysis card removed per requirements */}
 
       <div className="flex items-center justify-between pt-2">
-        <div className="text-sm text-gray-600">{saveMsg}</div>
+        <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{saveMsg}</div>
         <div className="flex items-center gap-2">
           <Button variant="outline" onClick={() => router.push("/trades")}>Cancel</Button>
           <Button variant="outline" onClick={() => router.push("/trades")}>Enter New Trade</Button>

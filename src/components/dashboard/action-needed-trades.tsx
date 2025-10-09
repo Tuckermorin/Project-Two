@@ -350,21 +350,21 @@ export function ActionNeededTradesPanel() {
             </div>
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full border-collapse border border-gray-200 text-sm">
+              <table className="w-full border-collapse border border-[var(--glass-border)] text-sm">
                 <thead>
-                  <tr className="bg-gray-50">
-                    <th className="border border-gray-200 px-3 py-2 text-left">Status</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Trade</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Symbol</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">IPS</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Contract</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Exp Date</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">DTE</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Contracts</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Credit</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Close Date</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Reason</th>
-                    <th className="border border-gray-200 px-3 py-2 text-left">Actions</th>
+                  <tr className="bg-muted/40">
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Status</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Trade</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Symbol</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">IPS</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Contract</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Exp Date</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">DTE</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Contracts</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Credit</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Close Date</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Reason</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -373,38 +373,38 @@ export function ActionNeededTradesPanel() {
                     const closeDate = meta.date ? new Date(meta.date).toLocaleDateString() : '—'
                     const reasonLabel = closeMethods.find(m => m.key === meta.reason)?.label || meta.reason || 'Not set'
                     return (
-                      <tr key={trade.id} className="hover:bg-gray-50">
-                        <td className="border border-gray-200 px-3 py-2">
+                      <tr key={trade.id} className="hover:bg-muted/40">
+                        <td className="border border-[var(--glass-border)] px-3 py-2">
                           <Badge className={`${String(trade.status || '').toLowerCase() === 'active' ? 'bg-green-100 text-green-800 border-green-200' : String(trade.status || '').toLowerCase() === 'closed' ? 'bg-gray-200 text-gray-700 border-gray-300' : 'bg-yellow-100 text-yellow-800 border-yellow-200'} border uppercase`}>
                             {String(trade.status || 'unknown').toUpperCase()}
                           </Badge>
                         </td>
-                        <td className="border border-gray-200 px-3 py-2">
+                        <td className="border border-[var(--glass-border)] px-3 py-2">
                           <div className="font-medium">{trade.name}</div>
                           <div className="text-xs text-gray-500">{trade.createdAt ? new Date(trade.createdAt).toLocaleDateString() : ''}</div>
                         </td>
-                        <td className="border border-gray-200 px-3 py-2">{trade.symbol}</td>
-                        <td className="border border-gray-200 px-3 py-2">{trade.ipsName || '—'}</td>
-                        <td className="border border-gray-200 px-3 py-2">{trade.contractType}</td>
-                        <td className="border border-gray-200 px-3 py-2">{trade.expirationDate ? new Date(trade.expirationDate).toLocaleDateString() : '—'}</td>
-                        <td className="border border-gray-200 px-3 py-2">
+                        <td className="border border-[var(--glass-border)] px-3 py-2">{trade.symbol}</td>
+                        <td className="border border-[var(--glass-border)] px-3 py-2">{trade.ipsName || '—'}</td>
+                        <td className="border border-[var(--glass-border)] px-3 py-2">{trade.contractType}</td>
+                        <td className="border border-[var(--glass-border)] px-3 py-2">{trade.expirationDate ? new Date(trade.expirationDate).toLocaleDateString() : '—'}</td>
+                        <td className="border border-[var(--glass-border)] px-3 py-2">
                           {trade.dte === null ? '—' : (
                             <Badge variant={trade.dte <= 0 ? 'destructive' : 'outline'}>
                               {trade.dte}
                             </Badge>
                           )}
                         </td>
-                        <td className="border border-gray-200 px-3 py-2">{trade.contracts}</td>
-                        <td className="border border-gray-200 px-3 py-2">
+                        <td className="border border-[var(--glass-border)] px-3 py-2">{trade.contracts}</td>
+                        <td className="border border-[var(--glass-border)] px-3 py-2">
                           {trade.creditReceived != null ? currencyFormatter.format(trade.creditReceived) : '—'}
                         </td>
-                        <td className="border border-gray-200 px-3 py-2">{closeDate}</td>
-                        <td className="border border-gray-200 px-3 py-2">
+                        <td className="border border-[var(--glass-border)] px-3 py-2">{closeDate}</td>
+                        <td className="border border-[var(--glass-border)] px-3 py-2">
                           {meta.reason ? (
                             <Badge variant="secondary" className="capitalize">{reasonLabel}</Badge>
                           ) : '—'}
                         </td>
-                        <td className="border border-gray-200 px-3 py-2">
+                        <td className="border border-[var(--glass-border)] px-3 py-2">
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button

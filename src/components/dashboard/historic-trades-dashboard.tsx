@@ -459,7 +459,7 @@ export default function HistoricTradesDashboard() {
           <CardTitle>Trade History</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-12 text-gray-600 flex items-center justify-center gap-2">
+          <div className="text-center py-12 flex items-center justify-center gap-2" style={{ color: 'var(--text-secondary)' }}>
             <Loader2 className="h-5 w-5 animate-spin" />
             Loading closed trades…
           </div>
@@ -499,10 +499,10 @@ export default function HistoricTradesDashboard() {
         </CardHeader>
         <CardContent>
           <div className="text-center py-12">
-            <History className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-            <h3 className="text-lg font-semibold mb-2">No Trade History</h3>
-            <p className="text-gray-600 mb-4">Your closed trades will appear here once you complete them.</p>
-            <p className="text-sm text-gray-500">Start by adding active trades and closing them to build your history.</p>
+            <History className="h-12 w-12 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
+            <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>No Trade History</h3>
+            <p className="mb-4" style={{ color: 'var(--text-secondary)' }}>Your closed trades will appear here once you complete them.</p>
+            <p className="text-sm" style={{ color: 'var(--text-tertiary)' }}>Start by adding active trades and closing them to build your history.</p>
           </div>
         </CardContent>
       </Card>
@@ -516,7 +516,7 @@ export default function HistoricTradesDashboard() {
         <div className="flex flex-row items-center justify-between">
           <div>
             <CardTitle>Trade History</CardTitle>
-            <p className="text-sm text-gray-600 mt-1">
+            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
               {processedTrades.length} closed {processedTrades.length === 1 ? 'trade' : 'trades'}
             </p>
           </div>
@@ -560,30 +560,30 @@ export default function HistoricTradesDashboard() {
 
         {/* Summary Statistics */}
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mt-4">
-          <div className="bg-gray-50 p-3 rounded">
-            <p className="text-xs text-gray-600">Total Trades</p>
+          <div className="p-3 rounded" style={{ background: 'var(--glass-bg)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Total Trades</p>
             <p className="text-lg font-semibold">{stats.totalTrades}</p>
           </div>
-          <div className="bg-gray-50 p-3 rounded">
-            <p className="text-xs text-gray-600">Win Rate</p>
+          <div className="p-3 rounded" style={{ background: 'var(--glass-bg)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Win Rate</p>
             <p className="text-lg font-semibold">{stats.winRate.toFixed(1)}%</p>
           </div>
-          <div className="bg-gray-50 p-3 rounded">
-            <p className="text-xs text-gray-600">Total P/L</p>
-            <p className={`text-lg font-semibold ${stats.totalPL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+          <div className="p-3 rounded" style={{ background: 'var(--glass-bg)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Total P/L</p>
+            <p className={`text-lg font-semibold ${stats.totalPL >= 0 ? 'pl-value positive' : 'pl-value negative'}`}>
               {currencyFormatter.format(stats.totalPL)}
             </p>
           </div>
-          <div className="bg-gray-50 p-3 rounded">
-            <p className="text-xs text-gray-600">Avg Win</p>
-            <p className="text-lg font-semibold text-green-600">{currencyFormatter.format(stats.avgWin)}</p>
+          <div className="p-3 rounded" style={{ background: 'var(--glass-bg)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Avg Win</p>
+            <p className="text-lg font-semibold pl-value positive">{currencyFormatter.format(stats.avgWin)}</p>
           </div>
-          <div className="bg-gray-50 p-3 rounded">
-            <p className="text-xs text-gray-600">Avg Loss</p>
-            <p className="text-lg font-semibold text-red-600">{currencyFormatter.format(stats.avgLoss)}</p>
+          <div className="p-3 rounded" style={{ background: 'var(--glass-bg)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Avg Loss</p>
+            <p className="text-lg font-semibold pl-value negative">{currencyFormatter.format(stats.avgLoss)}</p>
           </div>
-          <div className="bg-gray-50 p-3 rounded">
-            <p className="text-xs text-gray-600">Profit Factor</p>
+          <div className="p-3 rounded" style={{ background: 'var(--glass-bg)' }}>
+            <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Profit Factor</p>
             <p className="text-lg font-semibold">
               {stats.profitFactor === Infinity ? '∞' : stats.profitFactor.toFixed(2)}
             </p>
@@ -625,14 +625,14 @@ export default function HistoricTradesDashboard() {
         </div>
 
         {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse border border-gray-200 text-sm">
+        <div className="overflow-x-auto trades-table-container">
+          <table className="w-full border-collapse trades-table text-sm">
             <thead>
-              <tr className="bg-gray-50">
+              <tr>
                 {columnsToShow.map((column) => (
-                  <th 
+                  <th
                     key={column.key}
-                    className="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
+                    className="px-3 py-2 text-left font-medium cursor-pointer"
                     onClick={() => handleSort(column.key)}
                   >
                     <div className="flex items-center">
@@ -642,7 +642,7 @@ export default function HistoricTradesDashboard() {
                   </th>
                 ))}
                 {!showIPS && (
-                  <th className="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700">
+                  <th className="px-3 py-2 text-left font-medium">
                     Actions
                   </th>
                 )}
@@ -650,29 +650,25 @@ export default function HistoricTradesDashboard() {
             </thead>
             <tbody>
               {processedTrades.map((trade, index) => (
-                <tr 
-                  key={trade.id} 
-                  className={`hover:bg-gray-50 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-25'}`}
+                <tr
+                  key={trade.id}
                 >
                   {columnsToShow.map((column) => {
                     const cellValue = trade[column.key]
+                    const plClass = column.key === 'actualPL' || column.key === 'actualPLPercent'
+                      ? (trade[column.key] >= 0 ? 'pl-value positive' : 'pl-value negative')
+                      : ''
                     return (
-                      <td 
+                      <td
                         key={column.key}
-                        className={`border border-gray-200 px-3 py-2 ${
-                          column.key === 'actualPL'
-                            ? trade.actualPL >= 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'
-                            : column.key === 'actualPLPercent'
-                            ? trade.actualPLPercent >= 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'
-                            : ''
-                        }`}
+                        className={`px-3 py-2 ${plClass}`}
                       >
                         {formatValue(cellValue, column)}
                       </td>
                     )
                   })}
                   {!showIPS && (
-                    <td className="border border-gray-200 px-3 py-2">
+                    <td className="px-3 py-2">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -744,7 +740,7 @@ export default function HistoricTradesDashboard() {
         <DialogHeader>
           <DialogTitle>Delete Trade</DialogTitle>
         </DialogHeader>
-        <p className="text-sm text-gray-600">
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
           {`Are you sure you want to delete ${deleteDialog.trade?.name || 'this trade'} from history? This action cannot be undone.`}
         </p>
         <DialogFooter>
@@ -785,7 +781,7 @@ export default function HistoricTradesDashboard() {
         {editDialog.trade && (
           <div className="space-y-4">
             <div className="space-y-3">
-              <div className="text-sm text-gray-600">{editDialog.trade.name}</div>
+              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{editDialog.trade.name}</div>
               <div>
                 <Label className="text-sm">Close Date</Label>
                 <Input
@@ -818,7 +814,7 @@ export default function HistoricTradesDashboard() {
                   onChange={e => setEditDialog(prev => ({ ...prev, closePrice: e.target.value }))}
                   placeholder="e.g., 0.35"
                 />
-                <div className="text-xs text-gray-500 mt-1">
+                <div className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>
                   Initial credit: ${editDialog.trade.creditReceived?.toFixed(2) ?? '0.00'} • Contracts: {editDialog.trade.contracts}
                 </div>
               </div>

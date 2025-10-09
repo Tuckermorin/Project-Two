@@ -30,7 +30,7 @@ function SimplifiedQuickStart({ hasIPS = false, watchlistCount = 0, tradeCount =
     },
     {
       title: "Watchlist",
-      href: "/watchlist", 
+      href: "/watchlist",
       icon: Eye,
       completed: watchlistCount > 0,
       description: watchlistCount > 0 ? `${watchlistCount} stocks monitored` : "Add stocks to monitor"
@@ -45,21 +45,27 @@ function SimplifiedQuickStart({ hasIPS = false, watchlistCount = 0, tradeCount =
   ]
 
   return (
-    <Card>
+    <Card className="fade-in">
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">Quick Actions</CardTitle>
+        <CardTitle className="text-base" style={{ color: 'var(--text-primary)' }}>Quick Actions</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="space-y-3">
-          {steps.map((step) => {
+          {steps.map((step, index) => {
             const Icon = step.icon
             return (
-              <div key={step.title} className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50">
+              <div
+                key={step.title}
+                className={`flex items-center justify-between p-3 rounded-lg transition-all hover:bg-[var(--glass-bg-hover)] fade-in-delay-${index + 1}`}
+                style={{
+                  border: '1px solid var(--glass-border)'
+                }}
+              >
                 <div className="flex items-center gap-3">
-                  <Icon className="h-4 w-4 text-gray-600" />
+                  <Icon className="h-4 w-4" style={{ color: 'var(--gradient-primary-start)' }} />
                   <div>
-                    <p className="text-sm font-medium">{step.title}</p>
-                    <p className="text-xs text-gray-500">{step.description}</p>
+                    <p className="text-sm font-medium" style={{ color: 'var(--text-primary)' }}>{step.title}</p>
+                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>{step.description}</p>
                   </div>
                 </div>
                 <Button asChild variant="outline" size="sm">
@@ -92,38 +98,50 @@ export default function Dashboard() {
 
   return (
     <div className="container mx-auto px-4 py-8">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
-        <p className="text-gray-600 mt-2">Track your paper trading performance</p>
+      <div className="mb-8 fade-in">
+        <h1 className="text-3xl font-bold gradient-text-primary">Dashboard</h1>
+        <p className="mt-2" style={{ color: 'var(--text-secondary)' }}>Track your paper trading performance</p>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
         {/* Main Content: Current and Historic Trades */}
         <div className="lg:col-span-3 space-y-8">
           {/* Current Trades Component */}
-          <ExcelStyleTradesDashboard />
+          <div className="fade-in">
+            <ExcelStyleTradesDashboard />
+          </div>
 
           {/* Action Needed Component */}
-          <ActionNeededTradesPanel />
+          <div className="fade-in fade-in-delay-1">
+            <ActionNeededTradesPanel />
+          </div>
 
           {/* Historic Trades Component */}
-          <HistoricTradesDashboard />
+          <div className="fade-in fade-in-delay-2">
+            <HistoricTradesDashboard />
+          </div>
         </div>
 
         {/* Right Sidebar: Compact components */}
         <div className="space-y-6">
           {/* Market Overview with real Alpha Vantage data */}
-          <MarketOverview />
+          <div className="fade-in">
+            <MarketOverview />
+          </div>
 
           {/* IPS Performance Tracker */}
-          <IPSPerformanceTracker />
+          <div className="fade-in fade-in-delay-1">
+            <IPSPerformanceTracker />
+          </div>
 
           {/* Simplified Quick Start */}
-          <SimplifiedQuickStart
-            hasIPS={dashboardData.hasIPS}
-            watchlistCount={dashboardData.watchlistCount}
-            tradeCount={dashboardData.tradeCount}
-          />
+          <div className="fade-in fade-in-delay-2">
+            <SimplifiedQuickStart
+              hasIPS={dashboardData.hasIPS}
+              watchlistCount={dashboardData.watchlistCount}
+              tradeCount={dashboardData.tradeCount}
+            />
+          </div>
         </div>
       </div>
     </div>

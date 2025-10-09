@@ -339,7 +339,7 @@ export function IPSBuilderForm({ onSave, existingIPS, selectedStrategies = [] }:
                   id="preferredDTE"
                   value={formData.preferredDTE}
                   onChange={(e) => handleInputChange('preferredDTE', e.target.value)}
-                  className="w-full mt-1 p-2 border rounded-md"
+                  className="w-full mt-1 p-2 border border-[var(--glass-border)] rounded-md bg-[var(--glass-bg)] text-[var(--text-primary)] focus:border-[var(--gradient-primary-start)] focus:outline-none"
                 >
                   <option value="weekly">Weekly (0-7 DTE)</option>
                   <option value="monthly">Monthly (14-45 DTE)</option>

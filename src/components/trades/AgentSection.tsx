@@ -318,7 +318,7 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
             <Label htmlFor="ips-select">Select IPS Configuration</Label>
             <select
               id="ips-select"
-              className="w-full border rounded-md h-10 px-3 text-sm"
+              className="w-full border border-[var(--glass-border)] rounded-md h-10 px-3 text-sm bg-[var(--glass-bg)] text-[var(--text-primary)] focus:border-[var(--gradient-primary-start)] focus:outline-none"
               value={selectedIpsId || ""}
               onChange={(e) => setSelectedIpsId(e.target.value || null)}
             >

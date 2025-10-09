@@ -83,7 +83,7 @@ export default function ProspectiveTradesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Prospective Trades</h1>
-          <p className="text-gray-600">Track your paper trading performance</p>
+          <p style={{ color: 'var(--text-secondary)' }}>Track your paper trading performance</p>
         </div>
         <Button onClick={() => (window.location.href = "/trades")}> 
           <Plus className="h-4 w-4 mr-2" /> Add New Trade
@@ -97,11 +97,11 @@ export default function ProspectiveTradesPage() {
       </Card>
 
       <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
-        <Card><CardContent className="p-4 text-center"><div className="text-2xl font-bold">{totals.positions}</div><div className="text-sm text-gray-600">Total Positions</div></CardContent></Card>
-        <Card><CardContent className="p-4 text-center"><div className="text-2xl font-bold text-green-600">${totals.maxGain.toFixed(2)}</div><div className="text-sm text-gray-600">Total Max Gain</div></CardContent></Card>
-        <Card><CardContent className="p-4 text-center"><div className="text-2xl font-bold">{Math.round(totals.avgScore)}/100</div><div className="text-sm text-gray-600">Avg IPS Score</div></CardContent></Card>
-        <Card><CardContent className="p-4 text-center"><div className="text-2xl font-bold text-orange-600">{totals.expiring}</div><div className="text-sm text-gray-600">Expiring ≤ 7d</div></CardContent></Card>
-        <Card><CardContent className="p-4 text-center"><div className="text-2xl font-bold">Prospective</div><div className="text-sm text-gray-600">Status</div></CardContent></Card>
+        <Card><CardContent className="p-4 text-center"><div className="text-2xl font-bold">{totals.positions}</div><div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Total Positions</div></CardContent></Card>
+        <Card><CardContent className="p-4 text-center"><div className="text-2xl font-bold text-green-600">${totals.maxGain.toFixed(2)}</div><div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Total Max Gain</div></CardContent></Card>
+        <Card><CardContent className="p-4 text-center"><div className="text-2xl font-bold">{Math.round(totals.avgScore)}/100</div><div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Avg IPS Score</div></CardContent></Card>
+        <Card><CardContent className="p-4 text-center"><div className="text-2xl font-bold text-orange-600">{totals.expiring}</div><div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Expiring ≤ 7d</div></CardContent></Card>
+        <Card><CardContent className="p-4 text-center"><div className="text-2xl font-bold">Prospective</div><div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Status</div></CardContent></Card>
       </div>
 
       <Card>
@@ -110,13 +110,13 @@ export default function ProspectiveTradesPage() {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="py-6 text-gray-600">Loading…</div>
+            <div className="py-6" style={{ color: 'var(--text-secondary)' }}>Loading…</div>
           ) : filtered.length === 0 ? (
-            <div className="py-6 text-gray-600">No prospective trades.</div>
+            <div className="py-6" style={{ color: 'var(--text-secondary)' }}>No prospective trades.</div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead className="text-left text-gray-600">
+            <div className="overflow-x-auto trades-table-container">
+              <table className="w-full text-sm trades-table">
+                <thead style={{ color: 'var(--text-secondary)' }}>
                   <tr>
                     <th className="py-2 pr-4"></th>
                     <th className="py-2 pr-4">Name</th>
@@ -143,12 +143,12 @@ export default function ProspectiveTradesPage() {
 
                     return (
                       <>
-                        <tr key={r.id} className="border-t hover:bg-gray-50">
+                        <tr key={r.id}>
                           <td className="py-2 pr-2">
                             {r.ips_factor_scores && (
                               <button
                                 onClick={() => setExpandedRow(isExpanded ? null : r.id)}
-                                className="text-gray-500 hover:text-gray-700"
+                                style={{ color: 'var(--text-tertiary)' }}
                               >
                                 {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                               </button>
@@ -156,7 +156,7 @@ export default function ProspectiveTradesPage() {
                           </td>
                           <td className="py-2 pr-4">
                             <div className="font-medium">{r.name || r.symbol}</div>
-                            <div className="text-xs text-gray-500">{r.symbol} — {r.ips_configurations?.name || ""}</div>
+                            <div className="text-xs" style={{ color: 'var(--text-tertiary)' }}>{r.symbol} — {r.ips_configurations?.name || ""}</div>
                           </td>
                           <td className="py-2 pr-4">
                             {tierInfo ? (
@@ -170,8 +170,8 @@ export default function ProspectiveTradesPage() {
                           <td className="py-2 pr-4">{r.expiration_date ? new Date(r.expiration_date).toLocaleDateString() : "—"}</td>
                           <td className={`py-2 pr-4 ${d != null && d <= 0 ? "text-red-600" : ""}`}>{d != null ? d : "—"}</td>
                           <td className="py-2 pr-4">{r.contract_type?.replace(/-/g, " ")}</td>
-                          <td className="py-2 pr-4 text-green-600 font-medium">{r.max_gain != null ? `$${r.max_gain.toFixed(2)}` : "—"}</td>
-                          <td className="py-2 pr-4 text-red-600">{r.max_loss != null ? `$${r.max_loss.toFixed(2)}` : "—"}</td>
+                          <td className="py-2 pr-4 font-medium pl-value positive">{r.max_gain != null ? `$${r.max_gain.toFixed(2)}` : "—"}</td>
+                          <td className="py-2 pr-4 pl-value negative">{r.max_loss != null ? `$${r.max_loss.toFixed(2)}` : "—"}</td>
                           <td className="py-2 pr-4">
                             <div className="flex items-center gap-1">
                               <span className="font-medium">{r.ips_score != null ? `${Math.round(r.ips_score)}` : "—"}</span>
@@ -200,7 +200,7 @@ export default function ProspectiveTradesPage() {
                         </tr>
                         {isExpanded && r.ips_factor_scores && (
                           <tr>
-                            <td colSpan={10} className="py-4 px-4 bg-gray-50">
+                            <td colSpan={10} className="py-4 px-4" style={{ background: 'var(--glass-bg)' }}>
                               <FactorScorecard ipsFactorDetails={r.ips_factor_scores} />
                             </td>
                           </tr>

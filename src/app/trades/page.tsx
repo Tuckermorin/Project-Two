@@ -857,7 +857,7 @@ export default function TradesPage() {
             <div className="space-y-3">
               <div>
                 <Label className="text-sm">Choose IPS</Label>
-                <select className="w-full border rounded h-9 px-2 text-sm" value={aiDialog.ipsId ?? ''} onChange={(e)=> setAiDialog(p=> ({ ...p, ipsId: e.target.value || null }))}>
+                <select className="w-full border border-[var(--glass-border)] rounded h-9 px-2 text-sm bg-[var(--glass-bg)] text-[var(--text-primary)] focus:border-[var(--gradient-primary-start)] focus:outline-none" value={aiDialog.ipsId ?? ''} onChange={(e)=> setAiDialog(p=> ({ ...p, ipsId: e.target.value || null }))}>
                   <option value="">Select an IPS…</option>
                   {activeIPSs.map((ips:any)=> (
                     <option key={ips.id} value={ips.id}>{ips.name}</option>
@@ -1242,16 +1242,16 @@ export default function TradesPage() {
                                         </div>
                                       )}
                                       {Array.isArray(R.drivers) && R.drivers.length > 0 && (
-                                        <div className="text-xs text-gray-700">
-                                          <div className="text-xs font-semibold text-gray-600 mb-1">Top Drivers</div>
+                                        <div className="text-xs text-[var(--text-secondary)]">
+                                          <div className="text-xs font-semibold text-muted-foreground mb-1">Top Drivers</div>
                                           <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                             {R.drivers.slice(0, 6).map((driver, idx) => (
-                                              <div key={idx} className="rounded border border-gray-200 bg-white px-2 py-1 flex justify-between gap-2">
+                                              <div key={idx} className="rounded border border-[var(--glass-border)] bg-background px-2 py-1 flex justify-between gap-2">
                                                 <div>
-                                                  <div className="font-medium">{driver.code}</div>
-                                                  {driver.short_text && <div className="text-[11px] text-gray-500">{driver.short_text}</div>}
+                                                  <div className="font-medium text-foreground">{driver.code}</div>
+                                                  {driver.short_text && <div className="text-[11px] text-muted-foreground">{driver.short_text}</div>}
                                                 </div>
-                                                <div className="text-right text-[11px] text-gray-600">
+                                                <div className="text-right text-[11px] text-[var(--text-secondary)]">
                                                   <div>{driver.direction === "neg" ? "-" : "+"}</div>
                                                   <div>{driver.evidence_number != null ? Number(driver.evidence_number).toFixed(2) : "—"}</div>
                                                 </div>
@@ -1680,7 +1680,7 @@ export default function TradesPage() {
                   </div>
                   <div>
                     <Label className="text-sm">Method</Label>
-                    <select className="w-full border rounded h-9 px-2 text-sm" value={closingDialog.closeMethod} onChange={(e)=> setClosingDialog(prev => ({ ...prev, closeMethod: e.target.value }))}>
+                    <select className="w-full border border-[var(--glass-border)] rounded h-9 px-2 text-sm bg-[var(--glass-bg)] text-[var(--text-primary)] focus:border-[var(--gradient-primary-start)] focus:outline-none" value={closingDialog.closeMethod} onChange={(e)=> setClosingDialog(prev => ({ ...prev, closeMethod: e.target.value }))}>
                       {closeMethods.map(m=> <option key={m.key} value={m.key}>{m.label}</option>)}
                     </select>
                   </div>

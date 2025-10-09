@@ -12,9 +12,12 @@ import {
   History,
   Home,
   UserCircle,
-  LogOut
+  LogOut,
+  Sun,
+  Moon
 } from 'lucide-react'
 import { useAuth } from '@/components/auth/auth-provider'
+import { useTheme } from '@/hooks/use-theme'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -37,17 +40,29 @@ const navigation = [
 export function Navigation() {
   const pathname = usePathname()
   const { user, signOut } = useAuth()
+  const { isDarkMode, toggleTheme } = useTheme()
 
   return (
-    <nav className="bg-white shadow-sm border-b">
+    <nav className="mb-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between h-16">
+        <div
+          className="flex justify-between h-16 items-center"
+          style={{
+            background: 'var(--glass-bg)',
+            backdropFilter: 'blur(10px)',
+            WebkitBackdropFilter: 'blur(10px)',
+            borderRadius: '20px',
+            border: '1px solid var(--glass-border)',
+            padding: '0 20px',
+            marginTop: '20px'
+          }}
+        >
           <div className="flex">
             <div className="flex-shrink-0 flex items-center">
-              <BarChart3 className="h-8 w-8 text-blue-600" />
-              <span className="ml-2 text-xl font-bold text-gray-900">TenXiv</span>
+              <BarChart3 className="h-8 w-8" style={{ color: 'var(--gradient-primary-start)' }} />
+              <span className="ml-2 text-xl font-bold gradient-text-primary">TenXiv</span>
             </div>
-            <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
+            <div className="hidden sm:ml-6 sm:flex sm:space-x-1">
               {navigation.map((item) => {
                 const Icon = item.icon
                 return (
@@ -55,11 +70,14 @@ export function Navigation() {
                     key={item.name}
                     href={item.href}
                     className={cn(
-                      'inline-flex items-center px-1 pt-1 border-b-2 text-sm font-medium',
+                      'inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-all',
                       pathname === item.href
-                        ? 'border-blue-500 text-gray-900'
-                        : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700'
+                        ? 'bg-[var(--glass-bg-hover)] border-b-2 border-[var(--gradient-primary-start)]'
+                        : 'hover:bg-[var(--glass-bg)]'
                     )}
+                    style={{
+                      color: pathname === item.href ? 'var(--text-primary)' : 'var(--text-secondary)'
+                    }}
                   >
                     <Icon className="h-4 w-4 mr-2" />
                     {item.name}
@@ -68,7 +86,21 @@ export function Navigation() {
               })}
             </div>
           </div>
-          <div className="hidden sm:flex items-center gap-4">
+          <div className="hidden sm:flex items-center gap-3">
+            {/* Theme Toggle */}
+            <button
+              onClick={toggleTheme}
+              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg transition-all"
+              style={{
+                background: 'var(--glass-bg)',
+                border: '1px solid var(--glass-border)',
+                color: 'var(--text-primary)'
+              }}
+            >
+              {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+              <span className="text-sm">{isDarkMode ? 'Light' : 'Dark'}</span>
+            </button>
+
             {user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -77,7 +109,7 @@ export function Navigation() {
                     <span className="text-sm">{user.email}</span>
                   </Button>
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
+                <DropdownMenuContent align="end" className="w-56 glass-card">
                   <DropdownMenuLabel>My Account</DropdownMenuLabel>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem asChild>
@@ -87,7 +119,7 @@ export function Navigation() {
                     </Link>
                   </DropdownMenuItem>
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => signOut()} className="cursor-pointer text-red-600">
+                  <DropdownMenuItem onClick={() => signOut()} className="cursor-pointer" style={{ color: 'var(--text-negative)' }}>
                     <LogOut className="mr-2 h-4 w-4" />
                     Sign out
                   </DropdownMenuItem>
@@ -97,13 +129,18 @@ export function Navigation() {
               <>
                 <Link
                   href="/login"
-                  className="inline-flex items-center rounded-md border border-blue-600 px-3 py-1.5 text-sm font-medium text-blue-600 hover:bg-blue-50"
+                  className="inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium transition-all"
+                  style={{
+                    border: '1px solid var(--glass-border)',
+                    background: 'var(--glass-bg)',
+                    color: 'var(--text-primary)'
+                  }}
                 >
                   Login
                 </Link>
                 <Link
                   href="/signup"
-                  className="inline-flex items-center rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700"
+                  className="inline-flex items-center rounded-lg px-4 py-2 text-sm font-medium text-white transition-all gradient-bg-primary shadow-md hover:shadow-lg"
                 >
                   Sign up
                 </Link>

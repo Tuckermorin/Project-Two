@@ -255,13 +255,13 @@ export function IPSFactorSelector({
             <div className="overflow-y-auto h-[600px] space-y-6 pr-2">
               {Object.entries(factorsByCategory).map(([category, factors]) => (
                 <div key={category}>
-                  <h4 className="font-semibold text-gray-900 mb-3 text-sm uppercase tracking-wide sticky top-0 bg-white pb-2">
+                  <h4 className="font-semibold text-foreground mb-3 text-sm uppercase tracking-wide sticky top-0 bg-background pb-2">
                     {category}
                   </h4>
                   <div className="space-y-2">
                     {factors.map(factor => (
                       <TooltipProvider key={factor.id}>
-                        <div className="flex items-start gap-2 p-2 hover:bg-gray-50 rounded-md transition-colors">
+                        <div className="flex items-start gap-2 p-2 hover:bg-muted/40 rounded-md transition-colors">
                           <Checkbox
                             id={factor.id}
                             checked={selectedFactors.has(factor.name)}
@@ -319,14 +319,14 @@ export function IPSFactorSelector({
                 selectedFactorsList.map(factor => {
                   const config = factorConfigurations[factor.name];
                   return (
-                    <div key={factor.id} className="border rounded-lg p-4 bg-white shadow-sm">
+                    <div key={factor.id} className="border border-[var(--glass-border)] rounded-lg p-4 bg-background shadow-sm">
                       <div className="flex items-start justify-between mb-3">
                         <div className="flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="font-medium text-gray-900 text-sm">{factor.name}</span>
+                            <span className="font-medium text-foreground text-sm">{factor.name}</span>
                             {getCollectionMethodBadge(factor)}
                           </div>
-                          <p className="text-xs text-gray-500 mt-1">{factor.category}</p>
+                          <p className="text-xs text-muted-foreground mt-1">{factor.category}</p>
                         </div>
                         <button
                           onClick={() => toggleFactor(factor.name)}

@@ -109,7 +109,7 @@ export function ManualFactorsPanel({ factors, values, onChange }: ManualProps) {
                   </div>
                 ) : f.inputType === "select" && f.options ? (
                   <select
-                    className="w-full border rounded px-2 py-2 bg-background"
+                    className="w-full border border-[var(--glass-border)] rounded px-2 py-2 bg-[var(--glass-bg)] text-[var(--text-primary)] focus:border-[var(--gradient-primary-start)] focus:outline-none"
                     value={String(current)}
                     onChange={(e) => onChange(f.key, e.target.value)}
                   >

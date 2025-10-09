@@ -179,7 +179,7 @@ export function IPSPerformanceTracker() {
           </CardTitle>
         </CardHeader>
         <CardContent className="py-6">
-          <div className="flex items-center justify-center gap-2 text-sm text-gray-600">
+          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading IPS performance…
           </div>
@@ -218,9 +218,9 @@ export function IPSPerformanceTracker() {
         </CardHeader>
         <CardContent>
           <div className="text-center py-4">
-            <AlertCircle className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-            <p className="text-sm font-medium mb-2">No IPS Configurations</p>
-            <p className="text-xs text-gray-500 mb-3">
+            <AlertCircle className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+            <p className="text-sm font-medium mb-2 text-foreground">No IPS Configurations</p>
+            <p className="text-xs text-muted-foreground mb-3">
               Create an Investment Policy Statement to track performance.
             </p>
             <Button asChild variant="default" size="sm" className="w-full">
@@ -267,36 +267,36 @@ export function IPSPerformanceTracker() {
       </CardHeader>
       <CardContent className="space-y-4">
         {showEmptyState ? (
-          <div className="bg-gray-50 rounded-lg p-3 text-center text-sm text-gray-600">
+          <div className="bg-muted/40 rounded-lg p-3 text-center text-sm text-muted-foreground">
             No closed trades yet for {selectedIps.name}. Once you record a close, metrics will appear here.
           </div>
         ) : (
           <div className="grid grid-cols-2 gap-3 text-sm">
-            <div className="bg-gray-50 rounded-lg p-3">
-              <div className="text-xs text-gray-500">Win Rate</div>
-              <div className="text-lg font-semibold">{winRate.toFixed(1)}%</div>
+            <div className="bg-muted/40 rounded-lg p-3">
+              <div className="text-xs text-muted-foreground">Win Rate</div>
+              <div className="text-lg font-semibold text-foreground">{winRate.toFixed(1)}%</div>
             </div>
-            <div className="bg-gray-50 rounded-lg p-3">
-              <div className="text-xs text-gray-500">Total Trades</div>
-              <div className="text-lg font-semibold">{stats.totalTrades}</div>
+            <div className="bg-muted/40 rounded-lg p-3">
+              <div className="text-xs text-muted-foreground">Total Trades</div>
+              <div className="text-lg font-semibold text-foreground">{stats.totalTrades}</div>
             </div>
-            <div className="bg-gray-50 rounded-lg p-3 flex flex-col gap-1">
-              <div className="flex items-center justify-between text-xs text-gray-500">
+            <div className="bg-muted/40 rounded-lg p-3 flex flex-col gap-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>Highest Win</span>
                 <Trophy className="h-4 w-4 text-green-500" />
               </div>
-              <div className="text-lg font-semibold text-green-600">{formatPL(stats.best)}</div>
+              <div className="text-lg font-semibold text-green-600 dark:text-green-400">{formatPL(stats.best)}</div>
             </div>
-            <div className="bg-gray-50 rounded-lg p-3 flex flex-col gap-1">
-              <div className="flex items-center justify-between text-xs text-gray-500">
+            <div className="bg-muted/40 rounded-lg p-3 flex flex-col gap-1">
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
                 <span>Largest Loss</span>
                 <ArrowDownCircle className="h-4 w-4 text-red-500" />
               </div>
-              <div className="text-lg font-semibold text-red-600">{formatPL(stats.worst)}</div>
+              <div className="text-lg font-semibold text-red-600 dark:text-red-400">{formatPL(stats.worst)}</div>
             </div>
-            <div className="bg-gray-50 rounded-lg p-3 col-span-2">
-              <div className="text-xs text-gray-500">Total Realized P/L</div>
-              <div className={`text-lg font-semibold ${stats.totalPL >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            <div className="bg-muted/40 rounded-lg p-3 col-span-2">
+              <div className="text-xs text-muted-foreground">Total Realized P/L</div>
+              <div className={`text-lg font-semibold ${stats.totalPL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                 {formatPL(stats.totalPL)}
               </div>
             </div>

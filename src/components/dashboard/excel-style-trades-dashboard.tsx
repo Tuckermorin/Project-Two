@@ -445,12 +445,12 @@ export default function ExcelStyleTradesDashboard() {
         return currencyFormatter.format(value)
       case 'currentPL': {
         if (typeof value !== 'number') return '-'
-        const className = value >= 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'
+        const className = value >= 0 ? 'pl-value positive' : 'pl-value negative'
         return <span className={className}>{currencyFormatter.format(value)}</span>
       }
       case 'currentPLPercent': {
         if (typeof value !== 'number') return '-'
-        const className = value >= 0 ? 'text-green-600 font-semibold' : 'text-red-600 font-semibold'
+        const className = value >= 0 ? 'pl-percentage positive' : 'pl-percentage negative'
         return <span className={className}>{percentFormatter.format(value)}%</span>
       }
       case 'percentOfCredit':
@@ -468,20 +468,20 @@ export default function ExcelStyleTradesDashboard() {
         const tag = String(value).toUpperCase()
         const exitSignal = trade.exitSignal
 
-        // Determine color based on status and exit signal type
-        let cls: string
+        // Determine badge class based on status and exit signal type
+        let badgeClass: string
         if (exitSignal?.shouldExit && exitSignal.type === 'profit') {
           // Exit at profit: green
-          cls = 'bg-green-100 text-green-800 border-green-200'
+          badgeClass = 'status-badge good'
         } else if (tag === 'EXIT') {
           // Exit (loss or other): red
-          cls = 'bg-red-100 text-red-800 border-red-200'
+          badgeClass = 'status-badge exit'
         } else if (tag === 'GOOD') {
-          // Good status: light blue
-          cls = 'bg-blue-100 text-blue-800 border-blue-200'
+          // Good status
+          badgeClass = 'status-badge good'
         } else {
           // Watch: yellow
-          cls = 'bg-yellow-100 text-yellow-800 border-yellow-200'
+          badgeClass = 'status-badge watch'
         }
 
         if (exitSignal?.shouldExit) {
@@ -492,10 +492,10 @@ export default function ExcelStyleTradesDashboard() {
           return (
             <Popover>
               <PopoverTrigger asChild>
-                <Badge className={`${cls} border cursor-pointer hover:opacity-80 flex items-center gap-1`}>
+                <span className={`${badgeClass} cursor-pointer hover:opacity-80 inline-flex items-center gap-1`}>
                   {icon}
                   {tag}
-                </Badge>
+                </span>
               </PopoverTrigger>
               <PopoverContent className="w-64">
                 <div className="space-y-2">
@@ -505,10 +505,10 @@ export default function ExcelStyleTradesDashboard() {
                      exitSignal.type === 'loss' ? 'Stop Loss Signal' :
                      'Time Exit Signal'}
                   </div>
-                  <div className="text-xs text-gray-600">
+                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                     {exitSignal.reason}
                   </div>
-                  <div className="text-xs font-medium text-gray-700 mt-2">
+                  <div className="text-xs font-medium mt-2" style={{ color: 'var(--text-primary)' }}>
                     Consider closing this position
                   </div>
                 </div>
@@ -517,7 +517,7 @@ export default function ExcelStyleTradesDashboard() {
           )
         }
 
-        return <Badge className={`${cls} border`}>{tag}</Badge>
+        return <span className={badgeClass}>{tag}</span>
       }
       case 'deltaShortLeg':
       case 'theta':
@@ -554,7 +554,7 @@ export default function ExcelStyleTradesDashboard() {
           <CardTitle>Current Trades</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="text-center py-12 text-gray-600">Loading active trades…</div>
+          <div className="text-center py-12" style={{ color: 'var(--text-secondary)' }}>Loading active trades…</div>
         </CardContent>
       </Card>
     )
@@ -575,9 +575,9 @@ export default function ExcelStyleTradesDashboard() {
         </CardHeader>
         <CardContent>
           <div className="text-center py-12">
-            <AlertCircle className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-            <h3 className="text-lg font-semibold mb-2">No Active Trades</h3>
-            <p className="text-gray-600 mb-4">Start by adding your first paper trade to track.</p>
+            <AlertCircle className="h-12 w-12 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
+            <h3 className="text-lg font-semibold mb-2" style={{ color: 'var(--text-primary)' }}>No Active Trades</h3>
+            <p className="mb-4" style={{ color: 'var(--text-secondary)' }}>Start by adding your first paper trade to track.</p>
             <Button onClick={() => (window.location.href = '/trades')}>
               Add Your First Trade
             </Button>
@@ -593,7 +593,7 @@ export default function ExcelStyleTradesDashboard() {
       <CardHeader className="flex flex-row items-center justify-between">
         <div>
           <CardTitle>Current Trades</CardTitle>
-          <p className="text-sm text-gray-600 mt-1">
+          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
             {processedTrades.length} active {processedTrades.length === 1 ? 'trade' : 'trades'}
           </p>
         </div>
@@ -651,14 +651,14 @@ export default function ExcelStyleTradesDashboard() {
         </div>
 
         {/* Table */}
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse border border-gray-200 text-sm">
+        <div className="overflow-x-auto trades-table-container">
+          <table className="w-full border-collapse trades-table text-sm">
             <thead>
-              <tr className="bg-gray-50">
+              <tr>
                 {columnsToShow.map((column) => (
-                  <th 
+                  <th
                     key={column.key}
-                    className="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
+                    className="px-3 py-2 text-left font-medium cursor-pointer"
                     onClick={() => handleSort(column.key)}
                   >
                     <div className="flex items-center">
@@ -668,7 +668,7 @@ export default function ExcelStyleTradesDashboard() {
                   </th>
                 ))}
                 {!showIPS && (
-                  <th className="border border-gray-200 px-3 py-2 text-left font-medium text-gray-700">
+                  <th className="px-3 py-2 text-left font-medium">
                     Actions
                   </th>
                 )}
@@ -676,23 +676,22 @@ export default function ExcelStyleTradesDashboard() {
             </thead>
             <tbody>
               {processedTrades.map((trade, index) => (
-                <tr 
-                  key={trade.id} 
-                  className={`hover:bg-gray-50 ${index % 2 === 0 ? 'bg-white' : 'bg-gray-25'}`}
+                <tr
+                  key={trade.id}
                 >
                   {columnsToShow.map((column) => {
                     const cellValue = trade[column.key]
                     return (
                       <td
                         key={column.key}
-                        className="border border-gray-200 px-3 py-2"
+                        className="px-3 py-2"
                       >
                         {formatValue(cellValue, column, trade)}
                       </td>
                     )
                   })}
                   {!showIPS && (
-                    <td className="border border-gray-200 px-3 py-2">
+                    <td className="px-3 py-2">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -753,10 +752,10 @@ export default function ExcelStyleTradesDashboard() {
         </DialogHeader>
         {closing.trade && (
           <div className="space-y-4">
-            <div className="flex items-start justify-between gap-3 rounded-md border bg-gray-50 p-3">
+            <div className="flex items-start justify-between gap-3 rounded-md p-3" style={{ border: '1px solid var(--glass-border)', background: 'var(--glass-bg)' }}>
               <div>
                 <Label htmlFor="move-to-action-needed" className="text-sm font-medium">Move to Action Needed</Label>
-                <p className="text-xs text-gray-500">Keep the trade open while you finalize close-out details later.</p>
+                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Keep the trade open while you finalize close-out details later.</p>
               </div>
               <Checkbox
                 id="move-to-action-needed"
@@ -765,7 +764,7 @@ export default function ExcelStyleTradesDashboard() {
               />
             </div>
             <div className="space-y-3">
-              <div className="text-sm text-gray-600">{closing.trade.name}</div>
+              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>{closing.trade.name}</div>
               <div>
                 <Label className="text-sm">Close Date</Label>
                 <Input type="date" value={closing.date} onChange={(e)=> setClosing(prev => ({ ...prev, date: e.target.value }))} />
@@ -792,7 +791,7 @@ export default function ExcelStyleTradesDashboard() {
                   onChange={(e)=> setClosing(prev => ({ ...prev, costToClose: e.target.value }))}
                   placeholder="e.g., 0.35"
                 />
-                <div className="text-xs text-gray-500 mt-1">Initial credit: ${closing.trade.creditReceived.toFixed(2)} • Contracts: {closing.trade.contracts}</div>
+                <div className="text-xs mt-1" style={{ color: 'var(--text-secondary)' }}>Initial credit: ${closing.trade.creditReceived.toFixed(2)} • Contracts: {closing.trade.contracts}</div>
               </div>
             </div>
           </div>
@@ -866,7 +865,7 @@ export default function ExcelStyleTradesDashboard() {
         <DialogHeader>
           <DialogTitle>Delete Trade</DialogTitle>
         </DialogHeader>
-        <p className="text-sm text-gray-600">
+        <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
           {`Are you sure you want to delete ${deleteDialog.trade?.name || 'this trade'}? This action cannot be undone.`}
         </p>
         <DialogFooter>

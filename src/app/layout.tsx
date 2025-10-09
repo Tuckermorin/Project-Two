@@ -5,6 +5,7 @@ import { Navigation } from '@/components/navigation'
 import { MarketDataProvider } from '@/components/data/MarketDataProvider'
 import { AuthProvider } from '@/components/auth/auth-provider'
 import { Toaster } from "@/components/ui/sonner"
+import { ThemeScript } from '@/components/theme-script'
 
 // Initialize scheduler on server startup
 import '@/lib/init-scheduler'
@@ -22,8 +23,11 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body className={inter.className}>
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <ThemeScript />
+      </head>
+      <body className={inter.className} suppressHydrationWarning>
         <AuthProvider>
           <MarketDataProvider>
             <Navigation />

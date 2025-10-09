@@ -738,7 +738,7 @@ const handleSaveIPS = async (ipsData: any) => {
         <div className="flex items-center justify-center min-h-[400px]">
           <div className="text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
-            <p className="text-gray-600">Loading IPS configurations...</p>
+            <p style={{ color: 'var(--text-secondary)' }}>Loading IPS configurations...</p>
           </div>
         </div>
       </div>
@@ -788,8 +788,8 @@ const handleSaveIPS = async (ipsData: any) => {
     return (
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-gray-900">{state.currentIPSId ? "Edit IPS" : "Create New IPS"}</h1>
-          <p className="text-gray-600 mt-2">Configure your trading rules and risk parameters</p>
+          <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>{state.currentIPSId ? "Edit IPS" : "Create New IPS"}</h1>
+          <p className="mt-2" style={{ color: 'var(--text-secondary)' }}>Configure your trading rules and risk parameters</p>
         </div>
 
         {renderStepIndicator()}
@@ -887,8 +887,8 @@ const handleSaveIPS = async (ipsData: any) => {
       <div className="mb-8">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">IPS Builder</h1>
-            <p className="text-gray-600 mt-2">Manage your Investment Policy Statements and trading rules</p>
+            <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>IPS Builder</h1>
+            <p className="mt-2" style={{ color: 'var(--text-secondary)' }}>Manage your Investment Policy Statements and trading rules</p>
           </div>
           <Button onClick={handleCreateNew} className="bg-blue-600 hover:bg-blue-700">
             <PlusCircle className="h-4 w-4 mr-2" />
@@ -901,25 +901,25 @@ const handleSaveIPS = async (ipsData: any) => {
           <Card>
             <CardContent className="p-6 text-center">
               <div className="text-2xl font-bold text-blue-600">{activeIPSs.length}</div>
-              <div className="text-sm text-gray-600">Active IPSs</div>
+              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Active IPSs</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-6 text-center">
               <div className="text-2xl font-bold text-green-600">0</div>
-              <div className="text-sm text-gray-600">Total Trades</div>
+              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Total Trades</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-6 text-center">
               <div className="text-2xl font-bold text-purple-600">0%</div>
-              <div className="text-sm text-gray-600">Avg Win Rate</div>
+              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Avg Win Rate</div>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="p-6 text-center">
               <div className="text-2xl font-bold text-orange-600">{availableStrategies.length}</div>
-              <div className="text-sm text-gray-600">Available Strategies</div>
+              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Available Strategies</div>
             </CardContent>
           </Card>
         </div>
@@ -942,8 +942,8 @@ const handleSaveIPS = async (ipsData: any) => {
             <CardHeader className="pb-3">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
-                  <CardTitle className="text-lg font-semibold text-gray-900 mb-1">{ips.name}</CardTitle>
-                  {ips.description && <p className="text-sm text-gray-600 line-clamp-2">{ips.description}</p>}
+                  <CardTitle className="text-lg font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>{ips.name}</CardTitle>
+                  {ips.description && <p className="text-sm line-clamp-2" style={{ color: 'var(--text-secondary)' }}>{ips.description}</p>}
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
@@ -985,8 +985,8 @@ const handleSaveIPS = async (ipsData: any) => {
               {ips.total_factors > 0 && (
                 <div className="mb-4">
                   <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs text-gray-600">Configuration</span>
-                    <span className="text-xs text-gray-600">{Math.round((Number(ips.active_factors) / Math.max(1, Number(ips.total_factors))) * 100)}%</span>
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Configuration</span>
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{Math.round((Number(ips.active_factors) / Math.max(1, Number(ips.total_factors))) * 100)}%</span>
                   </div>
                   <Progress value={(Number(ips.active_factors) / Math.max(1, Number(ips.total_factors))) * 100} className="h-2" />
                 </div>
@@ -995,16 +995,16 @@ const handleSaveIPS = async (ipsData: any) => {
               {/* Stats Grid */}
               <div className="grid grid-cols-2 gap-4 text-center py-3 border-t">
                 <div>
-                  <div className="text-lg font-semibold text-gray-900">{ips.total_factors ||  (ips.ips_factors?.length || 0)}</div>
-                  <div className="text-xs text-gray-600">Total Factors</div>
+                  <div className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{ips.total_factors ||  (ips.ips_factors?.length || 0)}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Total Factors</div>
                 </div>
                 <div>
-                  <div className="text-lg font-semibold text-gray-900">{ips.total_trades || 0}</div>
-                  <div className="text-xs text-gray-600">Trades</div>
+                  <div className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{ips.total_trades || 0}</div>
+                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Trades</div>
                 </div>
                 <div>
                   <div className="text-lg font-semibold text-green-600">{ips.win_rate ? `${Math.round(Number(ips.win_rate))}%` : "0%"}</div>
-                  <div className="text-xs text-gray-600">Win Rate</div>
+                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Win Rate</div>
                 </div>
               </div>
 
@@ -1028,9 +1028,9 @@ const handleSaveIPS = async (ipsData: any) => {
         {/* Empty state */}
         {displayedIPSs.length === 0 && (
           <div className="col-span-full text-center py-12">
-            <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">No IPSs found</h3>
-            <p className="text-gray-600 mb-4">
+            <FileText className="w-12 h-12 mx-auto mb-4" style={{ color: 'var(--text-tertiary)' }} />
+            <h3 className="text-lg font-medium mb-2" style={{ color: 'var(--text-primary)' }}>No IPSs found</h3>
+            <p className="mb-4" style={{ color: 'var(--text-secondary)' }}>
               {showInactive ? "You haven't created any IPSs yet." : "No active IPSs. Try showing inactive ones or create a new IPS."}
             </p>
             <Button onClick={handleCreateNew} className="bg-blue-600 hover:bg-blue-700">

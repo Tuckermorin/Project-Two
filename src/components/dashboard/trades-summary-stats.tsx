@@ -177,9 +177,9 @@ export default function TradesSummaryStats() {
               <div className="text-2xl font-bold text-green-900">{stats.activeTrades}</div>
               <div className="text-xs text-green-600">Active</div>
             </div>
-            <div className="text-center p-3 bg-gray-50 rounded-lg border border-gray-100">
-              <div className="text-2xl font-bold text-gray-900">{stats.closedTrades}</div>
-              <div className="text-xs text-gray-600">Closed</div>
+            <div className="text-center p-3 bg-muted/40 rounded-lg border border-[var(--glass-border)]">
+              <div className="text-2xl font-bold text-foreground">{stats.closedTrades}</div>
+              <div className="text-xs text-muted-foreground">Closed</div>
             </div>
           </div>
 
@@ -258,11 +258,11 @@ export default function TradesSummaryStats() {
               </div>
               {stats.activeTrades > 0 && (
                 <div className="flex justify-between items-center">
-                  <span className="text-sm text-gray-600 flex items-center gap-1">
+                  <span className="text-sm text-muted-foreground flex items-center gap-1">
                     <Calendar className="h-3 w-3" />
                     Avg DTE:
                   </span>
-                  <span className="font-semibold text-gray-900">
+                  <span className="font-semibold text-foreground">
                     {stats.avgDTE.toFixed(0)} days
                   </span>
                 </div>
