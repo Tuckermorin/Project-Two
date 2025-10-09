@@ -11,7 +11,11 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
-import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2, Columns3, TrendingUp, TrendingDown, Clock } from 'lucide-react'
+import { Separator } from '@/components/ui/separator'
+import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2, Columns3, TrendingUp, TrendingDown, Clock, X, Search, Pin, GripVertical } from 'lucide-react'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { dispatchTradesUpdated } from '@/lib/events'
 import {
   DropdownMenu,
@@ -25,7 +29,80 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { evaluateExitStrategy, type ExitSignal } from '@/lib/utils/watch-criteria-evaluator'
-import ActiveTradesSummary from './active-trades-summary'
+import TradeStatsCards from './trade-stats-cards'
+
+// Column definition
+interface Column {
+  key: string
+  label: string
+  category: 'Basic Info' | 'Performance' | 'Greeks' | 'Trade Details'
+}
+
+// Sortable Column Item Component
+interface SortableColumnItemProps {
+  column: Column
+  isVisible: boolean
+  isPinned: boolean
+  onToggleVisible: (checked: boolean) => void
+  onTogglePin: () => void
+}
+
+function SortableColumnItem({ column, isVisible, isPinned, onToggleVisible, onTogglePin }: SortableColumnItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: column.key })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center space-x-2 group p-2 rounded ${isDragging ? 'bg-blue-50 border border-blue-300' : ''}`}
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing p-1"
+        aria-label="Drag to reorder"
+      >
+        <GripVertical className="h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
+      </button>
+      <Checkbox
+        id={`col-${column.key}`}
+        checked={isVisible}
+        onCheckedChange={onToggleVisible}
+      />
+      <Label
+        htmlFor={`col-${column.key}`}
+        className="text-sm font-normal cursor-pointer flex-1"
+      >
+        {column.label}
+      </Label>
+      <button
+        onClick={onTogglePin}
+        className={`p-1 rounded transition-colors ${
+          isPinned
+            ? 'text-blue-600'
+            : 'text-gray-400 opacity-0 group-hover:opacity-100'
+        }`}
+        aria-label={isPinned ? 'Unpin column' : 'Pin column'}
+        title={isPinned ? 'Unpin column' : 'Pin column'}
+      >
+        <Pin className={`h-3.5 w-3.5 ${isPinned ? 'fill-current' : ''}`} />
+      </button>
+    </div>
+  )
+}
 
 // Trade data type
 interface Trade {
@@ -70,41 +147,42 @@ interface Trade {
 interface Column {
   key: string
   label: string
+  category: 'Basic Info' | 'Performance' | 'Greeks' | 'Trade Details'
 }
 
 // All available columns
 const allColumns: Column[] = [
-  { key: 'status', label: 'Status' },
-  { key: 'name', label: 'Name' },
-  { key: 'placed', label: 'Date Placed' },
-  { key: 'currentPrice', label: 'Stock Price' },
-  { key: 'currentSpreadPrice', label: 'Spread Price' },
-  { key: 'currentPL', label: 'Current P/L' },
-  { key: 'currentPLPercent', label: 'Current P/L %' },
-  { key: 'expDate', label: 'Exp Date' },
-  { key: 'dte', label: 'DTE' },
-  { key: 'contractType', label: 'Contract Type' },
-  { key: 'contracts', label: '# of Contracts' },
-  { key: 'shortStrike', label: 'Short Strike' },
-  { key: 'longStrike', label: 'Long Strike' },
-  { key: 'creditReceived', label: 'Credit Received' },
-  { key: 'spreadWidth', label: 'Spread Width' },
-  { key: 'maxGain', label: 'Max Gain' },
-  { key: 'maxLoss', label: 'Max Loss' },
-  { key: 'percentCurrentToShort', label: '% Current to Short' },
-  { key: 'deltaShortLeg', label: 'Delta (Short Leg)' },
-  { key: 'theta', label: 'Theta' },
-  { key: 'vega', label: 'Vega' },
-  { key: 'ivAtEntry', label: 'IV at Entry' },
-  { key: 'sector', label: 'Sector' },
-  { key: 'ipsScore', label: 'IPS Score' },
-  { key: 'dateClosed', label: 'Date Closed' },
-  { key: 'costToClose', label: 'Cost to close' },
-  { key: 'percentOfCredit', label: '% of credit' },
-  { key: 'creditPaid', label: 'Credit Paid' },
-  { key: 'plDollar', label: 'P/L ($)' },
-  { key: 'plPercent', label: 'P/L (%)' },
-  { key: 'notes', label: 'Notes' }
+  { key: 'status', label: 'Status', category: 'Basic Info' },
+  { key: 'name', label: 'Name', category: 'Basic Info' },
+  { key: 'placed', label: 'Date Placed', category: 'Basic Info' },
+  { key: 'currentPrice', label: 'Stock Price', category: 'Basic Info' },
+  { key: 'expDate', label: 'Exp Date', category: 'Basic Info' },
+  { key: 'dte', label: 'DTE', category: 'Basic Info' },
+  { key: 'contractType', label: 'Contract Type', category: 'Basic Info' },
+  { key: 'sector', label: 'Sector', category: 'Basic Info' },
+  { key: 'ipsScore', label: 'IPS Score', category: 'Basic Info' },
+  { key: 'currentSpreadPrice', label: 'Spread Price', category: 'Performance' },
+  { key: 'currentPL', label: 'Current P/L', category: 'Performance' },
+  { key: 'currentPLPercent', label: 'Current P/L %', category: 'Performance' },
+  { key: 'creditReceived', label: 'Credit Received', category: 'Performance' },
+  { key: 'maxGain', label: 'Max Gain', category: 'Performance' },
+  { key: 'maxLoss', label: 'Max Loss', category: 'Performance' },
+  { key: 'percentCurrentToShort', label: '% Current to Short', category: 'Performance' },
+  { key: 'percentOfCredit', label: '% of credit', category: 'Performance' },
+  { key: 'plDollar', label: 'P/L ($)', category: 'Performance' },
+  { key: 'plPercent', label: 'P/L (%)', category: 'Performance' },
+  { key: 'deltaShortLeg', label: 'Delta (Short Leg)', category: 'Greeks' },
+  { key: 'theta', label: 'Theta', category: 'Greeks' },
+  { key: 'vega', label: 'Vega', category: 'Greeks' },
+  { key: 'ivAtEntry', label: 'IV at Entry', category: 'Greeks' },
+  { key: 'contracts', label: '# of Contracts', category: 'Trade Details' },
+  { key: 'shortStrike', label: 'Short Strike', category: 'Trade Details' },
+  { key: 'longStrike', label: 'Long Strike', category: 'Trade Details' },
+  { key: 'spreadWidth', label: 'Spread Width', category: 'Trade Details' },
+  { key: 'dateClosed', label: 'Date Closed', category: 'Trade Details' },
+  { key: 'costToClose', label: 'Cost to close', category: 'Trade Details' },
+  { key: 'creditPaid', label: 'Credit Paid', category: 'Trade Details' },
+  { key: 'notes', label: 'Notes', category: 'Trade Details' }
 ]
 
 // Default visible columns
@@ -114,11 +192,57 @@ const defaultColumns = [
   'shortStrike', 'longStrike', 'creditReceived', 'percentCurrentToShort'
 ]
 
+// Preset interface
+interface ColumnPreset {
+  id: string
+  name: string
+  visible: string[]
+  pinned: string[]
+  order: string[]
+}
+
+// Default presets
+const defaultPresets: ColumnPreset[] = [
+  {
+    id: 'quick-view',
+    name: 'Quick View',
+    visible: ['status', 'name', 'currentPL', 'currentPLPercent', 'expDate', 'dte'],
+    pinned: ['status', 'name'],
+    order: allColumns.map(c => c.key)
+  },
+  {
+    id: 'detailed-view',
+    name: 'Detailed View',
+    visible: [
+      'status', 'name', 'placed', 'currentPrice', 'currentSpreadPrice', 'currentPL',
+      'currentPLPercent', 'expDate', 'dte', 'shortStrike', 'longStrike', 'creditReceived'
+    ],
+    pinned: ['status', 'name'],
+    order: allColumns.map(c => c.key)
+  },
+  {
+    id: 'greeks-focus',
+    name: 'Greeks Focus',
+    visible: [
+      'name', 'deltaShortLeg', 'theta', 'vega', 'ivAtEntry',
+      'currentPrice', 'expDate', 'dte', 'currentPL'
+    ],
+    pinned: ['name'],
+    order: allColumns.map(c => c.key)
+  }
+]
+
 export default function ExcelStyleTradesDashboard() {
   // State
   const [showIPS, setShowIPS] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState(new Set(defaultColumns))
   const [showColumnSelector, setShowColumnSelector] = useState(false)
+  const [columnSearchTerm, setColumnSearchTerm] = useState('')
+  const [pinnedColumns, setPinnedColumns] = useState<Set<string>>(new Set())
+  const [columnOrder, setColumnOrder] = useState<string[]>(allColumns.map(c => c.key))
+  const [presets, setPresets] = useState<ColumnPreset[]>(defaultPresets)
+  const [showSavePreset, setShowSavePreset] = useState(false)
+  const [presetName, setPresetName] = useState('')
   const [sortConfig, setSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null)
   const [filterText, setFilterText] = useState('')
   const [statusFilter, setStatusFilter] = useState<string>('')
@@ -361,6 +485,48 @@ export default function ExcelStyleTradesDashboard() {
     }
     load()
   }, [])
+
+  // Load pinned columns, column order, and presets from localStorage
+  useEffect(() => {
+    try {
+      const savedPinned = localStorage.getItem('tradeColumnPins')
+      if (savedPinned) {
+        setPinnedColumns(new Set(JSON.parse(savedPinned)))
+      }
+
+      const savedOrder = localStorage.getItem('tradeColumnOrder')
+      if (savedOrder) {
+        setColumnOrder(JSON.parse(savedOrder))
+      }
+
+      const savedPresets = localStorage.getItem('tradeColumnPresets')
+      if (savedPresets) {
+        const userPresets = JSON.parse(savedPresets)
+        setPresets([...defaultPresets, ...userPresets])
+      }
+    } catch (e) {
+      console.error('Failed to load column settings', e)
+    }
+  }, [])
+
+  // Save pinned columns to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('tradeColumnPins', JSON.stringify(Array.from(pinnedColumns)))
+    } catch (e) {
+      console.error('Failed to save pinned columns', e)
+    }
+  }, [pinnedColumns])
+
+  // Save column order to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('tradeColumnOrder', JSON.stringify(columnOrder))
+    } catch (e) {
+      console.error('Failed to save column order', e)
+    }
+  }, [columnOrder])
+
   const hasActiveIPS = false
   const activeIPSFactors: string[] = []
 
@@ -394,6 +560,139 @@ export default function ExcelStyleTradesDashboard() {
     
     return filtered
   }, [trades, filterText, statusFilter, sortConfig])
+
+  // Calculate trade statistics
+  const tradeStats = React.useMemo(() => {
+    const totalActive = processedTrades.length
+    let tradesGood = 0
+    let tradesOnWatch = 0
+    let tradesExit = 0
+    let totalCurrentPL = 0
+    let totalMaxProfit = 0
+    let totalMaxLoss = 0
+
+    processedTrades.forEach(trade => {
+      // Count by status
+      const status = String(trade.status).toUpperCase()
+      if (status === 'EXIT') {
+        tradesExit++
+      } else if (status === 'WATCH') {
+        tradesOnWatch++
+      } else if (status === 'GOOD') {
+        tradesGood++
+      }
+
+      // Sum financial metrics
+      totalCurrentPL += trade.currentPL || 0
+      totalMaxProfit += trade.maxGain || 0
+      totalMaxLoss += trade.maxLoss || 0
+    })
+
+    return {
+      totalActive,
+      tradesGood,
+      tradesOnWatch,
+      tradesExit,
+      totalCurrentPL,
+      totalMaxProfit,
+      totalMaxLoss
+    }
+  }, [processedTrades])
+
+  // Filter columns by search term and group by category, respecting column order
+  const filteredColumnsByCategory = React.useMemo(() => {
+    // Create a map for quick lookup
+    const columnMap = new Map(allColumns.map(col => [col.key, col]))
+
+    // Sort columns by the custom order
+    const orderedColumns = columnOrder
+      .map(key => columnMap.get(key))
+      .filter((col): col is Column => col !== undefined)
+
+    // Filter by search term
+    const filtered = orderedColumns.filter(col =>
+      col.label.toLowerCase().includes(columnSearchTerm.toLowerCase())
+    )
+
+    const categories: Record<string, Column[]> = {
+      'Basic Info': [],
+      'Performance': [],
+      'Greeks': [],
+      'Trade Details': []
+    }
+
+    filtered.forEach(col => {
+      categories[col.category].push(col)
+    })
+
+    return categories
+  }, [columnSearchTerm, columnOrder])
+
+  // Toggle pin on a column
+  const togglePinColumn = (columnKey: string) => {
+    setPinnedColumns(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(columnKey)) {
+        newSet.delete(columnKey)
+      } else {
+        newSet.add(columnKey)
+      }
+      return newSet
+    })
+  }
+
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  // Handle drag end
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+
+    if (over && active.id !== over.id) {
+      setColumnOrder((items) => {
+        const oldIndex = items.indexOf(active.id as string)
+        const newIndex = items.indexOf(over.id as string)
+        return arrayMove(items, oldIndex, newIndex)
+      })
+    }
+  }
+
+  // Load a preset
+  const loadPreset = (preset: ColumnPreset) => {
+    setVisibleColumns(new Set(preset.visible))
+    setPinnedColumns(new Set(preset.pinned))
+    setColumnOrder(preset.order)
+  }
+
+  // Save current configuration as a new preset
+  const saveAsPreset = () => {
+    if (!presetName.trim()) return
+
+    const newPreset: ColumnPreset = {
+      id: `custom-${Date.now()}`,
+      name: presetName.trim(),
+      visible: Array.from(visibleColumns),
+      pinned: Array.from(pinnedColumns),
+      order: columnOrder
+    }
+
+    const userPresets = presets.filter(p => !defaultPresets.some(dp => dp.id === p.id))
+    const updatedPresets = [...userPresets, newPreset]
+
+    try {
+      localStorage.setItem('tradeColumnPresets', JSON.stringify(updatedPresets))
+      setPresets([...defaultPresets, ...updatedPresets])
+      setPresetName('')
+      setShowSavePreset(false)
+    } catch (e) {
+      console.error('Failed to save preset', e)
+    }
+  }
 
   // Handle sort
   const handleSort = (key: string) => {
@@ -435,6 +734,8 @@ export default function ExcelStyleTradesDashboard() {
     if (value === null || value === undefined) return '-'
 
     switch(column.key) {
+      case 'name':
+        return <span className="font-semibold">{value}</span>
       case 'creditReceived':
       case 'costToClose':
       case 'creditPaid':
@@ -445,13 +746,23 @@ export default function ExcelStyleTradesDashboard() {
         return currencyFormatter.format(value)
       case 'currentPL': {
         if (typeof value !== 'number') return '-'
-        const className = value >= 0 ? 'pl-value positive' : 'pl-value negative'
-        return <span className={className}>{currencyFormatter.format(value)}</span>
+        const className = value >= 0 ? 'pl-value positive text-green-600 font-medium' : 'pl-value negative text-red-600 font-medium'
+        return (
+          <span className={className}>
+            {currencyFormatter.format(value)}
+          </span>
+        )
       }
       case 'currentPLPercent': {
         if (typeof value !== 'number') return '-'
-        const className = value >= 0 ? 'pl-percentage positive' : 'pl-percentage negative'
-        return <span className={className}>{percentFormatter.format(value)}%</span>
+        const className = value >= 0 ? 'pl-percentage positive text-green-600 font-medium' : 'pl-percentage negative text-red-600 font-medium'
+        const Icon = value >= 0 ? TrendingUp : TrendingDown
+        return (
+          <span className={`${className} inline-flex items-center gap-1`}>
+            {percentFormatter.format(value)}%
+            <Icon className="h-3 w-3" />
+          </span>
+        )
       }
       case 'percentOfCredit':
       case 'plPercent':
@@ -528,24 +839,42 @@ export default function ExcelStyleTradesDashboard() {
     }
   }
 
-  // Get columns to show based on IPS view
+  // Get columns to show based on IPS view, with pinned columns first
   const columnsToShow = React.useMemo(() => {
     if (showIPS && hasActiveIPS) {
       // Show IPS factor columns instead of trade columns
       return activeIPSFactors.map(factor => ({
         key: factor.toLowerCase().replace(/\s+/g, ''),
-        label: factor
+        label: factor,
+        category: 'Basic Info' as const
       }))
     }
 
     const filtered = allColumns.filter(col => visibleColumns.has(col.key))
-    const statusIndex = filtered.findIndex(col => col.key === 'status')
-    if (statusIndex > 0) {
-      const [statusColumn] = filtered.splice(statusIndex, 1)
-      filtered.unshift(statusColumn)
-    }
-    return filtered
-  }, [showIPS, hasActiveIPS, activeIPSFactors, visibleColumns])
+
+    // Separate pinned and unpinned columns
+    const pinned = filtered.filter(col => pinnedColumns.has(col.key))
+    const unpinned = filtered.filter(col => !pinnedColumns.has(col.key))
+
+    // Return pinned columns first, then unpinned
+    return [...pinned, ...unpinned]
+  }, [showIPS, hasActiveIPS, activeIPSFactors, visibleColumns, pinnedColumns])
+
+  // Calculate cumulative widths for sticky positioning
+  const stickyOffsets = React.useMemo(() => {
+    const offsets: Record<string, number> = {}
+    let cumulativeWidth = 0
+
+    columnsToShow.forEach((col) => {
+      if (pinnedColumns.has(col.key)) {
+        offsets[col.key] = cumulativeWidth
+        // Default width, will be updated if we implement resizing
+        cumulativeWidth += 150
+      }
+    })
+
+    return offsets
+  }, [columnsToShow, pinnedColumns])
 
   if (loading && trades.length === 0) {
     return (
@@ -626,8 +955,7 @@ export default function ExcelStyleTradesDashboard() {
       </CardHeader>
 
       <CardContent>
-        {/* Active Trades Summary */}
-        <ActiveTradesSummary />
+        <TradeStatsCards {...tradeStats} />
 
         {/* Filters */}
         <div className="flex gap-4 mb-4">
@@ -655,18 +983,31 @@ export default function ExcelStyleTradesDashboard() {
           <table className="w-full border-collapse trades-table text-sm">
             <thead>
               <tr>
-                {columnsToShow.map((column) => (
-                  <th
-                    key={column.key}
-                    className="px-3 py-2 text-left font-medium cursor-pointer"
-                    onClick={() => handleSort(column.key)}
-                  >
-                    <div className="flex items-center">
-                      {column.label}
-                      {getSortIcon(column.key)}
-                    </div>
-                  </th>
-                ))}
+                {columnsToShow.map((column) => {
+                  const isPinned = pinnedColumns.has(column.key)
+                  const stickyStyle = isPinned ? {
+                    position: 'sticky' as const,
+                    left: `${stickyOffsets[column.key] || 0}px`,
+                    zIndex: 10,
+                    background: 'var(--glass-bg)',
+                    boxShadow: '2px 0 4px rgba(0, 0, 0, 0.1)'
+                  } : {}
+
+                  return (
+                    <th
+                      key={column.key}
+                      className="px-3 py-2 text-left font-medium cursor-pointer"
+                      style={stickyStyle}
+                      onClick={() => handleSort(column.key)}
+                    >
+                      <div className="flex items-center gap-1">
+                        {column.label}
+                        {getSortIcon(column.key)}
+                        {isPinned && <Pin className="h-3 w-3 text-blue-600 fill-current ml-1" />}
+                      </div>
+                    </th>
+                  )
+                })}
                 {!showIPS && (
                   <th className="px-3 py-2 text-left font-medium">
                     Actions
@@ -678,20 +1019,31 @@ export default function ExcelStyleTradesDashboard() {
               {processedTrades.map((trade, index) => (
                 <tr
                   key={trade.id}
+                  className="group hover:bg-[var(--glass-bg-hover)] transition-colors hover:border-l-2 hover:border-l-blue-500"
                 >
                   {columnsToShow.map((column) => {
                     const cellValue = trade[column.key]
+                    const isPinned = pinnedColumns.has(column.key)
+                    const stickyStyle = isPinned ? {
+                      position: 'sticky' as const,
+                      left: `${stickyOffsets[column.key] || 0}px`,
+                      zIndex: 9,
+                      background: index % 2 === 0 ? 'rgba(255, 255, 255, 0.04)' : 'transparent',
+                      boxShadow: '2px 0 4px rgba(0, 0, 0, 0.1)'
+                    } : {}
+
                     return (
                       <td
                         key={column.key}
                         className="px-3 py-2"
+                        style={stickyStyle}
                       >
                         {formatValue(cellValue, column, trade)}
                       </td>
                     )
                   })}
                   {!showIPS && (
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -892,7 +1244,50 @@ export default function ExcelStyleTradesDashboard() {
           <DialogTitle>Select Columns to Display</DialogTitle>
         </DialogHeader>
         <div className="space-y-4">
-          <div className="flex gap-2">
+          {/* Search Input */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
+            <Input
+              placeholder="Search columns..."
+              value={columnSearchTerm}
+              onChange={(e) => setColumnSearchTerm(e.target.value)}
+              className="pl-9 pr-9"
+            />
+            {columnSearchTerm && (
+              <button
+                onClick={() => setColumnSearchTerm('')}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                aria-label="Clear search"
+              >
+                <X className="h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
+              </button>
+            )}
+          </div>
+
+          {/* Presets and Quick Actions */}
+          <div className="flex gap-2 flex-wrap items-center">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline">
+                  Load Preset
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                {presets.map((preset) => (
+                  <DropdownMenuItem key={preset.id} onClick={() => loadPreset(preset)}>
+                    {preset.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowSavePreset(true)}
+            >
+              Save as Preset
+            </Button>
+            <Separator orientation="vertical" className="h-6" />
             <Button
               size="sm"
               variant="outline"
@@ -914,35 +1309,103 @@ export default function ExcelStyleTradesDashboard() {
             >
               Reset to Default
             </Button>
+            <div className="ml-auto text-xs flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
+              <span>{visibleColumns.size} visible</span>
+              <span>•</span>
+              <span>{pinnedColumns.size} pinned</span>
+              <span>•</span>
+              <span>{allColumns.length} total</span>
+            </div>
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            {allColumns.map((column) => (
-              <div key={column.key} className="flex items-center space-x-2">
-                <Checkbox
-                  id={`col-${column.key}`}
-                  checked={visibleColumns.has(column.key)}
-                  onCheckedChange={(checked) => {
-                    const newSet = new Set(visibleColumns)
-                    if (checked) {
-                      newSet.add(column.key)
-                    } else {
-                      newSet.delete(column.key)
-                    }
-                    setVisibleColumns(newSet)
-                  }}
-                />
-                <Label
-                  htmlFor={`col-${column.key}`}
-                  className="text-sm font-normal cursor-pointer"
-                >
-                  {column.label}
-                </Label>
-              </div>
-            ))}
-          </div>
+
+          {/* Columns by Category with Drag & Drop */}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <div className="space-y-4">
+              {Object.entries(filteredColumnsByCategory).map(([category, columns]) => {
+                if (columns.length === 0) return null
+                const columnKeys = columns.map(c => c.key)
+                return (
+                  <div key={category}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{category}</h3>
+                      <Separator className="flex-1" />
+                    </div>
+                    <SortableContext items={columnKeys} strategy={verticalListSortingStrategy}>
+                      <div className="space-y-1">
+                        {columns.map((column) => (
+                          <SortableColumnItem
+                            key={column.key}
+                            column={column}
+                            isVisible={visibleColumns.has(column.key)}
+                            isPinned={pinnedColumns.has(column.key)}
+                            onToggleVisible={(checked) => {
+                              const newSet = new Set(visibleColumns)
+                              if (checked) {
+                                newSet.add(column.key)
+                              } else {
+                                newSet.delete(column.key)
+                              }
+                              setVisibleColumns(newSet)
+                            }}
+                            onTogglePin={() => togglePinColumn(column.key)}
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </div>
+                )
+              })}
+            </div>
+          </DndContext>
         </div>
         <DialogFooter>
           <Button onClick={() => setShowColumnSelector(false)}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Save Preset Dialog */}
+    <Dialog open={showSavePreset} onOpenChange={setShowSavePreset}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Save Column Preset</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="preset-name">Preset Name</Label>
+            <Input
+              id="preset-name"
+              placeholder="Enter preset name..."
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && presetName.trim()) {
+                  saveAsPreset()
+                }
+              }}
+            />
+          </div>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            This will save your current column visibility, pinning, and order configuration.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => {
+            setShowSavePreset(false)
+            setPresetName('')
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={saveAsPreset}
+            disabled={!presetName.trim()}
+          >
+            Save Preset
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

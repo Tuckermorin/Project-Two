@@ -10,7 +10,12 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { ArrowUpDown, ArrowUp, ArrowDown, Filter, Eye, EyeOff, Settings2, AlertCircle, History, Trash2, RefreshCw, Loader2, MoreVertical } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Separator } from '@/components/ui/separator'
+import { ArrowUpDown, ArrowUp, ArrowDown, Filter, Eye, EyeOff, Settings2, AlertCircle, History, Trash2, RefreshCw, Loader2, MoreVertical, X, Search, Pin, GripVertical, TrendingUp, TrendingDown } from 'lucide-react'
+import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
 import { dispatchTradesUpdated, TRADES_UPDATED_EVENT } from '@/lib/events'
 import {
   DropdownMenu,
@@ -18,6 +23,79 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+
+// Column definition
+interface Column {
+  key: string
+  label: string
+  category: 'Basic Info' | 'Performance' | 'Greeks' | 'Trade Details'
+}
+
+// Sortable Column Item Component
+interface SortableColumnItemProps {
+  column: Column
+  isVisible: boolean
+  isPinned: boolean
+  onToggleVisible: (checked: boolean) => void
+  onTogglePin: () => void
+}
+
+function SortableColumnItem({ column, isVisible, isPinned, onToggleVisible, onTogglePin }: SortableColumnItemProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: column.key })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`flex items-center space-x-2 group p-2 rounded ${isDragging ? 'bg-blue-50 border border-blue-300' : ''}`}
+    >
+      <button
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing p-1"
+        aria-label="Drag to reorder"
+      >
+        <GripVertical className="h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
+      </button>
+      <Checkbox
+        id={`col-${column.key}`}
+        checked={isVisible}
+        onCheckedChange={onToggleVisible}
+      />
+      <Label
+        htmlFor={`col-${column.key}`}
+        className="text-sm font-normal cursor-pointer flex-1"
+      >
+        {column.label}
+      </Label>
+      <button
+        onClick={onTogglePin}
+        className={`p-1 rounded transition-colors ${
+          isPinned
+            ? 'text-blue-600'
+            : 'text-gray-400 opacity-0 group-hover:opacity-100'
+        }`}
+        aria-label={isPinned ? 'Unpin column' : 'Pin column'}
+        title={isPinned ? 'Unpin column' : 'Pin column'}
+      >
+        <Pin className={`h-3.5 w-3.5 ${isPinned ? 'fill-current' : ''}`} />
+      </button>
+    </div>
+  )
+}
 
 // Historic trade data type
 interface HistoricTrade {
@@ -58,52 +136,46 @@ interface HistoricTrade {
   [key: string]: any // For dynamic IPS factor columns
 }
 
-// Column definition
-interface Column {
-  key: string
-  label: string
-}
-
-// All available columns for historic trades
+// All available columns for historic trades with categories
 const allHistoricColumns: Column[] = [
-  { key: 'name', label: 'Name' },
-  { key: 'placed', label: 'Date Placed' },
-  { key: 'closedDate', label: 'Date Closed' },
-  { key: 'closedPrice', label: 'Closed Price' },
-  { key: 'contractType', label: 'Contract Type' },
-  { key: 'contracts', label: '# of Contracts' },
-  { key: 'shortStrike', label: 'Short Strike' },
-  { key: 'longStrike', label: 'Long Strike' },
-  { key: 'creditReceived', label: 'Credit Received' },
-  { key: 'premiumAtClose', label: 'Premium at Close' },
-  { key: 'actualPL', label: 'Actual P/L ($)' },
-  { key: 'actualPLPercent', label: 'Actual P/L (%)' },
-  { key: 'maxGain', label: 'Max Gain' },
-  { key: 'maxLoss', label: 'Max Loss' },
-  { key: 'deltaShortLeg', label: 'Delta at Entry' },
-  { key: 'deltaAtClose', label: 'Delta at Close' },
-  { key: 'theta', label: 'Theta at Entry' },
-  { key: 'thetaAtClose', label: 'Theta at Close' },
-  { key: 'vega', label: 'Vega at Entry' },
-  { key: 'vegaAtClose', label: 'Vega at Close' },
-  { key: 'gamma', label: 'Gamma at Entry' },
-  { key: 'gammaAtClose', label: 'Gamma at Close' },
-  { key: 'rho', label: 'Rho at Entry' },
-  { key: 'rhoAtClose', label: 'Rho at Close' },
-  { key: 'ivAtEntry', label: 'IV at Entry' },
-  { key: 'ivAtClose', label: 'IV at Close' },
-  { key: 'sector', label: 'Sector' },
-  { key: 'closingReason', label: 'Closing Reason' },
-  { key: 'ipsScore', label: 'IPS Score' },
-  { key: 'ipsAtClose', label: 'IPS at Close' },
-  { key: 'ipsName', label: 'IPS Name' },
-  { key: 'notes', label: 'Notes' },
-  { key: 'lessons', label: 'Lessons' }
+  { key: 'name', label: 'Name', category: 'Basic Info' },
+  { key: 'placed', label: 'Date Placed', category: 'Basic Info' },
+  { key: 'closedDate', label: 'Date Closed', category: 'Basic Info' },
+  { key: 'contractType', label: 'Contract Type', category: 'Basic Info' },
+  { key: 'sector', label: 'Sector', category: 'Basic Info' },
+  { key: 'ipsScore', label: 'IPS Score', category: 'Basic Info' },
+  { key: 'ipsAtClose', label: 'IPS at Close', category: 'Basic Info' },
+  { key: 'ipsName', label: 'IPS Name', category: 'Basic Info' },
+  { key: 'actualPL', label: 'Actual P/L ($)', category: 'Performance' },
+  { key: 'actualPLPercent', label: 'Actual P/L (%)', category: 'Performance' },
+  { key: 'creditReceived', label: 'Credit Received', category: 'Performance' },
+  { key: 'premiumAtClose', label: 'Premium at Close', category: 'Performance' },
+  { key: 'closedPrice', label: 'Closed Price', category: 'Performance' },
+  { key: 'maxGain', label: 'Max Gain', category: 'Performance' },
+  { key: 'maxLoss', label: 'Max Loss', category: 'Performance' },
+  { key: 'deltaShortLeg', label: 'Delta at Entry', category: 'Greeks' },
+  { key: 'deltaAtClose', label: 'Delta at Close', category: 'Greeks' },
+  { key: 'theta', label: 'Theta at Entry', category: 'Greeks' },
+  { key: 'thetaAtClose', label: 'Theta at Close', category: 'Greeks' },
+  { key: 'vega', label: 'Vega at Entry', category: 'Greeks' },
+  { key: 'vegaAtClose', label: 'Vega at Close', category: 'Greeks' },
+  { key: 'gamma', label: 'Gamma at Entry', category: 'Greeks' },
+  { key: 'gammaAtClose', label: 'Gamma at Close', category: 'Greeks' },
+  { key: 'rho', label: 'Rho at Entry', category: 'Greeks' },
+  { key: 'rhoAtClose', label: 'Rho at Close', category: 'Greeks' },
+  { key: 'ivAtEntry', label: 'IV at Entry', category: 'Greeks' },
+  { key: 'ivAtClose', label: 'IV at Close', category: 'Greeks' },
+  { key: 'contracts', label: '# of Contracts', category: 'Trade Details' },
+  { key: 'shortStrike', label: 'Short Strike', category: 'Trade Details' },
+  { key: 'longStrike', label: 'Long Strike', category: 'Trade Details' },
+  { key: 'closingReason', label: 'Closing Reason', category: 'Trade Details' },
+  { key: 'notes', label: 'Notes', category: 'Trade Details' },
+  { key: 'lessons', label: 'Lessons', category: 'Trade Details' }
 ]
 
 // Default visible columns for historic trades
 const defaultHistoricColumns = [
-  'name', 'placed', 'closedDate', 'closedPrice', 'contractType', 
+  'name', 'placed', 'closedDate', 'closedPrice', 'contractType',
   'shortStrike', 'longStrike', 'creditReceived', 'premiumAtClose',
   'actualPL', 'actualPLPercent', 'deltaShortLeg', 'deltaAtClose',
   'theta', 'thetaAtClose', 'closingReason', 'ipsScore', 'ipsName'
@@ -111,6 +183,46 @@ const defaultHistoricColumns = [
 
 // Simple view for historic trades
 const simpleHistoricColumns = ['name', 'closedDate', 'contractType', 'actualPL', 'actualPLPercent', 'closingReason', 'ipsScore']
+
+// Preset interface
+interface ColumnPreset {
+  id: string
+  name: string
+  visible: string[]
+  pinned: string[]
+  order: string[]
+}
+
+// Default presets for historic trades
+const defaultHistoricPresets: ColumnPreset[] = [
+  {
+    id: 'quick-view',
+    name: 'Quick View',
+    visible: ['name', 'closedDate', 'actualPL', 'actualPLPercent', 'closingReason', 'ipsScore'],
+    pinned: ['name'],
+    order: allHistoricColumns.map(c => c.key)
+  },
+  {
+    id: 'detailed-view',
+    name: 'Detailed View',
+    visible: [
+      'name', 'placed', 'closedDate', 'contractType', 'actualPL', 'actualPLPercent',
+      'creditReceived', 'premiumAtClose', 'shortStrike', 'longStrike', 'closingReason', 'ipsScore'
+    ],
+    pinned: ['name'],
+    order: allHistoricColumns.map(c => c.key)
+  },
+  {
+    id: 'greeks-analysis',
+    name: 'Greeks Analysis',
+    visible: [
+      'name', 'closedDate', 'deltaShortLeg', 'deltaAtClose', 'theta', 'thetaAtClose',
+      'vega', 'vegaAtClose', 'actualPL', 'actualPLPercent'
+    ],
+    pinned: ['name'],
+    order: allHistoricColumns.map(c => c.key)
+  }
+]
 
 const closeMethods = [
   { key: 'manual_close', label: 'Manual Close' },
@@ -124,10 +236,17 @@ export default function HistoricTradesDashboard() {
   const [viewMode, setViewMode] = useState<'simple' | 'detailed'>('simple')
   const [showIPS, setShowIPS] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState(new Set(defaultHistoricColumns))
+  const [showColumnSelector, setShowColumnSelector] = useState(false)
+  const [columnSearchTerm, setColumnSearchTerm] = useState('')
+  const [pinnedColumns, setPinnedColumns] = useState<Set<string>>(new Set())
+  const [columnOrder, setColumnOrder] = useState<string[]>(allHistoricColumns.map(c => c.key))
+  const [presets, setPresets] = useState<ColumnPreset[]>(defaultHistoricPresets)
+  const [showSavePreset, setShowSavePreset] = useState(false)
+  const [presetName, setPresetName] = useState('')
   const [sortConfig, setSortConfig] = useState<{key: string, direction: 'asc' | 'desc'} | null>(null)
   const [filterText, setFilterText] = useState('')
   const [reasonFilter, setReasonFilter] = useState<string>('')
-  
+
   const [trades, setTrades] = useState<HistoricTrade[]>([])
   const [loading, setLoading] = useState<boolean>(false)
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; trade: HistoricTrade | null }>({ open: false, trade: null })
@@ -228,6 +347,47 @@ export default function HistoricTradesDashboard() {
     window.addEventListener(TRADES_UPDATED_EVENT, handler)
     return () => window.removeEventListener(TRADES_UPDATED_EVENT, handler)
   }, [loadTrades])
+
+  // Load pinned columns, column order, and presets from localStorage
+  useEffect(() => {
+    try {
+      const savedPinned = localStorage.getItem('historicColumnPins')
+      if (savedPinned) {
+        setPinnedColumns(new Set(JSON.parse(savedPinned)))
+      }
+
+      const savedOrder = localStorage.getItem('historicColumnOrder')
+      if (savedOrder) {
+        setColumnOrder(JSON.parse(savedOrder))
+      }
+
+      const savedPresets = localStorage.getItem('historicColumnPresets')
+      if (savedPresets) {
+        const userPresets = JSON.parse(savedPresets)
+        setPresets([...defaultHistoricPresets, ...userPresets])
+      }
+    } catch (e) {
+      console.error('Failed to load column settings', e)
+    }
+  }, [])
+
+  // Save pinned columns to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('historicColumnPins', JSON.stringify(Array.from(pinnedColumns)))
+    } catch (e) {
+      console.error('Failed to save pinned columns', e)
+    }
+  }, [pinnedColumns])
+
+  // Save column order to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('historicColumnOrder', JSON.stringify(columnOrder))
+    } catch (e) {
+      console.error('Failed to save column order', e)
+    }
+  }, [columnOrder])
 
   async function handleDelete(id: string) {
     try {
@@ -363,6 +523,98 @@ export default function HistoricTradesDashboard() {
     return Array.from(set).sort()
   }, [trades])
 
+  // Filter columns by search term and group by category, respecting column order
+  const filteredColumnsByCategory = React.useMemo(() => {
+    const columnMap = new Map(allHistoricColumns.map(col => [col.key, col]))
+
+    const orderedColumns = columnOrder
+      .map(key => columnMap.get(key))
+      .filter((col): col is Column => col !== undefined)
+
+    const filtered = orderedColumns.filter(col =>
+      col.label.toLowerCase().includes(columnSearchTerm.toLowerCase())
+    )
+
+    const categories: Record<string, Column[]> = {
+      'Basic Info': [],
+      'Performance': [],
+      'Greeks': [],
+      'Trade Details': []
+    }
+
+    filtered.forEach(col => {
+      categories[col.category].push(col)
+    })
+
+    return categories
+  }, [columnSearchTerm, columnOrder])
+
+  // Toggle pin on a column
+  const togglePinColumn = (columnKey: string) => {
+    setPinnedColumns(prev => {
+      const newSet = new Set(prev)
+      if (newSet.has(columnKey)) {
+        newSet.delete(columnKey)
+      } else {
+        newSet.add(columnKey)
+      }
+      return newSet
+    })
+  }
+
+  // Drag and drop sensors
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  )
+
+  // Handle drag end
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event
+
+    if (over && active.id !== over.id) {
+      setColumnOrder((items) => {
+        const oldIndex = items.indexOf(active.id as string)
+        const newIndex = items.indexOf(over.id as string)
+        return arrayMove(items, oldIndex, newIndex)
+      })
+    }
+  }
+
+  // Load a preset
+  const loadPreset = (preset: ColumnPreset) => {
+    setVisibleColumns(new Set(preset.visible))
+    setPinnedColumns(new Set(preset.pinned))
+    setColumnOrder(preset.order)
+  }
+
+  // Save current configuration as a new preset
+  const saveAsPreset = () => {
+    if (!presetName.trim()) return
+
+    const newPreset: ColumnPreset = {
+      id: `custom-${Date.now()}`,
+      name: presetName.trim(),
+      visible: Array.from(visibleColumns),
+      pinned: Array.from(pinnedColumns),
+      order: columnOrder
+    }
+
+    const userPresets = presets.filter(p => !defaultHistoricPresets.some(dp => dp.id === p.id))
+    const updatedPresets = [...userPresets, newPreset]
+
+    try {
+      localStorage.setItem('historicColumnPresets', JSON.stringify(updatedPresets))
+      setPresets([...defaultHistoricPresets, ...updatedPresets])
+      setPresetName('')
+      setShowSavePreset(false)
+    } catch (e) {
+      console.error('Failed to save preset', e)
+    }
+  }
+
   // Handle sort
   const handleSort = (key: string) => {
     setSortConfig(current => {
@@ -380,6 +632,39 @@ export default function HistoricTradesDashboard() {
     if (sortConfig.direction === 'asc') return <ArrowUp className="h-3 w-3 ml-1" />
     return <ArrowDown className="h-3 w-3 ml-1" />
   }
+
+  // Get columns to show with pinned columns first
+  const columnsToShow = React.useMemo(() => {
+    if (showIPS && hasActiveIPS) {
+      return activeIPSFactors.map(factor => ({
+        key: factor.toLowerCase().replace(/\s+/g, ''),
+        label: factor,
+        category: 'Basic Info' as const
+      }))
+    }
+
+    const filtered = allHistoricColumns.filter(col => visibleColumns.has(col.key))
+
+    const pinned = filtered.filter(col => pinnedColumns.has(col.key))
+    const unpinned = filtered.filter(col => !pinnedColumns.has(col.key))
+
+    return [...pinned, ...unpinned]
+  }, [showIPS, hasActiveIPS, activeIPSFactors, visibleColumns, pinnedColumns])
+
+  // Calculate cumulative widths for sticky positioning
+  const stickyOffsets = React.useMemo(() => {
+    const offsets: Record<string, number> = {}
+    let cumulativeWidth = 0
+
+    columnsToShow.forEach((col) => {
+      if (pinnedColumns.has(col.key)) {
+        offsets[col.key] = cumulativeWidth
+        cumulativeWidth += 150
+      }
+    })
+
+    return offsets
+  }, [columnsToShow, pinnedColumns])
 
   const currencyFormatter = new Intl.NumberFormat('en-US', {
     style: 'currency',
@@ -403,14 +688,34 @@ export default function HistoricTradesDashboard() {
     if (value === null || value === undefined) return '-'
 
     switch(column.key) {
+      case 'name':
+        return <span className="font-semibold">{value}</span>
       case 'creditReceived':
       case 'premiumAtClose':
-      case 'actualPL':
       case 'maxGain':
       case 'maxLoss':
       case 'closedPrice':
         return currencyFormatter.format(value)
-      case 'actualPLPercent':
+      case 'actualPL': {
+        if (typeof value !== 'number') return '-'
+        const className = value >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'
+        return (
+          <span className={className}>
+            {currencyFormatter.format(value)}
+          </span>
+        )
+      }
+      case 'actualPLPercent': {
+        if (typeof value !== 'number') return '-'
+        const className = value >= 0 ? 'text-green-600 font-medium' : 'text-red-600 font-medium'
+        const Icon = value >= 0 ? TrendingUp : TrendingDown
+        return (
+          <span className={`${className} inline-flex items-center gap-1`}>
+            {percentFormatter.format(value)}%
+            <Icon className="h-3 w-3" />
+          </span>
+        )
+      }
       case 'ivAtEntry':
       case 'ivAtClose':
         return `${percentFormatter.format(value)}%`
@@ -437,20 +742,6 @@ export default function HistoricTradesDashboard() {
         return value
     }
   }
-
-  // Get columns to show based on view mode and IPS
-  const columnsToShow = React.useMemo(() => {
-    if (showIPS && hasActiveIPS) {
-      // Show IPS factor columns instead of trade columns
-      return activeIPSFactors.map(factor => ({
-        key: factor.toLowerCase().replace(/\s+/g, ''),
-        label: factor
-      }))
-    }
-    
-    const baseColumns = viewMode === 'simple' ? simpleHistoricColumns : Array.from(visibleColumns)
-    return allHistoricColumns.filter(col => baseColumns.includes(col.key))
-  }, [viewMode, showIPS, hasActiveIPS, activeIPSFactors, visibleColumns])
 
   if (loading && trades.length === 0) {
     return (
@@ -546,7 +837,7 @@ export default function HistoricTradesDashboard() {
             
             {/* Column selector */}
             {viewMode === 'detailed' && !showIPS && (
-              <Button variant="outline" size="sm">
+              <Button variant="outline" size="sm" onClick={() => setShowColumnSelector(true)}>
                 <Settings2 className="h-4 w-4 mr-2" />
                 Columns
               </Button>
@@ -629,18 +920,31 @@ export default function HistoricTradesDashboard() {
           <table className="w-full border-collapse trades-table text-sm">
             <thead>
               <tr>
-                {columnsToShow.map((column) => (
-                  <th
-                    key={column.key}
-                    className="px-3 py-2 text-left font-medium cursor-pointer"
-                    onClick={() => handleSort(column.key)}
-                  >
-                    <div className="flex items-center">
-                      {column.label}
-                      {getSortIcon(column.key)}
-                    </div>
-                  </th>
-                ))}
+                {columnsToShow.map((column) => {
+                  const isPinned = pinnedColumns.has(column.key)
+                  const stickyStyle = isPinned ? {
+                    position: 'sticky' as const,
+                    left: `${stickyOffsets[column.key] || 0}px`,
+                    zIndex: 10,
+                    background: 'var(--glass-bg)',
+                    boxShadow: '2px 0 4px rgba(0, 0, 0, 0.1)'
+                  } : {}
+
+                  return (
+                    <th
+                      key={column.key}
+                      className="px-3 py-2 text-left font-medium cursor-pointer"
+                      style={stickyStyle}
+                      onClick={() => handleSort(column.key)}
+                    >
+                      <div className="flex items-center gap-1">
+                        {column.label}
+                        {getSortIcon(column.key)}
+                        {isPinned && <Pin className="h-3 w-3 text-blue-600 fill-current ml-1" />}
+                      </div>
+                    </th>
+                  )
+                })}
                 {!showIPS && (
                   <th className="px-3 py-2 text-left font-medium">
                     Actions
@@ -652,23 +956,31 @@ export default function HistoricTradesDashboard() {
               {processedTrades.map((trade, index) => (
                 <tr
                   key={trade.id}
+                  className="group hover:bg-[var(--glass-bg-hover)] transition-colors hover:border-l-2 hover:border-l-blue-500"
                 >
                   {columnsToShow.map((column) => {
                     const cellValue = trade[column.key]
-                    const plClass = column.key === 'actualPL' || column.key === 'actualPLPercent'
-                      ? (trade[column.key] >= 0 ? 'pl-value positive' : 'pl-value negative')
-                      : ''
+                    const isPinned = pinnedColumns.has(column.key)
+                    const stickyStyle = isPinned ? {
+                      position: 'sticky' as const,
+                      left: `${stickyOffsets[column.key] || 0}px`,
+                      zIndex: 9,
+                      background: index % 2 === 0 ? 'rgba(255, 255, 255, 0.04)' : 'transparent',
+                      boxShadow: '2px 0 4px rgba(0, 0, 0, 0.1)'
+                    } : {}
+
                     return (
                       <td
                         key={column.key}
-                        className={`px-3 py-2 ${plClass}`}
+                        className="px-3 py-2"
+                        style={stickyStyle}
                       >
                         {formatValue(cellValue, column)}
                       </td>
                     )
                   })}
                   {!showIPS && (
-                    <td className="px-3 py-2">
+                    <td className="px-3 py-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button
@@ -849,6 +1161,179 @@ export default function HistoricTradesDashboard() {
             ) : (
               'Save Changes'
             )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Column Selector Dialog */}
+    <Dialog open={showColumnSelector} onOpenChange={setShowColumnSelector}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Select Columns to Display</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          {/* Search Input */}
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
+            <Input
+              placeholder="Search columns..."
+              value={columnSearchTerm}
+              onChange={(e) => setColumnSearchTerm(e.target.value)}
+              className="pl-9 pr-9"
+            />
+            {columnSearchTerm && (
+              <button
+                onClick={() => setColumnSearchTerm('')}
+                className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                aria-label="Clear search"
+              >
+                <X className="h-4 w-4" style={{ color: 'var(--text-tertiary)' }} />
+              </button>
+            )}
+          </div>
+
+          {/* Presets and Quick Actions */}
+          <div className="flex gap-2 flex-wrap items-center">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button size="sm" variant="outline">
+                  Load Preset
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent>
+                {presets.map((preset) => (
+                  <DropdownMenuItem key={preset.id} onClick={() => loadPreset(preset)}>
+                    {preset.name}
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setShowSavePreset(true)}
+            >
+              Save as Preset
+            </Button>
+            <Separator orientation="vertical" className="h-6" />
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setVisibleColumns(new Set(allHistoricColumns.map(c => c.key)))}
+            >
+              Select All
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setVisibleColumns(new Set())}
+            >
+              Deselect All
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setVisibleColumns(new Set(defaultHistoricColumns))}
+            >
+              Reset to Default
+            </Button>
+            <div className="ml-auto text-xs flex items-center gap-1" style={{ color: 'var(--text-secondary)' }}>
+              <span>{visibleColumns.size} visible</span>
+              <span>•</span>
+              <span>{pinnedColumns.size} pinned</span>
+              <span>•</span>
+              <span>{allHistoricColumns.length} total</span>
+            </div>
+          </div>
+
+          {/* Columns by Category with Drag & Drop */}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <div className="space-y-4">
+              {Object.entries(filteredColumnsByCategory).map(([category, columns]) => {
+                if (columns.length === 0) return null
+                const columnKeys = columns.map(c => c.key)
+                return (
+                  <div key={category}>
+                    <div className="flex items-center gap-2 mb-2">
+                      <h3 className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{category}</h3>
+                      <Separator className="flex-1" />
+                    </div>
+                    <SortableContext items={columnKeys} strategy={verticalListSortingStrategy}>
+                      <div className="space-y-1">
+                        {columns.map((column) => (
+                          <SortableColumnItem
+                            key={column.key}
+                            column={column}
+                            isVisible={visibleColumns.has(column.key)}
+                            isPinned={pinnedColumns.has(column.key)}
+                            onToggleVisible={(checked) => {
+                              const newSet = new Set(visibleColumns)
+                              if (checked) {
+                                newSet.add(column.key)
+                              } else {
+                                newSet.delete(column.key)
+                              }
+                              setVisibleColumns(newSet)
+                            }}
+                            onTogglePin={() => togglePinColumn(column.key)}
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </div>
+                )
+              })}
+            </div>
+          </DndContext>
+        </div>
+        <DialogFooter>
+          <Button onClick={() => setShowColumnSelector(false)}>Done</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    {/* Save Preset Dialog */}
+    <Dialog open={showSavePreset} onOpenChange={setShowSavePreset}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Save Column Preset</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div>
+            <Label htmlFor="preset-name">Preset Name</Label>
+            <Input
+              id="preset-name"
+              placeholder="Enter preset name..."
+              value={presetName}
+              onChange={(e) => setPresetName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && presetName.trim()) {
+                  saveAsPreset()
+                }
+              }}
+            />
+          </div>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            This will save your current column visibility, pinning, and order configuration.
+          </p>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => {
+            setShowSavePreset(false)
+            setPresetName('')
+          }}>
+            Cancel
+          </Button>
+          <Button
+            onClick={saveAsPreset}
+            disabled={!presetName.trim()}
+          >
+            Save Preset
           </Button>
         </DialogFooter>
       </DialogContent>
