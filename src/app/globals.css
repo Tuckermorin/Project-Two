@@ -628,3 +628,160 @@ body.light-mode {
     background: rgba(255, 255, 255, 0.85);
   }
 }
+
+/* ============================================
+   AI Trade Score Gamification Animations
+   ============================================ */
+
+/* Fire Effect (95-100%) */
+@keyframes fire-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 20px rgba(255, 107, 0, 0.8),
+      0 0 40px rgba(255, 0, 0, 0.6),
+      0 0 60px rgba(255, 0, 0, 0.4);
+    filter: brightness(1);
+  }
+  50% {
+    box-shadow:
+      0 0 30px rgba(255, 136, 0, 0.9),
+      0 0 60px rgba(255, 68, 0, 0.7),
+      0 0 90px rgba(255, 0, 0, 0.5);
+    filter: brightness(1.1);
+  }
+}
+
+.fire-effect {
+  animation: fire-glow 1.5s ease-in-out infinite;
+}
+
+/* Shimmer Effect (90-94%) */
+@keyframes shimmer-sweep {
+  0% {
+    transform: translateX(-100%) skewX(-15deg);
+  }
+  100% {
+    transform: translateX(200%) skewX(-15deg);
+  }
+}
+
+.shimmer-effect {
+  position: relative;
+  overflow: hidden;
+}
+
+.shimmer-effect::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.6),
+    transparent
+  );
+  animation: shimmer-sweep 2s infinite;
+  pointer-events: none;
+}
+
+/* Glow Pulse (80-89%) */
+@keyframes glow-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 10px rgba(59, 130, 246, 0.8),
+      0 0 20px rgba(59, 130, 246, 0.5);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow:
+      0 0 20px rgba(6, 182, 212, 1),
+      0 0 40px rgba(6, 182, 212, 0.7);
+    transform: scale(1.02);
+  }
+}
+
+.glow-pulse {
+  animation: glow-pulse 2s ease-in-out infinite;
+}
+
+/* Subtle Glow (70-79%) */
+.subtle-glow {
+  transition: all 0.3s ease;
+}
+
+.subtle-glow:hover {
+  box-shadow:
+    0 0 10px rgba(16, 185, 129, 0.6),
+    0 0 20px rgba(16, 185, 129, 0.4);
+  transform: translateY(-1px);
+}
+
+/* Standard (60-69%) */
+.standard {
+  transition: transform 0.2s ease;
+}
+
+.standard:hover {
+  transform: translateY(-1px);
+}
+
+/* Warning State (40-59%) */
+.warning-state {
+  transition: opacity 0.3s ease;
+}
+
+/* Accessibility - Respect reduced motion preference */
+@media (prefers-reduced-motion: reduce) {
+  .fire-effect,
+  .shimmer-effect::after,
+  .glow-pulse,
+  .subtle-glow,
+  .standard,
+  .warning-state {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .shimmer-effect::after {
+    display: none;
+  }
+}
+
+/* ============================================
+   Blob Animations for Login/Signup Pages
+   ============================================ */
+
+/* Floating blob animation */
+@keyframes blob {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  33% {
+    transform: translate(30px, -50px) scale(1.1);
+  }
+  66% {
+    transform: translate(-20px, 20px) scale(0.9);
+  }
+}
+
+.animate-blob {
+  animation: blob 7s infinite;
+}
+
+.animation-delay-2000 {
+  animation-delay: 2s;
+}
+
+.animation-delay-4000 {
+  animation-delay: 4s;
+}
+
+/* Respect reduced motion for blob animations */
+@media (prefers-reduced-motion: reduce) {
+  .animate-blob {
+    animation: none !important;
+  }
+}

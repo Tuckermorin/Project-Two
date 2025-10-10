@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight, List } from "lucide-react";
+import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight, List, Flame, Star, Award, Shield } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { FactorScorecard } from "@/components/trades/factor-scorecard";
 
@@ -232,7 +232,14 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
       }
 
       setRunId(json.runId || null);
-      setCands(json.selected || []);
+
+      // Map ips_score to score for gamification display
+      const mappedCands = (json.selected || []).map((c: any) => ({
+        ...c,
+        score: c.score ?? c.ips_score ?? c.composite_score
+      }));
+
+      setCands(mappedCands);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -471,13 +478,25 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                             <div className="text-xs text-muted-foreground mb-1">IPS Fit</div>
                             <Badge
                               className={
-                                c.score >= 70
-                                  ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200"
-                                  : c.score >= 50
-                                  ? "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200"
-                                  : "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
+                                c.score >= 95
+                                  ? "bg-gradient-to-r from-orange-500 to-red-500 text-white border-orange-400"
+                                  : c.score >= 90
+                                  ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white border-purple-400"
+                                  : c.score >= 80
+                                  ? "bg-gradient-to-r from-blue-500 to-cyan-500 text-white border-blue-400"
+                                  : c.score >= 70
+                                  ? "bg-gradient-to-r from-green-500 to-emerald-500 text-white border-green-400"
+                                  : c.score >= 60
+                                  ? "bg-gradient-to-r from-yellow-500 to-orange-500 text-white border-yellow-400"
+                                  : "bg-gradient-to-r from-orange-600 to-red-600 text-white border-orange-500 opacity-80"
                               }
                             >
+                              {c.score >= 95 ? <Flame className="w-3 h-3 mr-1 inline" /> :
+                               c.score >= 90 ? <Star className="w-3 h-3 mr-1 inline" /> :
+                               c.score >= 80 ? <Award className="w-3 h-3 mr-1 inline" /> :
+                               c.score >= 70 ? <TrendingUp className="w-3 h-3 mr-1 inline" /> :
+                               c.score >= 60 ? <Shield className="w-3 h-3 mr-1 inline" /> :
+                               <AlertCircle className="w-3 h-3 mr-1 inline" />}
                               {c.score.toFixed(0)}%
                             </Badge>
                           </div>
