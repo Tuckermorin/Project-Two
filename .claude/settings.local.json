@@ -63,7 +63,8 @@
       "WebFetch(domain:apewisdom.io)",
       "Bash(cmd.exe //c taskkill //PID 32388 //F)",
       "Bash(findstr:*)",
-      "Bash(cmd.exe:*)"
+      "Bash(cmd.exe:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []
