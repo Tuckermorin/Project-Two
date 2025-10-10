@@ -163,8 +163,8 @@ export class IVCacheService {
       console.log(`[IV Cache] Generated ${dates.length} trading dates`);
 
       let daysAdded = 0;
-      // Premium tier: 600 calls/minute = ~100ms per call
-      const alphaVantageDelay = parseInt(process.env.ALPHA_VANTAGE_MIN_DELAY_MS || '150');
+      // Premium tier: 600 calls/minute = ~100ms per call, use 10ms for safety margin
+      const alphaVantageDelay = parseInt(process.env.ALPHA_VANTAGE_MIN_DELAY_MS || '10');
 
       // Process dates in batches to respect rate limits
       for (const date of dates) {

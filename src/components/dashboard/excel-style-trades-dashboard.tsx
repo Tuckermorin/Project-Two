@@ -12,7 +12,7 @@ import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/separator'
-import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2, Columns3, TrendingUp, TrendingDown, Clock, X, Search, Pin, GripVertical } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2, Columns3, TrendingUp, TrendingDown, Clock, X, Search, Pin, GripVertical, RefreshCw } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -248,6 +248,8 @@ export default function ExcelStyleTradesDashboard() {
   const [statusFilter, setStatusFilter] = useState<string>('')
   const [trades, setTrades] = useState<Trade[]>([])
   const [loading, setLoading] = useState<boolean>(false)
+  const [refreshing, setRefreshing] = useState<boolean>(false)
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
   const LOCAL_CLOSURE_KEY = 'tenxiv:trade-closures'
 
   // Close/action-needed dialog state (local UI helper)
@@ -485,6 +487,131 @@ export default function ExcelStyleTradesDashboard() {
     }
     load()
   }, [])
+
+  // Refresh handler - updates all active trades with current market data
+  const handleRefresh = async () => {
+    try {
+      setRefreshing(true)
+      const res = await fetch('/api/trades/refresh-active', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        cache: 'no-store'
+      })
+
+      const data = await res.json()
+
+      if (res.ok && data.success) {
+        setLastRefresh(new Date())
+        // Reload trades from database (they've been updated by the refresh endpoint)
+        const tradesRes = await fetch(`/api/trades?status=active`, { cache: 'no-store' })
+        const tradesJson = await tradesRes.json()
+        if (tradesRes.ok) {
+          // Re-run the same normalization logic from the load function
+          const rows = (tradesJson?.data || []) as any[]
+          let quoteMap: Record<string, number> = {}
+          let sectorMap: Record<string, string> = {}
+          if (rows.length) {
+            const symbols = Array.from(new Set(rows.map((r:any)=>r.symbol))).join(',')
+            try {
+              const qRes = await fetch(`/api/market-data/quotes?symbols=${encodeURIComponent(symbols)}`)
+              const qJson = await qRes.json()
+              ;(qJson?.data || []).forEach((q:any)=>{
+                const price = Number(q.currentPrice ?? q.last ?? q.close ?? q.price)
+                if (!isNaN(price)) quoteMap[q.symbol] = price
+                if (q.sector) sectorMap[q.symbol] = q.sector
+              })
+            } catch {}
+          }
+
+          let ipsMap: Record<string, any> = {}
+          try {
+            const ipsRes = await fetch('/api/ips', { cache: 'no-store' })
+            const ipsJson = await ipsRes.json()
+            if (ipsRes.ok && Array.isArray(ipsJson)) {
+              ipsJson.forEach((ips: any) => { ipsMap[ips.id] = ips })
+            }
+          } catch {}
+
+          const normalized: Trade[] = rows.map((r:any) => {
+            const current = (quoteMap[r.symbol] ?? Number(r.current_price ?? 0)) || 0
+            const short = Number(r.short_strike ?? r.strike_price_short ?? 0) || 0
+            const percentToShort = short > 0 ? ((current - short) / short) * 100 : 0
+            const ipsScore = typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined
+            const watch = (ipsScore != null && ipsScore < 75) || (short > 0 && percentToShort < 5)
+
+            const ips = r.ips_id ? ipsMap[r.ips_id] : null
+            const spreadPrice = r.current_spread_price ? Number(r.current_spread_price) : undefined
+            const tradeForEval = {
+              current_price: spreadPrice,
+              entry_price: Number(r.entry_price ?? r.credit_received ?? 0),
+              credit_received: Number(r.credit_received ?? 0),
+              expiration_date: r.expiration_date,
+              max_gain: Number(r.max_gain ?? 0),
+              max_loss: Number(r.max_loss ?? 0),
+            }
+            const exitSignal = ips?.exit_strategies ? evaluateExitStrategy(tradeForEval, ips.exit_strategies) : null
+
+            let status: 'GOOD' | 'WATCH' | 'EXIT' = 'GOOD'
+            if (exitSignal?.shouldExit) {
+              status = 'EXIT'
+            } else if (watch) {
+              status = 'WATCH'
+            } else if (percentToShort < 0) {
+              status = 'EXIT'
+            }
+
+            const creditReceived = Number(r.credit_received ?? 0) || 0
+            const contracts = Number(r.number_of_contracts ?? r.contracts ?? 1) || 0
+            let currentPL: number | undefined
+            let currentPLPercent: number | undefined
+            if (spreadPrice !== undefined && creditReceived > 0) {
+              const plPerContract = creditReceived - spreadPrice
+              currentPL = plPerContract * contracts * 100
+              currentPLPercent = (plPerContract / creditReceived) * 100
+            }
+
+            return {
+              id: r.id,
+              name: r.name || r.symbol,
+              placed: r.entry_date || r.created_at || '',
+              currentPrice: current,
+              currentSpreadPrice: spreadPrice,
+              currentPL,
+              currentPLPercent,
+              expDate: r.expiration_date || '',
+              dte: r.expiration_date ? daysToExpiry(r.expiration_date) : 0,
+              contractType: toTitle(String(r.contract_type || '')),
+              contracts,
+              shortStrike: short,
+              longStrike: Number(r.long_strike ?? 0) || 0,
+              creditReceived,
+              spreadWidth: Number(r.spread_width ?? 0) || 0,
+              maxGain: Number(r.max_gain ?? 0) || 0,
+              maxLoss: Number(r.max_loss ?? 0) || 0,
+              percentCurrentToShort: percentToShort,
+              deltaShortLeg: Number(r.delta_short_leg ?? 0) || 0,
+              theta: Number(r.theta ?? 0) || 0,
+              vega: Number(r.vega ?? 0) || 0,
+              ivAtEntry: Number(r.iv_at_entry ?? 0) || 0,
+              sector: r.sector || sectorMap[r.symbol] || '-',
+              status,
+              ipsScore,
+              ipsName: r.ips_name ?? r.ips_configurations?.name ?? null,
+              plPercent: typeof r.pl_percent === 'number' ? Number(r.pl_percent) : undefined,
+              exitSignal,
+            } as Trade
+          })
+
+          setTrades(normalized.filter(t => t.dte > 0))
+          dispatchTradesUpdated({ type: 'full_refresh' })
+        }
+      }
+    } catch (error) {
+      console.error('Failed to refresh trades:', error)
+    } finally {
+      setRefreshing(false)
+    }
+  }
 
   // Load pinned columns, column order, and presets from localStorage
   useEffect(() => {
@@ -928,6 +1055,18 @@ export default function ExcelStyleTradesDashboard() {
         </div>
         
         <div className="flex gap-2">
+          {/* Refresh button */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={refreshing || loading}
+            title={lastRefresh ? `Last refreshed: ${lastRefresh.toLocaleTimeString()}` : 'Refresh all trades'}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
+            {refreshing ? 'Refreshing...' : 'Refresh'}
+          </Button>
+
           {/* IPS toggle */}
           <Button
             variant={showIPS ? "default" : "outline"}

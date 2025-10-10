@@ -1,4 +1,5 @@
 // src/app/page.tsx
+'use client'
 
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -11,6 +12,9 @@ import HistoricTradesDashboard from '@/components/dashboard/historic-trades-dash
 import { IPSPerformanceTracker } from '@/components/ips/ips-performance-tracker'
 import { MarketOverview } from '@/components/dashboard/market-overview'
 import TradesSummaryStats from '@/components/dashboard/trades-summary-stats'
+import { useAuth } from '@/components/auth/auth-provider'
+import { useEffect } from 'react'
+import { useRouter } from 'next/navigation'
 
 // Simplified Quick Start Component
 interface SimplifiedQuickStartProps {
@@ -84,6 +88,33 @@ function SimplifiedQuickStart({ hasIPS = false, watchlistCount = 0, tradeCount =
 
 // Main Dashboard Component
 export default function Dashboard() {
+  const { user, loading } = useAuth()
+  const router = useRouter()
+
+  // Redirect to login if not authenticated
+  useEffect(() => {
+    if (!loading && !user) {
+      window.location.href = '/login'
+    }
+  }, [user, loading])
+
+  // Show loading state while checking auth
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[var(--gradient-primary-start)] mx-auto"></div>
+          <p className="mt-4" style={{ color: 'var(--text-secondary)' }}>Loading...</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Don't render dashboard if not authenticated
+  if (!user) {
+    return null
+  }
+
   // TODO: Replace with actual data from your state management or API
   // These should come from your authentication context, database, or state management
   const dashboardData = {

@@ -44,8 +44,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         password,
       })
       if (error) throw error
-      router.push('/')
-      router.refresh()
+
+      // Force a hard redirect to ensure the dashboard loads
+      window.location.href = '/'
       return { error: null }
     } catch (error: any) {
       return { error }
@@ -70,8 +71,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signOut = async () => {
     await supabase.auth.signOut()
-    router.push('/login')
-    router.refresh()
+    // Force a hard redirect to login page
+    window.location.href = '/login'
   }
 
   return (

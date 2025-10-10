@@ -455,7 +455,7 @@ export class AlphaVantageClient {
 
   async getCompleteFundamentalData(symbol: string): Promise<FundamentalData> {
     console.log(`Fetching complete fundamental data for ${symbol}`);
-    const throttle = Number(process.env.ALPHA_VANTAGE_MIN_DELAY_MS || process.env.ALPHA_VANTAGE_THROTTLE_MS || 100);
+    const throttle = Number(process.env.ALPHA_VANTAGE_MIN_DELAY_MS || process.env.ALPHA_VANTAGE_THROTTLE_MS || 10);
 
     const fetchSafe = async <T>(label: string, fn: () => Promise<T>): Promise<T | null> => {
       try {

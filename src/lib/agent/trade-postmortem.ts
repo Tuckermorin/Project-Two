@@ -109,20 +109,54 @@ export async function analyzeTradePostMortem(
   const typedTrade = trade as ClosedTradeData;
 
   // Verify trade is closed
-  if (typedTrade.status !== "closed" || typedTrade.realized_pnl == null) {
-    throw new Error(`Trade ${tradeId} is not closed or missing P&L data`);
+  if (typedTrade.status !== "closed") {
+    throw new Error(`Trade ${tradeId} is not closed yet`);
+  }
+
+  // If realized_pnl is missing, try to calculate it from closure data
+  let realizedPnl = typedTrade.realized_pnl;
+  let realizedPlPercent = typedTrade.realized_pl_percent;
+
+  if (realizedPnl == null) {
+    // Fetch closure data to calculate P&L
+    const { data: closure } = await supabase
+      .from("trade_closures")
+      .select("*")
+      .eq("trade_id", tradeId)
+      .single();
+
+    if (closure?.realized_pl != null) {
+      realizedPnl = closure.realized_pl;
+      realizedPlPercent = closure.realized_pl_percent;
+    } else {
+      // Still no P&L - estimate from available data
+      const contractType = String(typedTrade.strategy_type || "").toLowerCase();
+      const credit = typedTrade.credit_received;
+      const costToClose = closure?.cost_to_close_per_spread;
+
+      if (credit != null && costToClose != null) {
+        const contracts = 1; // Default to 1 if not available
+        realizedPnl = (credit - costToClose) * contracts * 100;
+        realizedPlPercent = ((credit - costToClose) / credit) * 100;
+      } else {
+        // Set to 0 as fallback
+        console.warn(`[PostMortem] No P&L data available for trade ${tradeId}, using 0 as default`);
+        realizedPnl = 0;
+        realizedPlPercent = 0;
+      }
+    }
   }
 
   // Calculate trade metrics
   const entryDate = new Date(typedTrade.entry_date);
-  const exitDate = new Date(typedTrade.exit_date);
+  const exitDate = new Date(typedTrade.exit_date || typedTrade.closed_at);
   const daysHeld = Math.floor((exitDate.getTime() - entryDate.getTime()) / (1000 * 60 * 60 * 24));
-  const outcome: "win" | "loss" = typedTrade.realized_pnl > 0 ? "win" : "loss";
+  const outcome: "win" | "loss" = realizedPnl > 0 ? "win" : "loss";
 
   let creditsUsed = 0;
 
   console.log(
-    `[PostMortem] ${typedTrade.symbol} - ${outcome.toUpperCase()} (${daysHeld} days, P&L: $${typedTrade.realized_pnl})`
+    `[PostMortem] ${typedTrade.symbol} - ${outcome.toUpperCase()} (${daysHeld} days, P&L: $${realizedPnl.toFixed(2)})`
   );
 
   // Fetch historical context during trade period
@@ -172,13 +206,13 @@ export async function analyzeTradePostMortem(
     trade_id: tradeId,
     symbol: typedTrade.symbol,
     outcome,
-    realized_pnl: typedTrade.realized_pnl,
-    realized_pnl_percent: typedTrade.realized_pl_percent || 0,
+    realized_pnl: realizedPnl,
+    realized_pnl_percent: realizedPlPercent || 0,
     days_held: daysHeld,
     trade_lifecycle: {
       entry_context: `Entered ${typedTrade.strategy_type} on ${entryDate.toLocaleDateString()} with IPS score ${typedTrade.ips_score || "N/A"}%`,
       during_trade_events: lifecycleEvents,
-      exit_context: `Exited on ${exitDate.toLocaleDateString()} with ${outcome === "win" ? "profit" : "loss"} of $${typedTrade.realized_pnl} (${typedTrade.realized_pl_percent?.toFixed(1) || "N/A"}%)`,
+      exit_context: `Exited on ${exitDate.toLocaleDateString()} with ${outcome === "win" ? "profit" : "loss"} of $${realizedPnl.toFixed(2)} (${realizedPlPercent?.toFixed(1) || "N/A"}%)`,
     },
     lessons_learned: lessonsLearned,
     ips_effectiveness: ipsEffectiveness,
@@ -434,17 +468,22 @@ async function generateLessonsLearned(context: {
       whatDidntWork.push("Held through earnings - high risk event not properly managed");
     }
 
-    // What worked (damage control)
-    if (context.trade.realized_pnl > -(context.trade.credit_received || 100) * 0.5) {
+    // What worked (damage control) - only if we have valid P&L and credit data
+    const realizedPnl = context.trade.realized_pnl ?? 0;
+    const maxRisk = (context.trade.credit_received || 100);
+    if (realizedPnl > -(maxRisk * 0.5)) {
       whatWorked.push("Limited loss to less than max risk - good exit discipline");
     }
   }
 
   // Generate key insight using AI
+  const realizedPnl = context.trade.realized_pnl ?? 0;
+  const realizedPlPercent = context.trade.realized_pl_percent ?? 0;
+
   const prompt = `Analyze this completed trade and provide ONE key insight (1-2 sentences).
 
 Trade: ${context.trade.symbol} ${context.trade.strategy_type}
-Outcome: ${context.outcome.toUpperCase()} ($${context.trade.realized_pnl}, ${context.trade.realized_pl_percent?.toFixed(1)}%)
+Outcome: ${context.outcome.toUpperCase()} ($${realizedPnl.toFixed(2)}, ${realizedPlPercent.toFixed(1)}%)
 Days Held: ${context.daysHeld}
 IPS Score at Entry: ${context.trade.ips_score || "N/A"}%
 
@@ -532,12 +571,15 @@ async function generateAIPostMortem(context: {
   ipsEffectiveness: any;
   lifecycleEvents: any[];
 }): Promise<string> {
+  const realizedPnl = context.trade.realized_pnl ?? 0;
+  const realizedPlPercent = context.trade.realized_pl_percent ?? 0;
+
   const prompt = `You are a professional options trader conducting a post-mortem analysis. Write a comprehensive but concise summary (3-4 paragraphs).
 
 **Trade Summary:**
 - Symbol: ${context.trade.symbol}
 - Strategy: ${context.trade.strategy_type}
-- Outcome: ${context.outcome.toUpperCase()} - $${context.trade.realized_pnl} (${context.trade.realized_pl_percent?.toFixed(1)}%)
+- Outcome: ${context.outcome.toUpperCase()} - $${realizedPnl.toFixed(2)} (${realizedPlPercent.toFixed(1)}%)
 - Days Held: ${context.daysHeld}
 - Entry IPS Score: ${context.trade.ips_score || "N/A"}%
 
@@ -570,7 +612,7 @@ Be direct, data-driven, and actionable. This will be embedded in the knowledge b
     return analysis;
   } catch (error) {
     console.error("[PostMortem] Failed to generate AI analysis:", error);
-    return `Trade ${context.outcome} analysis: ${context.trade.symbol} ${context.trade.strategy_type} resulted in ${context.outcome === "win" ? "profit" : "loss"} of $${context.trade.realized_pnl} over ${context.daysHeld} days. ${context.lessonsLearned.key_insight}`;
+    return `Trade ${context.outcome} analysis: ${context.trade.symbol} ${context.trade.strategy_type} resulted in ${context.outcome === "win" ? "profit" : "loss"} of $${realizedPnl.toFixed(2)} over ${context.daysHeld} days. ${context.lessonsLearned.key_insight}`;
   }
 }
 
@@ -606,8 +648,20 @@ async function storePostMortem(
   tradeId: string,
   postMortem: TradePostMortem
 ): Promise<void> {
+  // Get user_id from the trade
+  const { data: trade, error: tradeError } = await supabase
+    .from("trades")
+    .select("user_id")
+    .eq("id", tradeId)
+    .single();
+
+  if (tradeError || !trade) {
+    throw new Error(`Cannot find trade ${tradeId} to get user_id`);
+  }
+
   const { error } = await supabase.from("trade_postmortems").insert({
     trade_id: tradeId,
+    user_id: trade.user_id,
     post_mortem_data: postMortem,
     created_at: postMortem.created_at,
   });
