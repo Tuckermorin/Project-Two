@@ -179,37 +179,37 @@ export default function ActiveTradesSummary() {
   const handleManualRefresh = async () => {
     try {
       setRefreshing(true)
-      toast.info('Updating options prices...', {
-        description: 'This may take a few moments',
+      toast.info('Refreshing all active trades...', {
+        description: 'Updating prices, spreads, P/L, and IPS factors',
         duration: 3000
       })
 
-      const response = await fetch('/api/trades/spread-prices', {
+      const response = await fetch('/api/trades/refresh-active', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({})
+        cache: 'no-store'
       })
 
       const data = await response.json()
 
       if (response.ok && data.success) {
-        toast.success(`Updated ${data.successful} of ${data.total} trades`, {
-          description: data.updatedAt ? `Last updated: ${new Date(data.updatedAt).toLocaleTimeString()}` : undefined
+        toast.success(`Refreshed ${data.summary.successful} of ${data.summary.total} trades`, {
+          description: `Updated: ${new Date(data.timestamp).toLocaleTimeString()}`
         })
 
         // Reload the summary with fresh data (no full page reload)
         await loadSummary()
 
         // Notify other components that trades were updated
-        dispatchTradesUpdated({ type: 'spread_prices_updated' })
+        dispatchTradesUpdated({ type: 'full_refresh' })
       } else {
-        toast.error('Failed to update prices', {
+        toast.error('Failed to refresh trades', {
           description: data.error || 'Please try again'
         })
       }
     } catch (error) {
       console.error('Manual refresh error:', error)
-      toast.error('Failed to update prices', {
+      toast.error('Failed to refresh trades', {
         description: 'Network error occurred'
       })
     } finally {

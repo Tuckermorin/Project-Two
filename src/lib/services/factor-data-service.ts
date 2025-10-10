@@ -40,23 +40,27 @@ class FactorDataService {
 
   /**
    * Fetch API factors for a given symbol and IPS configuration
+   * @param bypassCache - If true, skip cache and fetch fresh data (for manual refresh)
    */
   async fetchAPIFactors(
-    symbol: string, 
+    symbol: string,
     ipsId: string,
-    optionsContext?: OptionsRequestContext
+    optionsContext?: OptionsRequestContext,
+    bypassCache: boolean = false
   ): Promise<APIFactorResponse> {
     try {
-      console.log(`Fetching API factors for ${symbol} using IPS ${ipsId}`);
-      
-      // Try to get cached data first
+      console.log(`Fetching API factors for ${symbol} using IPS ${ipsId}${bypassCache ? ' (bypassing cache)' : ''}`);
+
+      // Try to get cached data first (unless bypassing)
       const contextSignature = optionsContext ? JSON.stringify(optionsContext) : 'default';
       const cacheKey = `api_factors_${symbol}_${ipsId}_${contextSignature}`;
-      const cached = this.getFromCache<APIFactorResponse>(cacheKey, 5 * 60 * 1000);
 
-      if (cached) {
-        console.log('Using cached API factor data');
-        return cached;
+      if (!bypassCache) {
+        const cached = this.getFromCache<APIFactorResponse>(cacheKey, 30 * 1000); // Reduced to 30 seconds
+        if (cached) {
+          console.log('Using cached API factor data');
+          return cached;
+        }
       }
 
       // Use the real API endpoint
@@ -67,7 +71,7 @@ class FactorDataService {
       const url = `/api/trades/factors?${params.toString()}`;
       console.log('Fetching from URL:', url);
 
-      const response = await fetch(url);
+      const response = await fetch(url, { cache: 'no-store' }); // Disable HTTP cache
       console.log('Response status:', response.status);
 
       const data = await response.json();
@@ -81,8 +85,8 @@ class FactorDataService {
           timestamp: new Date(data.data.timestamp)
         };
 
-        // Cache successful response
-        this.setCache(cacheKey, apiResponse, 5 * 60 * 1000); // 5 minute TTL
+        // Cache successful response (30 seconds instead of 5 minutes)
+        this.setCache(cacheKey, apiResponse, 30 * 1000); // 30 second TTL
         return apiResponse;
       } else if (data.success === false && data.data) {
         // Handle the case where success is false but data is present (e.g., no IPS ID)
