@@ -42,6 +42,12 @@ export function Navigation() {
   const { user, signOut } = useAuth()
   const { isDarkMode, toggleTheme } = useTheme()
 
+  // Hide navigation on auth pages
+  const isAuthPage = pathname === '/login' || pathname === '/signup'
+  if (isAuthPage) {
+    return null
+  }
+
   return (
     <nav className="mb-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

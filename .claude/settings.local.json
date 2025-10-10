@@ -64,7 +64,8 @@
       "Bash(cmd.exe //c taskkill //PID 32388 //F)",
       "Bash(findstr:*)",
       "Bash(cmd.exe:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT id, symbol, status, current_spread_price, current_spread_bid, current_spread_ask, credit_received, spread_price_updated_at FROM trades WHERE status = ''active'' LIMIT 3;\")"
     ],
     "deny": [],
     "ask": []
