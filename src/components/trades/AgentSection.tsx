@@ -13,6 +13,8 @@ import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight, List } from "lucide
 import { useAuth } from "@/components/auth/auth-provider";
 import { FactorScorecard } from "@/components/trades/factor-scorecard";
 import { AITradeScoreCard } from "@/components/trades/AITradeScoreCard";
+import { TradeTileCompact } from "@/components/trades/TradeTileCompact";
+import { TradeDetailsModal } from "@/components/trades/TradeDetailsModal";
 
 type Candidate = {
   id: string;
@@ -241,10 +243,10 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
     }
   }
 
-  const handleAddToProspective = async (candidate: Candidate) => {
+  const handleAddToProspective = async (candidate: Candidate, numContracts?: number) => {
     if (!runId) return;
 
-    const contracts = parseInt(numberOfContracts) || 1;
+    const contracts = numContracts || parseInt(numberOfContracts) || 1;
 
     // Auto-extract values from candidate data
     const shortLeg = candidate.contract_legs?.find(l => l.type === "SELL");
@@ -425,36 +427,38 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                   Sorted by IPS fit score
                 </div>
               </div>
-              <div className="space-y-3 max-h-[600px] overflow-y-auto">
-                {cands.slice(0, 10).map((c) => {
-                  // Extract IPS factor information for gamification
-                  const ipsFactors = c.detailed_analysis?.ips_factors || [];
-                  const passedFactors = ipsFactors
-                    .filter(f => f.status === 'pass')
-                    .map(f => f.name || f.factor_key || 'Unknown');
-                  const failedFactors = ipsFactors
-                    .filter(f => f.status === 'fail')
-                    .map(f => f.name || f.factor_key || 'Unknown');
+              {/* Compact Gamified Tiles Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto">
+                {cands.slice(0, 12).map((c) => {
+                  // Calculate DTE
+                  const getDTE = () => {
+                    if (!c.contract_legs || c.contract_legs.length === 0) return 0;
+                    const expiry = c.contract_legs[0].expiry;
+                    const expiryDate = new Date(expiry);
+                    const today = new Date();
+                    const diffTime = expiryDate.getTime() - today.getTime();
+                    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                  };
+
+                  // Get short and long strikes
+                  const shortLeg = c.contract_legs?.find(l => l.type === 'SELL');
+                  const longLeg = c.contract_legs?.find(l => l.type === 'BUY');
+                  const shortStrike = shortLeg?.strike || 0;
+                  const longStrike = longLeg?.strike || 0;
+                  const contractType = shortLeg?.right || 'P';
 
                   return (
-                    <AITradeScoreCard
+                    <TradeTileCompact
                       key={c.id}
-                      score={c.score || c.ips_score || c.composite_score || 0}
+                      score={c.ips_score || c.composite_score || c.score || 0}
                       symbol={c.symbol}
                       strategy={c.strategy}
-                      contractType={c.contract_legs?.map((l: any) =>
-                        `${l.type} ${l.right === 'P' ? 'Put' : 'Call'} $${l.strike}`
-                      ).join(' / ') || 'N/A'}
+                      shortStrike={shortStrike}
+                      longStrike={longStrike}
+                      dte={getDTE()}
                       entryPrice={c.entry_mid}
-                      maxProfit={c.max_profit}
-                      maxLoss={c.max_loss}
-                      probabilityOfProfit={c.est_pop ? c.est_pop * 100 : undefined}
-                      ipsFactors={{
-                        passed: passedFactors,
-                        failed: failedFactors,
-                      }}
-                      rationale={c.rationale}
-                      contractLegs={c.contract_legs}
+                      contractType={contractType === 'P' ? 'PUT' : 'CALL'}
+                      intelligenceAdjustments={c.intelligence_adjustments}
                       onViewDetails={() => {
                         setSelectedCandidate(c);
                         setNumberOfContracts("1");
@@ -469,8 +473,18 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
         </div>
       </CardContent>
 
-      {/* Trade Details Dialog */}
-      <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+      {/* Trade Details Modal with Alpha Intelligence */}
+      {selectedCandidate && (
+        <TradeDetailsModal
+          open={detailsDialogOpen}
+          onOpenChange={setDetailsDialogOpen}
+          candidate={selectedCandidate}
+          onAddToProspective={handleAddToProspective}
+        />
+      )}
+
+      {/* Old Dialog for Adding to Prospective Trades (kept for compatibility) */}
+      <Dialog open={false} onOpenChange={() => {}}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">

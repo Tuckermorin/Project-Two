@@ -240,10 +240,32 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
       let avNewsSentiment = null;
       try {
         const avClient = getAlphaVantageClient();
+        // Fetch without topic filtering to get all relevant news
         avNewsSentiment = await avClient.getNewsSentiment(symbol, 50);
-        console.log(`[PreFilterGeneral] ${symbol}: Alpha Vantage sentiment score=${avNewsSentiment.average_score?.toFixed(2)}, count=${avNewsSentiment.count}`);
+        console.log(`[PreFilterGeneral] ${symbol}: Alpha Vantage sentiment=${avNewsSentiment.sentiment_label} (${avNewsSentiment.average_score?.toFixed(2)}), articles=${avNewsSentiment.count} (${avNewsSentiment.positive}+/${avNewsSentiment.negative}-), relevance=${avNewsSentiment.avg_relevance?.toFixed(2)}`);
+
+        // Log topic-specific sentiment if available
+        if (avNewsSentiment.topic_sentiment) {
+          const topicSents = Object.entries(avNewsSentiment.topic_sentiment)
+            .slice(0, 3)
+            .map(([topic, score]) => `${topic}:${(score as number).toFixed(2)}`)
+            .join(', ');
+          if (topicSents) {
+            console.log(`[PreFilterGeneral] ${symbol}: Topic sentiment: ${topicSents}`);
+          }
+        }
       } catch (error) {
         console.warn(`[PreFilterGeneral] ${symbol}: Failed to fetch Alpha Vantage news sentiment:`, error);
+      }
+
+      // Fetch Insider Transactions (insider buy/sell activity)
+      let insiderActivity = null;
+      try {
+        const avClient = getAlphaVantageClient();
+        insiderActivity = await avClient.getInsiderTransactions(symbol);
+        console.log(`[PreFilterGeneral] ${symbol}: Insider activity: ${insiderActivity.transaction_count} transactions (${insiderActivity.acquisition_count} buys, ${insiderActivity.disposal_count} sells), buy/sell ratio=${insiderActivity.buy_ratio.toFixed(2)}, trend=${insiderActivity.activity_trend > 0 ? 'bullish' : insiderActivity.activity_trend < 0 ? 'bearish' : 'neutral'}`);
+      } catch (error) {
+        console.warn(`[PreFilterGeneral] ${symbol}: Failed to fetch insider transactions:`, error);
       }
 
       // Spread overview at root level so all AlphaVantage fields are accessible
@@ -258,6 +280,7 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
         news: newsSearch.results || [],
         social: socialSearch.results || [],
         av_news_sentiment: avNewsSentiment, // Alpha Vantage sentiment with actual scores
+        insider_activity: insiderActivity, // Insider buy/sell transactions
         reddit: redditData, // Reddit sentiment, mentions, velocity, trending rank
         timestamp: new Date().toISOString()
       };
@@ -631,47 +654,111 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
 
     console.log(`[FilterHighWeight] ${symbol}: Generated ${symbolCandidates.length} candidate spreads before filtering`);
 
-    // MEME STOCK DETECTION GUARDRAIL
-    // Check for viral meme stock activity before scoring
+    // ============================================================================
+    // SENTIMENT & INTELLIGENCE GUARDRAILS
+    // ============================================================================
     const generalData = state.generalData[symbol];
     const reddit = generalData?.reddit;
     const avNews = generalData?.av_news_sentiment;
+    const insider = generalData?.insider_activity;
 
+    // Guardrail 1: Viral Meme Stock Detection (Reddit)
     if (reddit) {
-      // Guardrail 1: Viral Meme Stock Detection
       const isMemeStock = reddit.trending_rank !== null && reddit.trending_rank <= 10 && reddit.mention_velocity > 100;
 
       if (isMemeStock) {
         console.log(`[FilterHighWeight] ⚠️  MEME STOCK DETECTED: ${symbol} (Rank: ${reddit.trending_rank}, Velocity: +${reddit.mention_velocity}%) - SKIPPING ALL CANDIDATES`);
         continue; // Skip all candidates for this symbol
       }
+    }
 
-      // Guardrail 2: Sentiment Divergence Warning
-      if (avNews && reddit.sentiment_score !== null) {
-        const newsSentiment = avNews.average_score || 0;
-        const redditSentiment = reddit.sentiment_score;
-        const divergence = Math.abs(newsSentiment - redditSentiment);
+    // Guardrail 2: Strongly Negative News Sentiment (Alpha Vantage)
+    if (avNews) {
+      const sentimentScore = avNews.average_score || 0;
+      const negativeArticles = avNews.negative || 0;
 
-        if (divergence > 0.5) {
-          console.log(`[FilterHighWeight] ⚠️  SENTIMENT DIVERGENCE: ${symbol} (News: ${newsSentiment.toFixed(2)}, Reddit: ${redditSentiment.toFixed(2)}) - Lowering scores by 10 points`);
+      // Block if strongly bearish with multiple negative articles
+      if (sentimentScore < -0.5 && avNews.count >= 5) {
+        console.log(`[FilterHighWeight] ⚠️  NEGATIVE NEWS CLUSTER: ${symbol} (sentiment=${sentimentScore.toFixed(2)}, ${negativeArticles} negative articles) - SKIPPING`);
+        continue;
+      }
 
-          // Mark all candidates with divergence warning
-          for (const candidate of symbolCandidates) {
-            candidate.sentiment_divergence = true;
-            candidate.sentiment_divergence_amount = divergence;
-          }
+      // Warn if moderately bearish
+      if (sentimentScore < -0.3 && negativeArticles >= 3) {
+        console.log(`[FilterHighWeight] ⚠️  BEARISH NEWS: ${symbol} (sentiment=${sentimentScore.toFixed(2)}) - Lowering scores by 15 points`);
+        for (const candidate of symbolCandidates) {
+          candidate.news_sentiment_warning = true;
+          candidate.news_sentiment_penalty = 15;
         }
       }
 
-      // Guardrail 3: High Velocity IV Expansion Signal
-      if (reddit.mention_velocity > 50) {
-        console.log(`[FilterHighWeight] 📈 IV EXPANSION SIGNAL: ${symbol} (+${reddit.mention_velocity}% mentions) - Wait 24-48h for better premium`);
-
-        // Add timing recommendation to all candidates
-        for (const candidate of symbolCandidates) {
-          candidate.reddit_timing_signal = 'WAIT_FOR_IV_EXPANSION';
-          candidate.reddit_velocity = reddit.mention_velocity;
+      // Check earnings-specific sentiment
+      if (avNews.topic_sentiment?.Earnings !== undefined) {
+        const earningsSent = avNews.topic_sentiment.Earnings;
+        if (earningsSent < -0.4) {
+          console.log(`[FilterHighWeight] ⚠️  NEGATIVE EARNINGS SENTIMENT: ${symbol} (${earningsSent.toFixed(2)}) - High risk period`);
+          for (const candidate of symbolCandidates) {
+            candidate.earnings_risk = true;
+          }
         }
+      }
+    }
+
+    // Guardrail 3: Heavy Insider Selling (Alpha Vantage)
+    if (insider && insider.transaction_count >= 5) {
+      const buyRatio = insider.buy_ratio || 0;
+      const trend = insider.activity_trend || 0;
+
+      // Block if heavy selling with negative trend
+      if (buyRatio < 0.3 && trend < -0.5) {
+        console.log(`[FilterHighWeight] ⚠️  HEAVY INSIDER SELLING: ${symbol} (buy/sell=${buyRatio.toFixed(2)}, trend=${trend.toFixed(2)}) - SKIPPING`);
+        continue;
+      }
+
+      // Warn if moderate selling
+      if (buyRatio < 0.5 && insider.disposal_count >= 3) {
+        console.log(`[FilterHighWeight] ⚠️  INSIDER SELLING DETECTED: ${symbol} (${insider.disposal_count} sells) - Lowering scores by 10 points`);
+        for (const candidate of symbolCandidates) {
+          candidate.insider_selling_warning = true;
+          candidate.insider_penalty = 10;
+        }
+      }
+
+      // Boost if strong insider buying
+      if (buyRatio > 2.0 && trend > 0.5) {
+        console.log(`[FilterHighWeight] ✅ INSIDER BUYING: ${symbol} (buy/sell=${buyRatio.toFixed(2)}) - Boosting scores by 10 points`);
+        for (const candidate of symbolCandidates) {
+          candidate.insider_buying_boost = true;
+          candidate.insider_boost = 10;
+        }
+      }
+    }
+
+    // Guardrail 4: Sentiment Divergence (News vs Reddit)
+    if (avNews && reddit && reddit.sentiment_score !== null) {
+      const newsSentiment = avNews.average_score || 0;
+      const redditSentiment = reddit.sentiment_score;
+      const divergence = Math.abs(newsSentiment - redditSentiment);
+
+      if (divergence > 0.5) {
+        console.log(`[FilterHighWeight] ⚠️  SENTIMENT DIVERGENCE: ${symbol} (News: ${newsSentiment.toFixed(2)}, Reddit: ${redditSentiment.toFixed(2)}) - Lowering scores by 10 points`);
+
+        // Mark all candidates with divergence warning
+        for (const candidate of symbolCandidates) {
+          candidate.sentiment_divergence = true;
+          candidate.sentiment_divergence_amount = divergence;
+        }
+      }
+    }
+
+    // Guardrail 5: High Velocity IV Expansion Signal (Reddit)
+    if (reddit && reddit.mention_velocity > 50) {
+      console.log(`[FilterHighWeight] 📈 IV EXPANSION SIGNAL: ${symbol} (+${reddit.mention_velocity}% mentions) - Wait 24-48h for better premium`);
+
+      // Add timing recommendation to all candidates
+      for (const candidate of symbolCandidates) {
+        candidate.reddit_timing_signal = 'WAIT_FOR_IV_EXPANSION';
+        candidate.reddit_velocity = reddit.mention_velocity;
       }
     }
 
@@ -708,9 +795,31 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
       // Calculate final IPS score (0-100)
       let ipsScore = totalWeight > 0 ? weightedScore / totalWeight : 50;
 
-      // Apply sentiment divergence penalty
+      // Apply Alpha Intelligence adjustments
+      let adjustmentNotes: string[] = [];
+
+      // News sentiment penalties
+      if (candidate.news_sentiment_warning && candidate.news_sentiment_penalty) {
+        ipsScore = Math.max(0, ipsScore - candidate.news_sentiment_penalty);
+        adjustmentNotes.push(`-${candidate.news_sentiment_penalty} (bearish news)`);
+      }
+
+      // Insider selling penalties
+      if (candidate.insider_selling_warning && candidate.insider_penalty) {
+        ipsScore = Math.max(0, ipsScore - candidate.insider_penalty);
+        adjustmentNotes.push(`-${candidate.insider_penalty} (insider selling)`);
+      }
+
+      // Insider buying boosts
+      if (candidate.insider_buying_boost && candidate.insider_boost) {
+        ipsScore = Math.min(100, ipsScore + candidate.insider_boost);
+        adjustmentNotes.push(`+${candidate.insider_boost} (insider buying)`);
+      }
+
+      // Sentiment divergence penalty
       if (candidate.sentiment_divergence) {
         ipsScore = Math.max(0, ipsScore - 10);
+        adjustmentNotes.push(`-10 (sentiment divergence)`);
       }
 
       // Add ALL candidates with their scores
@@ -719,7 +828,8 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
         ips_score: ipsScore,
         factor_scores: factorScores,
         violations: violations.join(', '),
-        violation_count: violations.length
+        violation_count: violations.length,
+        intelligence_adjustments: adjustmentNotes.join(', ') || 'none'
       });
 
       const shortLeg = candidate.contract_legs?.find((l: any) => l.type === "SELL");
@@ -2006,7 +2116,13 @@ async function sortAndSelectTiered(state: AgentState): Promise<Partial<AgentStat
     console.log(`  Speculative (IPS 60-74): ${finalSpeculative.length} trades`);
   }
 
-  return { selected: top20 };
+  // Attach general_data to each candidate for UI display (news sentiment, insider activity, etc.)
+  const enriched = top20.map(candidate => ({
+    ...candidate,
+    general_data: state.generalData[candidate.symbol] || null
+  }));
+
+  return { selected: enriched };
 
   // Log details for each selected trade
   diversified.forEach((c, i) => {

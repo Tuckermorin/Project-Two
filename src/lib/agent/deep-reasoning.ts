@@ -297,30 +297,83 @@ export async function synthesizeResearch(
     key_insights.push(`Low IV environment (${(iv_rank * 100).toFixed(0)}th percentile) - limited premium collection`);
   }
 
-  // 2. News sentiment (using Tavily)
+  // 2. News sentiment (using Alpha Vantage Alpha Intelligence)
   let news_sentiment = "neutral";
   try {
-    const newsRes = await tavilySearch(
-      `${symbol} stock news earnings outlook sentiment last 7 days`,
-      { time_range: "week", max_results: 5 }
-    );
+    // Use Alpha Vantage sentiment data if available (more accurate than keyword counting)
+    const avNews = candidate.general_data?.av_news_sentiment;
 
-    if (newsRes.results && newsRes.results.length > 0) {
-      const snippets = newsRes.results.map((r: any) => r.snippet?.toLowerCase() || "").join(" ");
+    if (avNews) {
+      const score = avNews.average_score || 0;
+      const label = avNews.sentiment_label || "neutral";
 
-      // Simple sentiment analysis
-      const positive_words = ["beat", "positive", "upgraded", "strong", "growth", "rally"];
-      const negative_words = ["miss", "negative", "downgraded", "weak", "decline", "concern"];
-
-      const positive_count = positive_words.filter((w) => snippets.includes(w)).length;
-      const negative_count = negative_words.filter((w) => snippets.includes(w)).length;
-
-      if (positive_count > negative_count) {
+      // Map Alpha Vantage sentiment to our categories
+      if (label === "bullish" || label === "somewhat-bullish") {
         news_sentiment = "positive";
-        key_insights.push("Recent news sentiment is positive");
-      } else if (negative_count > positive_count) {
+        key_insights.push(`Bullish news sentiment: ${score.toFixed(2)} (${avNews.positive} positive articles)`);
+      } else if (label === "bearish" || label === "somewhat-bearish") {
         news_sentiment = "negative";
-        key_insights.push("Recent news sentiment is negative - caution warranted");
+        key_insights.push(`Bearish news sentiment: ${score.toFixed(2)} (${avNews.negative} negative articles) - caution warranted`);
+      } else {
+        news_sentiment = "neutral";
+      }
+
+      // Add topic-specific insights
+      if (avNews.topic_sentiment) {
+        const earningsSent = avNews.topic_sentiment.Earnings;
+        if (earningsSent !== undefined) {
+          if (earningsSent < -0.3) {
+            key_insights.push(`⚠️ Negative earnings sentiment: ${earningsSent.toFixed(2)}`);
+          } else if (earningsSent > 0.3) {
+            key_insights.push(`✓ Positive earnings sentiment: ${earningsSent.toFixed(2)}`);
+          }
+        }
+
+        const techSent = avNews.topic_sentiment.Technology;
+        if (techSent !== undefined && Math.abs(techSent) > 0.3) {
+          key_insights.push(`Tech sector sentiment: ${techSent > 0 ? 'positive' : 'negative'} (${techSent.toFixed(2)})`);
+        }
+      }
+
+      // Add relevance context
+      if (avNews.avg_relevance !== null && avNews.avg_relevance < 0.3) {
+        key_insights.push(`Low news relevance (${avNews.avg_relevance.toFixed(2)}) - sentiment may be sector-wide`);
+      }
+    } else {
+      // Fallback to Tavily if Alpha Vantage data unavailable
+      const newsRes = await tavilySearch(
+        `${symbol} stock news earnings outlook sentiment last 7 days`,
+        { time_range: "week", max_results: 5 }
+      );
+
+      if (newsRes.results && newsRes.results.length > 0) {
+        const snippets = newsRes.results.map((r: any) => r.snippet?.toLowerCase() || "").join(" ");
+
+        // Simple sentiment analysis
+        const positive_words = ["beat", "positive", "upgraded", "strong", "growth", "rally"];
+        const negative_words = ["miss", "negative", "downgraded", "weak", "decline", "concern"];
+
+        const positive_count = positive_words.filter((w) => snippets.includes(w)).length;
+        const negative_count = negative_words.filter((w) => snippets.includes(w)).length;
+
+        if (positive_count > negative_count) {
+          news_sentiment = "positive";
+          key_insights.push("Recent news sentiment is positive (Tavily)");
+        } else if (negative_count > positive_count) {
+          news_sentiment = "negative";
+          key_insights.push("Recent news sentiment is negative - caution warranted (Tavily)");
+        }
+      }
+    }
+
+    // Check insider activity
+    const insider = candidate.general_data?.insider_activity;
+    if (insider && insider.transaction_count >= 3) {
+      const buyRatio = insider.buy_ratio || 0;
+      if (buyRatio > 1.5) {
+        key_insights.push(`✓ Insider buying signal: ${insider.acquisition_count} buys vs ${insider.disposal_count} sells`);
+      } else if (buyRatio < 0.5) {
+        key_insights.push(`⚠️ Insider selling: ${insider.disposal_count} sells vs ${insider.acquisition_count} buys`);
       }
     }
   } catch (err) {

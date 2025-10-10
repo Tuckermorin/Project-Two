@@ -207,6 +207,65 @@ function buildTradeContext(trade: any): string {
     }
   }
 
+  // Add Alpha Vantage News Sentiment context
+  if (trade.metadata?.av_news_sentiment) {
+    const news = trade.metadata.av_news_sentiment;
+
+    if (news.sentiment_label) {
+      lines.push(`News Sentiment: ${news.sentiment_label}`);
+    }
+
+    if (news.average_score != null) {
+      lines.push(`News Score: ${news.average_score.toFixed(2)} (${news.positive || 0}+ / ${news.negative || 0}- articles)`);
+    }
+
+    if (news.avg_relevance != null) {
+      lines.push(`News Relevance: ${news.avg_relevance.toFixed(2)}`);
+    }
+
+    // Add topic-specific sentiment
+    if (news.topic_sentiment) {
+      const topics = Object.entries(news.topic_sentiment)
+        .slice(0, 3)
+        .map(([topic, score]) => `${topic}:${(score as number).toFixed(2)}`)
+        .join(', ');
+      if (topics) {
+        lines.push(`Topic Sentiment: ${topics}`);
+      }
+    }
+  }
+
+  // Add Insider Activity context
+  if (trade.metadata?.insider_activity) {
+    const insider = trade.metadata.insider_activity;
+
+    if (insider.transaction_count > 0) {
+      lines.push(`Insider Transactions: ${insider.transaction_count} (${insider.acquisition_count} buys, ${insider.disposal_count} sells)`);
+    }
+
+    if (insider.buy_ratio != null && insider.transaction_count >= 3) {
+      const ratioLabel =
+        insider.buy_ratio > 2.0 ? "strong buying" :
+        insider.buy_ratio > 1.0 ? "moderate buying" :
+        insider.buy_ratio > 0.5 ? "balanced" :
+        "selling";
+      lines.push(`Insider Activity: ${ratioLabel} (ratio: ${insider.buy_ratio.toFixed(2)})`);
+    }
+
+    if (insider.activity_trend != null) {
+      const trendLabel =
+        insider.activity_trend > 0.5 ? "increasingly bullish" :
+        insider.activity_trend < -0.5 ? "increasingly bearish" :
+        "stable";
+      lines.push(`Insider Trend: ${trendLabel}`);
+    }
+  }
+
+  // Add Intelligence Adjustments if present
+  if (trade.metadata?.intelligence_adjustments && trade.metadata.intelligence_adjustments !== 'none') {
+    lines.push(`Intelligence Adjustments: ${trade.metadata.intelligence_adjustments}`);
+  }
+
   return lines.join("\n");
 }
 
