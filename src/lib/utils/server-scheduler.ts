@@ -97,12 +97,12 @@ export function initializeScheduler() {
         try {
           const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
 
+          // Find all closed trades from the last 2 hours (don't require realized_pnl)
           const { data: closedTrades } = await supabase
             .from('trades')
-            .select('id, symbol, status, closed_at')
+            .select('id, symbol, status, closed_at, realized_pnl')
             .eq('status', 'closed')
-            .gte('closed_at', twoHoursAgo)
-            .not('realized_pnl', 'is', null);
+            .gte('closed_at', twoHoursAgo);
 
           if (closedTrades && closedTrades.length > 0) {
             console.log(`[Cron] Found ${closedTrades.length} newly closed trades`);
@@ -116,12 +116,19 @@ export function initializeScheduler() {
                 .single();
 
               if (!existingPM) {
-                console.log(`[Cron] Generating post-mortem for ${trade.symbol}...`);
-                await analyzeTradePostMortem(trade.id, { embedToRAG: true });
+                console.log(`[Cron] Generating post-mortem for ${trade.symbol} (realized_pnl: ${trade.realized_pnl ?? 'null'})...`);
+                try {
+                  await analyzeTradePostMortem(trade.id, { embedToRAG: true });
+                  console.log(`[Cron] ✓ Post-mortem created for ${trade.symbol}`);
+                } catch (pmError) {
+                  console.error(`[Cron] Failed to create post-mortem for ${trade.symbol}:`, pmError);
+                }
+              } else {
+                console.log(`[Cron] Skipping ${trade.symbol} - post-mortem already exists`);
               }
             }
           } else {
-            console.log('[Cron] No newly closed trades');
+            console.log('[Cron] No newly closed trades in last 2 hours');
           }
         } catch (error) {
           console.error('[Cron] Auto post-mortem failed:', error);
