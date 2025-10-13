@@ -42,8 +42,9 @@ export function Navigation() {
   const { user, signOut } = useAuth()
   const { isDarkMode, toggleTheme } = useTheme()
 
-  // Hide navigation on login and signup pages for cleaner auth experience
-  if (pathname === '/login' || pathname === '/signup') {
+  // Hide navigation on auth pages
+  const isAuthPage = pathname === '/login' || pathname === '/signup'
+  if (isAuthPage) {
     return null
   }
 

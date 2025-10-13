@@ -663,20 +663,181 @@ export class AlphaVantageClient {
   }
 
   // ---------- Alpha Intelligence: News Sentiment ----------
-  async getNewsSentiment(symbol: string, limit = 50) {
-    const data = await this.makeRequest<any>({
-      function: 'NEWS_SENTIMENT', tickers: symbol.toUpperCase(), sort: 'LATEST', limit: String(limit)
-    });
+  async getNewsSentiment(symbol: string, limit = 50, options?: {
+    topics?: string[];
+    time_from?: string;
+    time_to?: string;
+  }) {
+    const params: Record<string, string> = {
+      function: 'NEWS_SENTIMENT',
+      tickers: symbol.toUpperCase(),
+      sort: 'LATEST',
+      limit: String(limit)
+    };
+
+    if (options?.topics && options.topics.length > 0) {
+      params.topics = options.topics.join(',');
+    }
+    if (options?.time_from) params.time_from = options.time_from;
+    if (options?.time_to) params.time_to = options.time_to;
+
+    const data = await this.makeRequest<any>(params);
     const feed: any[] = Array.isArray(data?.feed) ? data.feed : [];
+
+    // Overall sentiment aggregation
     let sum = 0, n = 0, pos = 0, neg = 0, neu = 0;
+    let relevanceSum = 0, relevanceCount = 0;
+
+    // Topic-based sentiment tracking
+    const topicSentiment: Record<string, { sum: number; count: number }> = {};
+    const topicRelevance: Record<string, number> = {};
+
     for (const item of feed) {
+      // Overall sentiment
       const s = Number(item?.overall_sentiment_score);
       if (Number.isFinite(s)) { sum += s; n++; }
+
       const lbl = String(item?.overall_sentiment_label || '').toLowerCase();
-      if (lbl.includes('positive')) pos++; else if (lbl.includes('negative')) neg++; else neu++;
+      if (lbl.includes('bullish')) pos++;
+      else if (lbl.includes('bearish')) neg++;
+      else neu++;
+
+      // Ticker-specific sentiment and relevance
+      const tickerSentiments = Array.isArray(item?.ticker_sentiment) ? item.ticker_sentiment : [];
+      for (const ts of tickerSentiments) {
+        if (ts.ticker === symbol.toUpperCase()) {
+          const relevance = Number(ts.relevance_score);
+          if (Number.isFinite(relevance)) {
+            relevanceSum += relevance;
+            relevanceCount++;
+          }
+        }
+      }
+
+      // Topic-based sentiment
+      const topics = Array.isArray(item?.topics) ? item.topics : [];
+      for (const topic of topics) {
+        const topicName = topic.topic;
+        const topicRel = Number(topic.relevance_score);
+
+        if (topicName && Number.isFinite(topicRel)) {
+          if (!topicSentiment[topicName]) {
+            topicSentiment[topicName] = { sum: 0, count: 0 };
+          }
+          if (Number.isFinite(s)) {
+            topicSentiment[topicName].sum += s;
+            topicSentiment[topicName].count++;
+          }
+
+          topicRelevance[topicName] = (topicRelevance[topicName] || 0) + topicRel;
+        }
+      }
     }
-    const avg = n ? sum / n : null;
-    return { average_score: avg, count: n, positive: pos, negative: neg, neutral: neu };
+
+    const avgSentiment = n ? sum / n : null;
+    const avgRelevance = relevanceCount ? relevanceSum / relevanceCount : null;
+
+    // Calculate topic averages
+    const topicSentimentAvg: Record<string, number> = {};
+    for (const [topic, data] of Object.entries(topicSentiment)) {
+      if (data.count > 0) {
+        topicSentimentAvg[topic] = data.sum / data.count;
+      }
+    }
+
+    return {
+      average_score: avgSentiment,
+      sentiment_label: avgSentiment === null ? 'neutral' :
+        avgSentiment >= 0.35 ? 'bullish' :
+        avgSentiment >= 0.15 ? 'somewhat-bullish' :
+        avgSentiment <= -0.35 ? 'bearish' :
+        avgSentiment <= -0.15 ? 'somewhat-bearish' :
+        'neutral',
+      count: n,
+      positive: pos,
+      negative: neg,
+      neutral: neu,
+      avg_relevance: avgRelevance,
+      topic_sentiment: topicSentimentAvg,
+      topic_relevance: topicRelevance,
+      raw_articles: feed.slice(0, 10) // Store first 10 for reference
+    };
+  }
+
+  async getInsiderTransactions(symbol: string, limit = 100) {
+    const data = await this.makeRequest<any>({
+      function: 'INSIDER_TRANSACTIONS',
+      symbol: symbol.toUpperCase()
+    });
+
+    const transactions: any[] = Array.isArray(data?.data) ? data.data : [];
+
+    // Calculate metrics
+    let acquisitionCount = 0;
+    let disposalCount = 0;
+    let sharesAcquired = 0;
+    let sharesDisposed = 0;
+    let valueAcquired = 0;
+    let valueDisposed = 0;
+
+    const last90Days = new Date();
+    last90Days.setDate(last90Days.getDate() - 90);
+
+    const recentTransactions = transactions.filter(t => {
+      const transDate = new Date(t.transaction_date);
+      return transDate >= last90Days;
+    }).slice(0, limit);
+
+    for (const trans of recentTransactions) {
+      const shares = Number(trans.shares) || 0;
+      const price = Number(trans.share_price) || 0;
+      const value = shares * price;
+
+      if (trans.acquisition_or_disposal === 'A') {
+        acquisitionCount++;
+        sharesAcquired += shares;
+        valueAcquired += value;
+      } else if (trans.acquisition_or_disposal === 'D') {
+        disposalCount++;
+        sharesDisposed += shares;
+        valueDisposed += value;
+      }
+    }
+
+    const netShares = sharesAcquired - sharesDisposed;
+    const netValue = valueAcquired - valueDisposed;
+    const buyRatio = disposalCount === 0 ? (acquisitionCount > 0 ? 10 : 0) :
+                     acquisitionCount === 0 ? 0 :
+                     acquisitionCount / disposalCount;
+
+    // Calculate trend (compare first half to second half)
+    const midpoint = Math.floor(recentTransactions.length / 2);
+    const firstHalf = recentTransactions.slice(0, midpoint);
+    const secondHalf = recentTransactions.slice(midpoint);
+
+    const firstHalfBuyRatio = this.calculateBuyRatio(firstHalf);
+    const secondHalfBuyRatio = this.calculateBuyRatio(secondHalf);
+    const trend = secondHalfBuyRatio - firstHalfBuyRatio; // Positive = improving
+
+    return {
+      transaction_count: recentTransactions.length,
+      acquisition_count: acquisitionCount,
+      disposal_count: disposalCount,
+      net_shares: netShares,
+      net_value: netValue,
+      buy_ratio: buyRatio,
+      activity_trend: trend,
+      transactions: recentTransactions
+    };
+  }
+
+  private calculateBuyRatio(transactions: any[]): number {
+    let buys = 0, sells = 0;
+    for (const t of transactions) {
+      if (t.acquisition_or_disposal === 'A') buys++;
+      else if (t.acquisition_or_disposal === 'D') sells++;
+    }
+    return sells === 0 ? (buys > 0 ? 10 : 0) : (buys === 0 ? 0 : buys / sells);
   }
 
   // ---------- Macro / Economic Indicators ----------

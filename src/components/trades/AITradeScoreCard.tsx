@@ -1,3 +1,5 @@
+"use client";
+
 import React from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -11,8 +13,9 @@ import {
   AlertTriangle,
   ChevronRight,
   Info,
-  X
+  Eye
 } from 'lucide-react';
+import { getIconColor, getScoreBackgroundColor } from '@/lib/utils/trade-scoring';
 
 interface ScoreTier {
   name: string;
@@ -29,21 +32,29 @@ interface AITradeScoreCardProps {
   symbol: string;
   strategy: string;
   contractType: string;
-  entryPrice: number;
-  maxProfit: number;
-  maxLoss: number;
-  probabilityOfProfit: number;
+  entryPrice?: number;
+  maxProfit?: number;
+  maxLoss?: number;
+  probabilityOfProfit?: number;
   ipsFactors?: {
     passed: string[];
     failed: string[];
-    scores: Record<string, number>;
+    scores?: Record<string, number>;
   };
   rationale?: string;
-  onAccept: () => void;
-  onReject: () => void;
+  contractLegs?: Array<{
+    type: 'BUY' | 'SELL';
+    right: 'P' | 'C';
+    strike: number;
+    expiry: string;
+  }>;
   onViewDetails: () => void;
+  className?: string;
 }
 
+/**
+ * Get the visual tier for a given score
+ */
 function getScoreTier(score: number): ScoreTier {
   if (score >= 95) {
     return {
@@ -51,7 +62,7 @@ function getScoreTier(score: number): ScoreTier {
       className: 'bg-gradient-to-r from-orange-500 to-red-500',
       animationClass: 'fire-effect',
       IconComponent: Flame,
-      message: 'Exceptional IPS alignment!',
+      message: '🔥 Exceptional IPS alignment! This trade perfectly matches your strategy.',
       borderClass: 'border-2 border-orange-400',
       textClass: 'text-white'
     };
@@ -63,7 +74,7 @@ function getScoreTier(score: number): ScoreTier {
       className: 'bg-gradient-to-r from-purple-500 to-pink-500',
       animationClass: 'shimmer-effect',
       IconComponent: Star,
-      message: 'Elite opportunity',
+      message: '⭐ Elite opportunity with outstanding IPS fit.',
       borderClass: 'border-2 border-purple-400',
       textClass: 'text-white'
     };
@@ -75,7 +86,7 @@ function getScoreTier(score: number): ScoreTier {
       className: 'bg-gradient-to-r from-blue-500 to-cyan-500',
       animationClass: 'glow-pulse',
       IconComponent: Award,
-      message: 'High-quality match',
+      message: '💎 High-quality trade with strong fundamentals.',
       borderClass: 'border-2 border-blue-400',
       textClass: 'text-white'
     };
@@ -87,7 +98,7 @@ function getScoreTier(score: number): ScoreTier {
       className: 'bg-gradient-to-r from-green-500 to-emerald-500',
       animationClass: 'subtle-glow',
       IconComponent: TrendingUp,
-      message: 'Solid trade',
+      message: '✓ Solid trade meeting your criteria.',
       borderClass: 'border border-green-400',
       textClass: 'text-white'
     };
@@ -99,7 +110,7 @@ function getScoreTier(score: number): ScoreTier {
       className: 'bg-gradient-to-r from-yellow-500 to-orange-500',
       animationClass: 'standard',
       IconComponent: Shield,
-      message: 'Meets baseline criteria',
+      message: '⚠️ Meets baseline criteria. Review IPS factors carefully.',
       borderClass: 'border border-yellow-400',
       textClass: 'text-white'
     };
@@ -107,33 +118,19 @@ function getScoreTier(score: number): ScoreTier {
 
   return {
     name: 'Review Needed',
-    className: 'bg-gradient-to-r from-orange-600 to-red-600 opacity-80',
+    className: 'bg-gradient-to-r from-orange-600 to-red-600',
     animationClass: 'warning-state',
     IconComponent: AlertTriangle,
-    message: 'Manual review recommended',
+    message: '⚠️ Marginal fit - manual review recommended. See why below.',
     borderClass: 'border border-orange-500 border-dashed',
     textClass: 'text-white'
   };
 }
 
-function getIconColor(score: number): string {
-  if (score >= 95) return 'text-orange-500';
-  if (score >= 90) return 'text-purple-500';
-  if (score >= 80) return 'text-blue-500';
-  if (score >= 70) return 'text-green-500';
-  if (score >= 60) return 'text-yellow-500';
-  return 'text-orange-600';
-}
-
-function getScoreBackgroundColor(score: number): string {
-  if (score >= 95) return 'bg-orange-100 dark:bg-orange-950 border border-orange-200 dark:border-orange-800';
-  if (score >= 90) return 'bg-purple-100 dark:bg-purple-950 border border-purple-200 dark:border-purple-800';
-  if (score >= 80) return 'bg-blue-100 dark:bg-blue-950 border border-blue-200 dark:border-blue-800';
-  if (score >= 70) return 'bg-green-100 dark:bg-green-950 border border-green-200 dark:border-green-800';
-  if (score >= 60) return 'bg-yellow-100 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800';
-  return 'bg-orange-100 dark:bg-orange-950 border border-orange-200 dark:border-orange-800';
-}
-
+/**
+ * Card component for displaying scored AI trade recommendations
+ * Comprehensive view with metrics, IPS factors, and educational info
+ */
 export function AITradeScoreCard({
   score,
   symbol,
@@ -145,57 +142,85 @@ export function AITradeScoreCard({
   probabilityOfProfit,
   ipsFactors,
   rationale,
-  onAccept,
-  onReject,
-  onViewDetails
+  contractLegs,
+  onViewDetails,
+  className = ''
 }: AITradeScoreCardProps) {
   const tier = getScoreTier(score);
   const { IconComponent } = tier;
+  const iconColor = getIconColor(score);
+  const scoreBackgroundColor = getScoreBackgroundColor(score);
 
   return (
-    <Card className={`${tier.borderClass} hover:shadow-lg transition-shadow`}>
+    <Card className={`${tier.borderClass} hover:shadow-lg transition-shadow ${className}`}>
       <CardHeader className="pb-3">
         <div className="flex items-start justify-between">
           <div className="space-y-1">
             <CardTitle className="flex items-center gap-2 text-xl">
-              <IconComponent className={`w-5 h-5 ${getIconColor(score)}`} />
-              {symbol} - {strategy}
+              <IconComponent className={`w-5 h-5 ${iconColor}`} />
+              {symbol} - {strategy.replace(/_/g, ' ')}
             </CardTitle>
             <p className="text-sm text-muted-foreground">{contractType}</p>
           </div>
           <Badge
             className={`${tier.className} ${tier.textClass} text-lg font-bold px-3 py-1`}
           >
-            {score}%
+            {score.toFixed(0)}%
           </Badge>
         </div>
       </CardHeader>
 
       <CardContent className="space-y-4">
-        <div className={`p-3 rounded-lg ${getScoreBackgroundColor(score)}`}>
+        {/* Score Message */}
+        <div className={`p-3 rounded-lg ${scoreBackgroundColor}`}>
           <p className="text-sm font-medium">{tier.message}</p>
         </div>
 
+        {/* Trade Metrics */}
         <div className="grid grid-cols-2 gap-3 text-sm">
-          <div>
-            <p className="text-muted-foreground">Entry Price</p>
-            <p className="font-semibold">${entryPrice.toFixed(2)}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Max Profit</p>
-            <p className="font-semibold text-green-600 dark:text-green-400">${maxProfit.toFixed(2)}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Max Loss</p>
-            <p className="font-semibold text-red-600 dark:text-red-400">${maxLoss.toFixed(2)}</p>
-          </div>
-          <div>
-            <p className="text-muted-foreground">Probability</p>
-            <p className="font-semibold">{probabilityOfProfit.toFixed(0)}%</p>
-          </div>
+          {entryPrice !== undefined && (
+            <div>
+              <p className="text-muted-foreground">Entry Price</p>
+              <p className="font-semibold">${entryPrice.toFixed(2)}</p>
+            </div>
+          )}
+          {maxProfit !== undefined && (
+            <div>
+              <p className="text-muted-foreground">Max Profit</p>
+              <p className="font-semibold text-green-600">${maxProfit.toFixed(2)}</p>
+            </div>
+          )}
+          {maxLoss !== undefined && (
+            <div>
+              <p className="text-muted-foreground">Max Loss</p>
+              <p className="font-semibold text-red-600">${Math.abs(maxLoss).toFixed(2)}</p>
+            </div>
+          )}
+          {probabilityOfProfit !== undefined && (
+            <div>
+              <p className="text-muted-foreground">Probability</p>
+              <p className="font-semibold">{probabilityOfProfit.toFixed(0)}%</p>
+            </div>
+          )}
         </div>
 
-        {ipsFactors && (
+        {/* Contract Legs */}
+        {contractLegs && contractLegs.length > 0 && (
+          <div className="space-y-2">
+            <p className="text-xs font-semibold text-muted-foreground">Contract Structure</p>
+            <div className="text-xs text-muted-foreground">
+              {contractLegs.map((leg, i) => (
+                <span key={i}>
+                  {i > 0 && ' / '}
+                  {leg.type} {leg.right === 'P' ? 'Put' : 'Call'} ${leg.strike}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* IPS Factors */}
+        {ipsFactors && (ipsFactors.passed.length > 0 || ipsFactors.failed.length > 0) && (
           <div className="space-y-2">
             <p className="text-xs font-semibold text-muted-foreground flex items-center gap-1">
               <Info className="w-3 h-3" />
@@ -205,7 +230,7 @@ export function AITradeScoreCard({
               {ipsFactors.passed.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {ipsFactors.passed.map((factor, idx) => (
-                    <Badge key={idx} variant="outline" className="text-green-600 dark:text-green-400 border-green-600 dark:border-green-400">
+                    <Badge key={idx} variant="outline" className="text-green-600 border-green-600">
                       ✓ {factor}
                     </Badge>
                   ))}
@@ -214,7 +239,7 @@ export function AITradeScoreCard({
               {ipsFactors.failed.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {ipsFactors.failed.map((factor, idx) => (
-                    <Badge key={idx} variant="outline" className="text-red-600 dark:text-red-400 border-red-600 dark:border-red-400">
+                    <Badge key={idx} variant="outline" className="text-red-600 border-red-600">
                       ✗ {factor}
                     </Badge>
                   ))}
@@ -224,34 +249,23 @@ export function AITradeScoreCard({
           </div>
         )}
 
+        {/* AI Rationale */}
         {rationale && (
           <div className="text-sm border-l-2 border-blue-500 pl-3 py-1 bg-blue-50 dark:bg-blue-950">
             <p className="text-muted-foreground">{rationale}</p>
           </div>
         )}
 
+        {/* Actions */}
         <div className="flex gap-2 pt-2">
-          <Button
-            onClick={onAccept}
-            className="flex-1"
-            variant={score >= 80 ? "default" : "secondary"}
-          >
-            Accept Trade
-          </Button>
           <Button
             onClick={onViewDetails}
             variant="outline"
             className="flex-1"
           >
+            <Eye className="w-4 h-4 mr-1" />
             View Details
             <ChevronRight className="w-4 h-4 ml-1" />
-          </Button>
-          <Button
-            onClick={onReject}
-            variant="ghost"
-            size="icon"
-          >
-            <X className="w-4 h-4" />
           </Button>
         </div>
       </CardContent>

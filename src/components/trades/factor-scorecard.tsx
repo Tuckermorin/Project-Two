@@ -140,32 +140,24 @@ export function FactorScorecard({ ipsFactorDetails, compact = false }: FactorSco
 }
 
 function FactorRow({ factor, type }: { factor: FactorDetail; type: 'pass' | 'minor' | 'major' }) {
-  const bgColor = type === 'pass' ? 'bg-green-50' : type === 'minor' ? 'bg-yellow-50' : 'bg-red-50';
-  const textColor = type === 'pass' ? 'text-green-800' : type === 'minor' ? 'text-yellow-800' : 'text-red-800';
+  const iconColor = type === 'pass' ? 'text-green-600 dark:text-green-400' : type === 'minor' ? 'text-yellow-600 dark:text-yellow-400' : 'text-red-600 dark:text-red-400';
   const Icon = type === 'pass' ? CheckCircle2 : type === 'minor' ? AlertCircle : XCircle;
 
   return (
-    <div className={`flex items-center justify-between p-2 rounded ${bgColor}`}>
+    <div className="flex items-center justify-between">
       <div className="flex items-center gap-2">
-        <Icon className={`h-4 w-4 ${textColor}`} />
-        <span className="text-sm font-medium">{factor.factor_name}</span>
-        <span className="text-xs text-gray-500">
+        <Icon className={`h-4 w-4 ${iconColor}`} />
+        <span className="text-sm">{factor.factor_name}</span>
+        <span className="text-xs text-muted-foreground">
           (Weight: {(factor.weight * 100).toFixed(0)}%)
         </span>
       </div>
-      <div className="text-right">
-        <div className="text-sm">
-          <span className={textColor}>
-            {factor.value !== null ? factor.value.toFixed(2) : 'N/A'}
-          </span>
-          <span className="text-gray-500 mx-1">→</span>
-          <span className="text-gray-600">target: {factor.target}</span>
-        </div>
-        {factor.distance !== 0 && factor.distance !== -999 && (
-          <div className="text-xs text-gray-500">
-            {factor.distance > 0 ? `+${factor.distance.toFixed(2)}` : factor.distance.toFixed(2)} from target
-          </div>
-        )}
+      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+        <span>
+          {factor.value !== null ? factor.value.toFixed(2) : 'N/A'}
+        </span>
+        <span>→</span>
+        <span>target: {factor.target}</span>
       </div>
     </div>
   );

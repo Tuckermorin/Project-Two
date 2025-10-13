@@ -9,9 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight, List, Flame, Star, Award, Shield } from "lucide-react";
+import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight, List } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { FactorScorecard } from "@/components/trades/factor-scorecard";
+import { AITradeScoreCard } from "@/components/trades/AITradeScoreCard";
+import { TradeTileCompact } from "@/components/trades/TradeTileCompact";
+import { TradeDetailsModal } from "@/components/trades/TradeDetailsModal";
 
 type Candidate = {
   id: string;
@@ -232,14 +235,7 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
       }
 
       setRunId(json.runId || null);
-
-      // Map ips_score to score for gamification display
-      const mappedCands = (json.selected || []).map((c: any) => ({
-        ...c,
-        score: c.score ?? c.ips_score ?? c.composite_score
-      }));
-
-      setCands(mappedCands);
+      setCands(json.selected || []);
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -247,10 +243,10 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
     }
   }
 
-  const handleAddToProspective = async (candidate: Candidate) => {
+  const handleAddToProspective = async (candidate: Candidate, numContracts?: number) => {
     if (!runId) return;
 
-    const contracts = parseInt(numberOfContracts) || 1;
+    const contracts = numContracts || parseInt(numberOfContracts) || 1;
 
     // Auto-extract values from candidate data
     const shortLeg = candidate.contract_legs?.find(l => l.type === "SELL");
@@ -431,103 +427,64 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                   Sorted by IPS fit score
                 </div>
               </div>
-              <div className="space-y-2 max-h-[500px] overflow-y-auto">
-                {cands.slice(0, 10).map((c) => (
-                  <div key={c.id} className="border rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors">
-                    <div className="flex items-center justify-between gap-4">
-                      {/* Left: Symbol and Strategy */}
-                      <div className="flex items-center gap-3 flex-1">
-                        <div>
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="text-lg font-bold">{c.symbol}</span>
-                            <Badge variant="outline" className="text-xs">
-                              {c.strategy.replace(/_/g, " ")}
-                            </Badge>
-                          </div>
-                          <div className="text-xs text-muted-foreground">
-                            {c.contract_legs.map((l, i) => (
-                              <span key={i}>
-                                {i > 0 && " / "}
-                                {l.type} {l.right} ${l.strike}
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
+              {/* Compact Gamified Tiles Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto">
+                {cands.slice(0, 12).map((c) => {
+                  // Calculate DTE
+                  const getDTE = () => {
+                    if (!c.contract_legs || c.contract_legs.length === 0) return 0;
+                    const expiry = c.contract_legs[0].expiry;
+                    const expiryDate = new Date(expiry);
+                    const today = new Date();
+                    const diffTime = expiryDate.getTime() - today.getTime();
+                    return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                  };
 
-                      {/* Middle: Quick Stats */}
-                      <div className="flex items-center gap-6 text-sm">
-                        <div className="text-center">
-                          <div className="text-xs text-muted-foreground">Entry</div>
-                          <div className="font-medium">${c.entry_mid?.toFixed(2) ?? "—"}</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-xs text-muted-foreground">Max P</div>
-                          <div className="font-medium text-green-600">${c.max_profit?.toFixed(2) ?? "—"}</div>
-                        </div>
-                        <div className="text-center">
-                          <div className="text-xs text-muted-foreground">POP</div>
-                          <div className="font-medium">{c.est_pop ? `${(c.est_pop * 100).toFixed(0)}%` : "—"}</div>
-                        </div>
-                      </div>
+                  // Get short and long strikes
+                  const shortLeg = c.contract_legs?.find(l => l.type === 'SELL');
+                  const longLeg = c.contract_legs?.find(l => l.type === 'BUY');
+                  const shortStrike = shortLeg?.strike || 0;
+                  const longStrike = longLeg?.strike || 0;
+                  const contractType = shortLeg?.right || 'P';
 
-                      {/* Right: IPS Fit and Actions */}
-                      <div className="flex items-center gap-3">
-                        {c.score !== undefined && (
-                          <div className="text-center">
-                            <div className="text-xs text-muted-foreground mb-1">IPS Fit</div>
-                            <Badge
-                              className={
-                                c.score >= 95
-                                  ? "bg-gradient-to-r from-orange-500 to-red-500 text-white border-orange-400"
-                                  : c.score >= 90
-                                  ? "bg-gradient-to-r from-purple-500 to-pink-500 text-white border-purple-400"
-                                  : c.score >= 80
-                                  ? "bg-gradient-to-r from-blue-500 to-cyan-500 text-white border-blue-400"
-                                  : c.score >= 70
-                                  ? "bg-gradient-to-r from-green-500 to-emerald-500 text-white border-green-400"
-                                  : c.score >= 60
-                                  ? "bg-gradient-to-r from-yellow-500 to-orange-500 text-white border-yellow-400"
-                                  : "bg-gradient-to-r from-orange-600 to-red-600 text-white border-orange-500 opacity-80"
-                              }
-                            >
-                              {c.score >= 95 ? <Flame className="w-3 h-3 mr-1 inline" /> :
-                               c.score >= 90 ? <Star className="w-3 h-3 mr-1 inline" /> :
-                               c.score >= 80 ? <Award className="w-3 h-3 mr-1 inline" /> :
-                               c.score >= 70 ? <TrendingUp className="w-3 h-3 mr-1 inline" /> :
-                               c.score >= 60 ? <Shield className="w-3 h-3 mr-1 inline" /> :
-                               <AlertCircle className="w-3 h-3 mr-1 inline" />}
-                              {c.score.toFixed(0)}%
-                            </Badge>
-                          </div>
-                        )}
-                        {c.guardrail_flags && Object.values(c.guardrail_flags).some((v) => v) && (
-                          <AlertCircle className="h-5 w-5 text-amber-600" />
-                        )}
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setSelectedCandidate(c);
-                            setNumberOfContracts("1");
-                            setDetailsDialogOpen(true);
-                          }}
-                        >
-                          <Eye className="h-4 w-4 mr-1" />
-                          View Details
-                        </Button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                  return (
+                    <TradeTileCompact
+                      key={c.id}
+                      score={c.ips_score || c.composite_score || c.score || 0}
+                      symbol={c.symbol}
+                      strategy={c.strategy}
+                      shortStrike={shortStrike}
+                      longStrike={longStrike}
+                      dte={getDTE()}
+                      entryPrice={c.entry_mid}
+                      contractType={contractType === 'P' ? 'PUT' : 'CALL'}
+                      intelligenceAdjustments={c.intelligence_adjustments}
+                      onViewDetails={() => {
+                        setSelectedCandidate(c);
+                        setNumberOfContracts("1");
+                        setDetailsDialogOpen(true);
+                      }}
+                    />
+                  );
+                })}
               </div>
             </div>
           )}
         </div>
       </CardContent>
 
-      {/* Trade Details Dialog */}
-      <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+      {/* Trade Details Modal with Alpha Intelligence */}
+      {selectedCandidate && (
+        <TradeDetailsModal
+          open={detailsDialogOpen}
+          onOpenChange={setDetailsDialogOpen}
+          candidate={selectedCandidate}
+          onAddToProspective={handleAddToProspective}
+        />
+      )}
+
+      {/* Old Dialog for Adding to Prospective Trades (kept for compatibility) */}
+      <Dialog open={false} onOpenChange={() => {}}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">

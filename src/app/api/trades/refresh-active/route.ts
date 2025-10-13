@@ -116,27 +116,54 @@ export async function POST(request: NextRequest) {
                 const isPutSpread = contractType?.toLowerCase().includes('put');
                 const optionType: 'put' | 'call' = isPutSpread ? 'put' : 'call';
 
-                // Fetch options data for both legs
-                const [shortLegData, longLegData] = await Promise.all([
-                  avClient.getRealtimeOptions(symbol, { requireGreeks: true })
-                    .then(contracts => contracts.find(c =>
-                      c.strike === shortStrike &&
-                      c.expiration === expiration &&
-                      c.type === optionType
-                    )),
-                  avClient.getRealtimeOptions(symbol, { requireGreeks: true })
-                    .then(contracts => contracts.find(c =>
-                      c.strike === longStrike &&
-                      c.expiration === expiration &&
-                      c.type === optionType
-                    ))
-                ]);
+                console.log(`[Refresh] Fetching options for ${symbol}: shortStrike=${shortStrike}, longStrike=${longStrike}, expiration=${expiration}, type=${optionType}`);
+
+                // Fetch options data once and filter
+                const allContracts = await avClient.getRealtimeOptions(symbol, { requireGreeks: true });
+
+                console.log(`[Refresh] Received ${allContracts.length} contracts for ${symbol}`);
+
+                // Log a sample to see the data format
+                if (allContracts.length > 0) {
+                  console.log(`[Refresh] Sample contract:`, JSON.stringify(allContracts[0], null, 2));
+                }
+
+                // Find matching contracts with some tolerance for strike prices
+                const shortLegData = allContracts.find(c =>
+                  Math.abs((c.strike ?? 0) - shortStrike) < 0.01 &&
+                  c.expiration === expiration &&
+                  c.type === optionType
+                );
+
+                const longLegData = allContracts.find(c =>
+                  Math.abs((c.strike ?? 0) - longStrike) < 0.01 &&
+                  c.expiration === expiration &&
+                  c.type === optionType
+                );
+
+                console.log(`[Refresh] ${symbol} short leg found:`, !!shortLegData, shortLegData ? `strike=${shortLegData.strike}, bid=${shortLegData.bid}, ask=${shortLegData.ask}` : 'not found');
+                console.log(`[Refresh] ${symbol} long leg found:`, !!longLegData, longLegData ? `strike=${longLegData.strike}, bid=${longLegData.bid}, ask=${longLegData.ask}` : 'not found');
 
                 // Calculate spread price for credit spreads
                 if (shortLegData && longLegData) {
                   const shortBid = shortLegData.bid ?? 0;
+                  const shortAsk = shortLegData.ask ?? 0;
+                  const longBid = longLegData.bid ?? 0;
                   const longAsk = longLegData.ask ?? 0;
-                  const spreadPrice = Math.max(0, shortBid - longAsk);
+
+                  // For credit spreads (you sold the spread, now want to buy it back to close):
+                  // Spread Ask = what you PAY to buy back the spread (conservative)
+                  // Spread Bid = what you GET if you sell the spread (liberal)
+                  // We use the mid price for realistic valuation
+                  const spreadAsk = shortAsk - longBid;  // Pay ask for short, get bid for long
+                  const spreadBid = shortBid - longAsk;  // Get bid for short, pay ask for long
+                  const spreadMid = (spreadAsk + spreadBid) / 2;
+
+                  // If spread mid is negative, the spread is inverted (long worth more than short)
+                  // This means the position has achieved max profit (spread collapsed to zero)
+                  const spreadPrice = spreadMid < 0 ? 0 : spreadMid;
+
+                  console.log(`[Refresh] ${symbol} spread: bid=${spreadBid.toFixed(2)}, ask=${spreadAsk.toFixed(2)}, mid=${spreadMid.toFixed(2)}, final=${spreadPrice.toFixed(2)}`);
 
                   updates.currentSpreadPrice = spreadPrice;
 
@@ -151,6 +178,8 @@ export async function POST(request: NextRequest) {
 
                     updates.currentPL = totalPL;
                     updates.currentPLPercent = plPercent;
+
+                    console.log(`[Refresh] ${symbol} P/L: credit=${creditReceived}, spread=${spreadPrice}, plPerContract=${plPerContract}, totalPL=${totalPL}, plPercent=${plPercent}%`);
                   }
 
                   // Store greeks from short leg
@@ -162,6 +191,15 @@ export async function POST(request: NextRequest) {
                     rho: shortLegData.rho,
                     impliedVolatility: shortLegData.impliedVolatility
                   };
+                } else {
+                  console.warn(`[Refresh] ${symbol} Could not find both legs - shortLeg: ${!!shortLegData}, longLeg: ${!!longLegData}`);
+                  // Log available strikes to help debug
+                  const availableStrikes = allContracts
+                    .filter(c => c.type === optionType && c.expiration === expiration)
+                    .map(c => c.strike)
+                    .filter((v, i, a) => a.indexOf(v) === i)
+                    .sort((a, b) => (a ?? 0) - (b ?? 0));
+                  console.warn(`[Refresh] ${symbol} Available ${optionType} strikes for ${expiration}:`, availableStrikes);
                 }
               } catch (optError) {
                 console.error(`[Refresh] Failed to fetch options data for ${symbol} trade ${trade.id}:`, optError);
@@ -179,8 +217,7 @@ export async function POST(request: NextRequest) {
                   delta_short_leg: updates.greeks?.delta,
                   theta: updates.greeks?.theta,
                   vega: updates.greeks?.vega,
-                  gamma: updates.greeks?.gamma,
-                  implied_volatility_at_entry: updates.greeks?.impliedVolatility,
+                  iv_at_entry: updates.greeks?.impliedVolatility,
                   updated_at: new Date().toISOString()
                 })
                 .eq('id', trade.id);

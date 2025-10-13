@@ -68,7 +68,20 @@
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:\\Users\\tucke\\OneDrive\\Desktop\\Project-Two\\supabase\\migrations\\20251009_add_behavioral_metrics_to_trades.sql\")",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:\\Users\\tucke\\OneDrive\\Desktop\\Project-Two\\supabase\\migrations\\20251009_create_trade_pattern_views.sql\")",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:\\Users\\tucke\\OneDrive\\Desktop\\Project-Two\\supabase\\migrations\\20251009_create_snapshot_embeddings.sql\")",
-      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:\\Users\\tucke\\OneDrive\\Desktop\\Project-Two\\supabase\\migrations\\20251010_add_ips_factors_to_snapshots.sql\")"
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:\\Users\\tucke\\OneDrive\\Desktop\\Project-Two\\supabase\\migrations\\20251010_add_ips_factors_to_snapshots.sql\")",
+      "Bash(git checkout:*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT id, symbol, status, current_spread_price, current_spread_bid, current_spread_ask, credit_received, spread_price_updated_at FROM trades WHERE status = ''active'' LIMIT 3;\")",
+      "Bash(if [ -n \"$ALPHA_VANTAGE_API_KEY\" ])",
+      "Bash(then)",
+      "Bash(elif [ -n \"$NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY\" ])",
+      "Bash(else)",
+      "Bash(exit 1)",
+      "Bash(fi)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"supabase/migrations/20251010_add_news_sentiment_table.sql\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"supabase/migrations/20251010_add_insider_transactions_table.sql\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"supabase/migrations/20251010_add_alpha_intelligence_factors.sql\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"\\d factor_definitions\")",
+      "Bash(npx shadcn@latest add:*)"
     ],
     "deny": [],
     "ask": []

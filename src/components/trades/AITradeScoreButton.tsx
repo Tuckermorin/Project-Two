@@ -1,3 +1,5 @@
+"use client";
+
 import React from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -7,7 +9,7 @@ import {
   Award,
   TrendingUp,
   Shield,
-  AlertTriangle
+  AlertTriangle,
 } from 'lucide-react';
 import {
   Tooltip,
@@ -35,12 +37,16 @@ interface AITradeScoreButtonProps {
   ipsFactors?: {
     passed: string[];
     failed: string[];
-    scores: Record<string, number>;
+    scores?: Record<string, number>;
   };
   disabled?: boolean;
   className?: string;
 }
 
+/**
+ * Get the visual tier for a given score
+ * Implements 6 distinct tiers with different visual treatments
+ */
 function getScoreTier(score: number): ScoreTier {
   if (score >= 95) {
     return {
@@ -113,6 +119,10 @@ function getScoreTier(score: number): ScoreTier {
   };
 }
 
+/**
+ * Button component with score-based visual gamification
+ * Ethically designed to educate without manipulating
+ */
 export function AITradeScoreButton({
   score,
   tradeName,
@@ -157,7 +167,7 @@ export function AITradeScoreButton({
                   variant="secondary"
                   className="text-lg font-bold bg-white/20 text-white"
                 >
-                  {score}%
+                  {score.toFixed(0)}%
                 </Badge>
               </span>
             </Button>
