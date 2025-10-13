@@ -54,6 +54,20 @@ export interface TradePostMortem {
     analyst_activity: number;
     sec_filings: number;
   };
+  snapshot_analysis?: {
+    total_snapshots: number;
+    peak_pnl_percent: number | null;
+    lowest_pnl_percent: number | null;
+    max_delta_reached: number | null;
+    days_above_50pct_profit: number;
+    behavioral_flags: string[];
+    critical_moments: Array<{
+      snapshot_time: string;
+      description: string;
+      delta: number | null;
+      pnl_percent: number | null;
+    }>;
+  };
   ai_analysis: string;
   credits_used: number;
   created_at: string;
@@ -168,6 +182,9 @@ export async function analyzeTradePostMortem(
   );
   creditsUsed += tradeLifecycleData.creditsUsed;
 
+  // Fetch snapshot analysis
+  const snapshotAnalysis = await analyzeTradeSnapshots(tradeId, outcome);
+
   // Analyze what happened during the trade
   const lifecycleEvents = analyzeLifecycleEvents(
     tradeLifecycleData,
@@ -222,6 +239,7 @@ export async function analyzeTradePostMortem(
       analyst_activity: tradeLifecycleData.analysts.length,
       sec_filings: tradeLifecycleData.sec.length,
     },
+    snapshot_analysis: snapshotAnalysis,
     ai_analysis: aiAnalysis,
     credits_used: creditsUsed,
     created_at: new Date().toISOString(),
@@ -689,4 +707,150 @@ export async function getTradePostMortem(
   if (error || !data) return null;
 
   return data.post_mortem_data as TradePostMortem;
+}
+
+// ============================================================================
+// Snapshot Analysis
+// ============================================================================
+
+/**
+ * Analyze trade snapshots to understand behavioral patterns during lifecycle
+ */
+async function analyzeTradeSnapshots(
+  tradeId: string,
+  outcome: "win" | "loss"
+): Promise<{
+  total_snapshots: number;
+  peak_pnl_percent: number | null;
+  lowest_pnl_percent: number | null;
+  max_delta_reached: number | null;
+  days_above_50pct_profit: number;
+  behavioral_flags: string[];
+  critical_moments: Array<{
+    snapshot_time: string;
+    description: string;
+    delta: number | null;
+    pnl_percent: number | null;
+  }>;
+} | undefined> {
+  console.log(`[PostMortem] Analyzing snapshots for trade ${tradeId}`);
+
+  try {
+    // Fetch all snapshots for this trade
+    const { data: snapshots, error } = await supabase
+      .from("trade_snapshots")
+      .select("*")
+      .eq("trade_id", tradeId)
+      .order("snapshot_time", { ascending: true });
+
+    if (error || !snapshots || snapshots.length === 0) {
+      console.log(`[PostMortem] No snapshots found for trade ${tradeId}`);
+      return undefined;
+    }
+
+    console.log(`[PostMortem] Found ${snapshots.length} snapshots to analyze`);
+
+    // Calculate metrics
+    const pnlValues = snapshots.map((s) => s.unrealized_pnl_percent).filter((p) => p != null);
+    const deltaValues = snapshots.map((s) => Math.abs(s.delta_spread || 0));
+
+    const peakPnl = pnlValues.length > 0 ? Math.max(...pnlValues) : null;
+    const lowestPnl = pnlValues.length > 0 ? Math.min(...pnlValues) : null;
+    const maxDelta = deltaValues.length > 0 ? Math.max(...deltaValues) : null;
+
+    const daysAbove50Pct = snapshots.filter((s) => s.unrealized_pnl_percent && s.unrealized_pnl_percent > 50).length;
+
+    // Describe behavioral observations (no hard-coded thresholds - just facts for AI)
+    const behavioralFlags: string[] = [];
+
+    // Peak/low P&L facts
+    if (peakPnl && outcome === "loss") {
+      behavioralFlags.push(`Peaked at ${peakPnl.toFixed(0)}% profit but closed as ${outcome}`);
+    } else if (peakPnl && outcome === "win") {
+      behavioralFlags.push(`Peaked at ${peakPnl.toFixed(0)}% profit, closed at realized P&L`);
+    }
+
+    // Delta facts
+    if (maxDelta) {
+      behavioralFlags.push(`Max delta reached: ${maxDelta.toFixed(3)}`);
+    }
+
+    // P&L pattern facts
+    if (daysAbove50Pct > 0) {
+      behavioralFlags.push(`Snapshots above 50% profit: ${daysAbove50Pct}`);
+    }
+
+    // P&L range facts
+    if (peakPnl && lowestPnl) {
+      const pnlRange = peakPnl - lowestPnl;
+      behavioralFlags.push(`P&L range during trade: ${pnlRange.toFixed(0)}% (peak: ${peakPnl.toFixed(0)}%, low: ${lowestPnl.toFixed(0)}%)`);
+    }
+
+    // Identify critical moments
+    const criticalMoments: Array<{
+      snapshot_time: string;
+      description: string;
+      delta: number | null;
+      pnl_percent: number | null;
+    }> = [];
+
+    // Moment 1: Peak P&L
+    if (peakPnl) {
+      const peakSnapshot = snapshots.find((s) => s.unrealized_pnl_percent === peakPnl);
+      if (peakSnapshot) {
+        criticalMoments.push({
+          snapshot_time: peakSnapshot.snapshot_time,
+          description: `Peak profit: ${peakPnl.toFixed(0)}% (${daysAbove50Pct > 0 ? 'exit opportunity' : 'best point'})`,
+          delta: peakSnapshot.delta_spread,
+          pnl_percent: peakPnl,
+        });
+      }
+    }
+
+    // Moment 2: Max delta
+    if (maxDelta) {
+      const deltaSnapshot = snapshots.find((s) => Math.abs(s.delta_spread || 0) === maxDelta);
+      if (deltaSnapshot) {
+        criticalMoments.push({
+          snapshot_time: deltaSnapshot.snapshot_time,
+          description: `Max delta: ${maxDelta.toFixed(3)}`,
+          delta: deltaSnapshot.delta_spread,
+          pnl_percent: deltaSnapshot.unrealized_pnl_percent,
+        });
+      }
+    }
+
+    // Moment 3: Turning point (if went from profit to loss)
+    const lastProfitableSnapshot = [...snapshots].reverse().find((s) => s.unrealized_pnl_percent && s.unrealized_pnl_percent > 0);
+    const firstUnprofitableAfter = lastProfitableSnapshot
+      ? snapshots.find(
+          (s) =>
+            s.unrealized_pnl_percent &&
+            s.unrealized_pnl_percent < 0 &&
+            new Date(s.snapshot_time).getTime() > new Date(lastProfitableSnapshot.snapshot_time).getTime()
+        )
+      : null;
+
+    if (lastProfitableSnapshot && firstUnprofitableAfter && outcome === "loss") {
+      criticalMoments.push({
+        snapshot_time: firstUnprofitableAfter.snapshot_time,
+        description: `Turning point: went from +${lastProfitableSnapshot.unrealized_pnl_percent.toFixed(0)}% to ${firstUnprofitableAfter.unrealized_pnl_percent.toFixed(0)}%`,
+        delta: firstUnprofitableAfter.delta_spread,
+        pnl_percent: firstUnprofitableAfter.unrealized_pnl_percent,
+      });
+    }
+
+    return {
+      total_snapshots: snapshots.length,
+      peak_pnl_percent: peakPnl,
+      lowest_pnl_percent: lowestPnl,
+      max_delta_reached: maxDelta,
+      days_above_50pct_profit: daysAbove50Pct,
+      behavioral_flags,
+      critical_moments,
+    };
+  } catch (error) {
+    console.error(`[PostMortem] Error analyzing snapshots:`, error);
+    return undefined;
+  }
 }

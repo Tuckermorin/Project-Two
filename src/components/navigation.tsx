@@ -42,6 +42,11 @@ export function Navigation() {
   const { user, signOut } = useAuth()
   const { isDarkMode, toggleTheme } = useTheme()
 
+  // Hide navigation on login and signup pages for cleaner auth experience
+  if (pathname === '/login' || pathname === '/signup') {
+    return null
+  }
+
   return (
     <nav className="mb-8">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -62,29 +67,32 @@ export function Navigation() {
               <BarChart3 className="h-8 w-8" style={{ color: 'var(--gradient-primary-start)' }} />
               <span className="ml-2 text-xl font-bold gradient-text-primary">TenXiv</span>
             </div>
-            <div className="hidden sm:ml-6 sm:flex sm:space-x-1">
-              {navigation.map((item) => {
-                const Icon = item.icon
-                return (
-                  <Link
-                    key={item.name}
-                    href={item.href}
-                    className={cn(
-                      'inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-all',
-                      pathname === item.href
-                        ? 'bg-[var(--glass-bg-hover)] border-b-2 border-[var(--gradient-primary-start)]'
-                        : 'hover:bg-[var(--glass-bg)]'
-                    )}
-                    style={{
-                      color: pathname === item.href ? 'var(--text-primary)' : 'var(--text-secondary)'
-                    }}
-                  >
-                    <Icon className="h-4 w-4 mr-2" />
-                    {item.name}
-                  </Link>
-                )
-              })}
-            </div>
+            {/* Only show navigation links when user is authenticated */}
+            {user && (
+              <div className="hidden sm:ml-6 sm:flex sm:space-x-1">
+                {navigation.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <Link
+                      key={item.name}
+                      href={item.href}
+                      className={cn(
+                        'inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-all',
+                        pathname === item.href
+                          ? 'bg-[var(--glass-bg-hover)] border-b-2 border-[var(--gradient-primary-start)]'
+                          : 'hover:bg-[var(--glass-bg)]'
+                      )}
+                      style={{
+                        color: pathname === item.href ? 'var(--text-primary)' : 'var(--text-secondary)'
+                      }}
+                    >
+                      <Icon className="h-4 w-4 mr-2" />
+                      {item.name}
+                    </Link>
+                  )
+                })}
+              </div>
+            )}
           </div>
           <div className="hidden sm:flex items-center gap-3">
             {/* Theme Toggle */}

@@ -63,7 +63,12 @@
       "WebFetch(domain:apewisdom.io)",
       "Bash(cmd.exe //c taskkill //PID 32388 //F)",
       "Bash(findstr:*)",
-      "Bash(cmd.exe:*)"
+      "Bash(cmd.exe:*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:\\Users\\tucke\\OneDrive\\Desktop\\Project-Two\\supabase\\migrations\\20251009_create_trade_snapshots.sql\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:\\Users\\tucke\\OneDrive\\Desktop\\Project-Two\\supabase\\migrations\\20251009_add_behavioral_metrics_to_trades.sql\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:\\Users\\tucke\\OneDrive\\Desktop\\Project-Two\\supabase\\migrations\\20251009_create_trade_pattern_views.sql\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:\\Users\\tucke\\OneDrive\\Desktop\\Project-Two\\supabase\\migrations\\20251009_create_snapshot_embeddings.sql\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:\\Users\\tucke\\OneDrive\\Desktop\\Project-Two\\supabase\\migrations\\20251010_add_ips_factors_to_snapshots.sql\")"
     ],
     "deny": [],
     "ask": []

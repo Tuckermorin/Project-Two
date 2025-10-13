@@ -478,3 +478,313 @@ export async function onTradeClose(tradeId: string): Promise<void> {
 
   await embedTradeOutcome(trade);
 }
+
+// ============================================================================
+// Snapshot Embeddings
+// ============================================================================
+
+/**
+ * Embed a trade snapshot for temporal pattern learning
+ * Snapshots capture state during trade lifecycle, not just entry/exit
+ */
+export async function embedTradeSnapshot(
+  snapshot: any,
+  trade: any,
+  options: {
+    includeOutcome?: boolean; // If trade is closed, include outcome context
+  } = {}
+): Promise<void> {
+  const { includeOutcome = false } = options;
+
+  console.log(`[RAG] Embedding snapshot for trade ${trade.symbol} (${snapshot.snapshot_trigger})`);
+
+  try {
+    // Build snapshot context
+    const context = buildSnapshotContext(snapshot, trade, includeOutcome);
+
+    // Generate embedding
+    const embedding = await generateEmbedding(context);
+
+    // Store in trade_snapshot_embeddings table (will create migration for this)
+    await supabase.from("trade_snapshot_embeddings").insert({
+      snapshot_id: snapshot.id,
+      trade_id: trade.id,
+      embedding: embedding,
+      metadata: {
+        symbol: trade.symbol,
+        strategy: trade.strategy_type,
+        snapshot_trigger: snapshot.snapshot_trigger,
+        days_in_trade: snapshot.days_in_trade,
+        days_to_expiration: snapshot.days_to_expiration,
+        delta_spread: snapshot.delta_spread,
+        unrealized_pnl_percent: snapshot.unrealized_pnl_percent,
+        iv_rank: snapshot.iv_rank,
+        // If trade is closed, include outcome for pattern learning
+        outcome: includeOutcome && trade.status === 'closed'
+          ? trade.realized_pnl > 0 ? 'win' : 'loss'
+          : null,
+        final_pnl_percent: includeOutcome && trade.status === 'closed'
+          ? trade.realized_pl_percent
+          : null,
+      },
+      user_id: trade.user_id,
+    });
+
+    console.log(`[RAG] ✓ Embedded snapshot ${snapshot.id}`);
+  } catch (error: any) {
+    console.error(`[RAG] Failed to embed snapshot ${snapshot.id}:`, error.message);
+    throw error;
+  }
+}
+
+/**
+ * Build context text for a trade snapshot
+ */
+function buildSnapshotContext(snapshot: any, trade: any, includeOutcome: boolean): string {
+  const lines: string[] = [
+    `Symbol: ${trade.symbol}`,
+    `Strategy: ${trade.strategy_type}`,
+    `Snapshot Type: ${snapshot.snapshot_trigger}`,
+  ];
+
+  // Trade lifecycle context
+  if (snapshot.days_in_trade != null) {
+    lines.push(`Days in Trade: ${snapshot.days_in_trade}`);
+  }
+
+  if (snapshot.days_to_expiration != null) {
+    lines.push(`Days to Expiration: ${snapshot.days_to_expiration}`);
+  }
+
+  // Current state
+  if (snapshot.current_stock_price != null) {
+    lines.push(`Stock Price: $${snapshot.current_stock_price}`);
+  }
+
+  if (snapshot.current_spread_price != null) {
+    lines.push(`Spread Price: $${snapshot.current_spread_price}`);
+  }
+
+  // Greeks at snapshot
+  if (snapshot.delta_spread != null) {
+    const deltaDirection = snapshot.delta_spread > 0 ? "bullish" : "bearish";
+    lines.push(`Delta: ${snapshot.delta_spread.toFixed(3)} (${deltaDirection})`);
+  }
+
+  if (snapshot.theta != null) {
+    lines.push(`Theta: ${snapshot.theta.toFixed(4)}`);
+  }
+
+  if (snapshot.gamma != null) {
+    lines.push(`Gamma: ${snapshot.gamma.toFixed(4)}`);
+  }
+
+  if (snapshot.vega != null) {
+    lines.push(`Vega: ${snapshot.vega.toFixed(4)}`);
+  }
+
+  // P&L at snapshot
+  if (snapshot.unrealized_pnl != null) {
+    lines.push(`Unrealized P&L: $${snapshot.unrealized_pnl.toFixed(2)}`);
+  }
+
+  if (snapshot.unrealized_pnl_percent != null) {
+    const profitStatus =
+      snapshot.unrealized_pnl_percent > 50 ? "above profit target" :
+      snapshot.unrealized_pnl_percent > 0 ? "profitable" :
+      snapshot.unrealized_pnl_percent < -50 ? "significant loss" :
+      "at loss";
+    lines.push(`P&L: ${snapshot.unrealized_pnl_percent.toFixed(1)}% (${profitStatus})`);
+  }
+
+  // IV metrics
+  if (snapshot.iv_rank != null) {
+    const ivContext =
+      snapshot.iv_rank > 70 ? "very high IV environment" :
+      snapshot.iv_rank > 50 ? "elevated IV" :
+      snapshot.iv_rank < 30 ? "low IV environment" :
+      "moderate IV";
+    lines.push(`IV Rank: ${snapshot.iv_rank.toFixed(0)}% (${ivContext})`);
+  }
+
+  if (snapshot.iv_percentile != null) {
+    lines.push(`IV Percentile: ${snapshot.iv_percentile.toFixed(0)}%`);
+  }
+
+  if (snapshot.hv_20 != null && snapshot.iv_short_strike != null) {
+    const ivVsHv = snapshot.iv_short_strike > snapshot.hv_20 ? "IV elevated vs HV" : "IV compressed vs HV";
+    lines.push(`HV20: ${snapshot.hv_20.toFixed(1)}% | IV: ${(snapshot.iv_short_strike * 100).toFixed(1)}% (${ivVsHv})`);
+  }
+
+  // Risk metrics
+  if (snapshot.probability_of_profit != null) {
+    lines.push(`Probability of Profit: ${snapshot.probability_of_profit.toFixed(1)}%`);
+  }
+
+  if (snapshot.probability_itm != null) {
+    const itmRisk =
+      snapshot.probability_itm > 50 ? "high risk of assignment" :
+      snapshot.probability_itm > 30 ? "moderate ITM risk" :
+      "low ITM risk";
+    lines.push(`ITM Probability: ${snapshot.probability_itm.toFixed(1)}% (${itmRisk})`);
+  }
+
+  // Market context
+  if (snapshot.vix_level != null) {
+    const vixEnvironment =
+      snapshot.vix_level > 30 ? "high fear" :
+      snapshot.vix_level > 20 ? "elevated uncertainty" :
+      "calm market";
+    lines.push(`VIX: ${snapshot.vix_level.toFixed(1)} (${vixEnvironment})`);
+  }
+
+  if (snapshot.spy_price != null) {
+    lines.push(`SPY: $${snapshot.spy_price.toFixed(2)}`);
+  }
+
+  if (snapshot.sector_performance != null) {
+    const sectorTrend =
+      snapshot.sector_performance > 2 ? "sector outperforming" :
+      snapshot.sector_performance < -2 ? "sector underperforming" :
+      "sector neutral";
+    lines.push(`Sector Performance: ${snapshot.sector_performance.toFixed(2)}% (${sectorTrend})`);
+  }
+
+  // If including outcome (for closed trades), add what happened next
+  if (includeOutcome && trade.status === 'closed') {
+    const outcome = trade.realized_pnl > 0 ? "WIN" : "LOSS";
+    lines.push(`\nFinal Outcome: ${outcome}`);
+    lines.push(`Final P&L: $${trade.realized_pnl.toFixed(2)} (${trade.realized_pl_percent.toFixed(1)}%)`);
+
+    // Calculate if this snapshot preceded the exit
+    if (trade.exit_date && snapshot.snapshot_time) {
+      const daysUntilExit = Math.ceil(
+        (new Date(trade.exit_date).getTime() - new Date(snapshot.snapshot_time).getTime()) /
+        (1000 * 60 * 60 * 24)
+      );
+      if (daysUntilExit >= 0) {
+        lines.push(`Days until exit from this snapshot: ${daysUntilExit}`);
+      }
+    }
+  }
+
+  return lines.join("\n");
+}
+
+/**
+ * Find similar snapshot patterns
+ * Used to answer questions like: "When delta > 0.40, what typically happens?"
+ */
+export async function findSimilarSnapshots(
+  querySnapshot: any,
+  options: {
+    matchThreshold?: number;
+    matchCount?: number;
+    onlyWithOutcomes?: boolean; // Only match snapshots from closed trades
+  } = {}
+): Promise<Array<{
+  snapshot_id: string;
+  trade_id: string;
+  similarity: number;
+  metadata: any;
+}>> {
+  const { matchThreshold = 0.80, matchCount = 20, onlyWithOutcomes = false } = options;
+
+  console.log(`[RAG] Finding similar snapshot patterns`);
+
+  try {
+    // Build query context
+    const queryText = buildSnapshotContext(querySnapshot, { symbol: querySnapshot.symbol || 'UNKNOWN' }, false);
+
+    // Generate query embedding
+    const queryEmbedding = await generateEmbedding(queryText);
+
+    // Query for similar snapshots
+    const { data, error } = await supabase.rpc("match_trade_snapshots", {
+      query_embedding: queryEmbedding,
+      match_threshold: matchThreshold,
+      match_count: matchCount,
+    });
+
+    if (error) {
+      console.error("[RAG] Error querying similar snapshots:", error);
+      return [];
+    }
+
+    let results = data || [];
+
+    // Filter to only snapshots with outcomes if requested
+    if (onlyWithOutcomes) {
+      results = results.filter((r: any) => r.metadata?.outcome != null);
+    }
+
+    console.log(`[RAG] Found ${results.length} similar snapshots`);
+
+    return results;
+  } catch (error: any) {
+    console.error(`[RAG] Failed to find similar snapshots:`, error.message);
+    return [];
+  }
+}
+
+/**
+ * Batch embed all snapshots for closed trades
+ * This allows the agent to learn temporal patterns
+ */
+export async function embedClosedTradeSnapshots(userId: string): Promise<number> {
+  console.log("[RAG] Embedding snapshots for closed trades");
+
+  // Get all closed trades
+  const { data: closedTrades, error: tradesError } = await supabase
+    .from("trades")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("status", "closed");
+
+  if (tradesError || !closedTrades || closedTrades.length === 0) {
+    console.log("[RAG] No closed trades found");
+    return 0;
+  }
+
+  const tradeIds = closedTrades.map(t => t.id);
+
+  // Get all snapshots for these trades
+  const { data: snapshots, error: snapshotsError } = await supabase
+    .from("trade_snapshots")
+    .select("*, trades!inner(*)")
+    .in("trade_id", tradeIds);
+
+  if (snapshotsError || !snapshots || snapshots.length === 0) {
+    console.log("[RAG] No snapshots found for closed trades");
+    return 0;
+  }
+
+  console.log(`[RAG] Found ${snapshots.length} snapshots to embed`);
+
+  let embedded = 0;
+  for (const snapshot of snapshots) {
+    try {
+      // Check if already embedded
+      const { data: existing } = await supabase
+        .from("trade_snapshot_embeddings")
+        .select("id")
+        .eq("snapshot_id", snapshot.id)
+        .single();
+
+      if (existing) {
+        continue;
+      }
+
+      await embedTradeSnapshot(snapshot, snapshot.trades, { includeOutcome: true });
+      embedded++;
+
+      // Rate limit
+      await new Promise(resolve => setTimeout(resolve, 100));
+    } catch (error: any) {
+      console.error(`[RAG] Failed to embed snapshot ${snapshot.id}:`, error.message);
+    }
+  }
+
+  console.log(`[RAG] ✓ Embedded ${embedded}/${snapshots.length} snapshots`);
+  return embedded;
+}
