@@ -175,6 +175,58 @@ export function initializeScheduler() {
     scheduledJobs.push(weeklyEnrichment);
     console.log('✓ Weekly RAG Enrichment - 2:00 AM Sunday');
 
+    // Job 5: Daily Watchlist IV Update - 5:00 AM EST (Mon-Fri)
+    const dailyIVUpdate = cron.schedule(
+      '0 5 * * 1-5',
+      async () => {
+        console.log('[Cron] Daily watchlist IV update triggered');
+        try {
+          const { data: watchlistItems } = await supabase
+            .from('watchlist_items')
+            .select('symbol')
+            .limit(100);
+
+          if (watchlistItems && watchlistItems.length > 0) {
+            console.log(`[Cron] Updating IV cache for ${watchlistItems.length} watchlist symbols`);
+
+            // Import the IV cache service
+            const { getIVCacheService } = await import('@/lib/services/iv-cache-service');
+            const ivService = getIVCacheService();
+
+            let successCount = 0;
+            let errorCount = 0;
+
+            for (const item of watchlistItems) {
+              try {
+                const result = await ivService.updateIVCache(item.symbol);
+                if (result.success) {
+                  successCount++;
+                } else {
+                  errorCount++;
+                  console.error(`[Cron] Failed to update IV for ${item.symbol}: ${result.error}`);
+                }
+
+                // Rate limiting: wait 100ms between requests (600/min for premium tier)
+                await new Promise(resolve => setTimeout(resolve, 100));
+              } catch (error) {
+                errorCount++;
+                console.error(`[Cron] Error updating IV for ${item.symbol}:`, error);
+              }
+            }
+
+            console.log(`[Cron] IV update complete: ${successCount} succeeded, ${errorCount} failed`);
+          } else {
+            console.log('[Cron] No watchlist items to update');
+          }
+        } catch (error) {
+          console.error('[Cron] Daily IV update failed:', error);
+        }
+      },
+      { timezone: 'America/New_York' }
+    );
+    scheduledJobs.push(dailyIVUpdate);
+    console.log('✓ Daily Watchlist IV Update - 5:00 AM EST (Mon-Fri)');
+
     schedulerStarted = true;
 
     console.log('');
@@ -187,6 +239,7 @@ export function initializeScheduler() {
     console.log('  - Midday checks: ~0 credits (cached)');
     console.log('  - Auto post-mortems: ~22 credits per closed trade');
     console.log('  - Weekly enrichment: ~70 credits/week');
+    console.log('  - Daily IV updates: ~0 credits (uses Alpha Vantage API)');
     console.log('  - TOTAL: ~2,920 credits/month (~$146)');
     console.log('');
 

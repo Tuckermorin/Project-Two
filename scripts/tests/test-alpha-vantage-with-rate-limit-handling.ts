@@ -1,6 +1,6 @@
 // Rate limit aware Alpha Vantage test
 import 'dotenv/config';
-import { getAlphaVantageClient } from './src/lib/api/alpha-vantage';
+import { getAlphaVantageClient } from '../../src/lib/api/alpha-vantage';
 
 async function testAlphaVantageWithRateLimit() {
   console.log('=== Alpha Vantage API Test (Rate Limit Aware) ===');

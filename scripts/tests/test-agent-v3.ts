@@ -1,8 +1,8 @@
 // Test script for Agent v3
-// Run with: npx tsx scripts/test-agent-v3.ts
+// Run with: npx tsx scripts/tests/test-agent-v3.ts
 
-import { runAgentV3 } from "../src/lib/agent/options-agent-v3";
-import { seedTradeEmbeddings } from "../src/lib/agent/rag-embeddings";
+import { runAgentV3 } from "../../src/lib/agent/options-agent-v3";
+import { seedTradeEmbeddings } from "../../src/lib/agent/rag-embeddings";
 
 async function main() {
   const command = process.argv[2];

@@ -1,7 +1,6 @@
 // Load environment variables from .env file
 import 'dotenv/config';
-import { getAlphaVantageClient } from './src/lib/api/alpha-vantage';
-import { getTradierClient } from './src/lib/api/tradier';
+import { getAlphaVantageClient } from '../../src/lib/api/alpha-vantage';
 
 async function testAPIConnections() {
   console.log('=== API Connections Test ===');
@@ -9,7 +8,6 @@ async function testAPIConnections() {
   // Check environment variables
   console.log('\n1. Checking API keys...');
   const alphaVantageKey = process.env.NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY;
-  const tradierKey = process.env.TRADIER_ACCESS_TOKEN;
 
   if (!alphaVantageKey || alphaVantageKey === 'your-alpha-vantage-key-here') {
     console.log('⚠️  NEXT_PUBLIC_ALPHA_VANTAGE_API_KEY not set or is placeholder');
@@ -30,15 +28,12 @@ async function testAPIConnections() {
     }
   }
 
-  if (!alphaVantageKey || !tradierKey || 
-      alphaVantageKey === 'your-alpha-vantage-key-here' || 
-      tradierKey === 'your-tradier-token-here') {
-    console.log('\n⚠️  To complete setup, get your API keys:');
+  if (!alphaVantageKey || alphaVantageKey === 'your-alpha-vantage-key-here') {
+    console.log('\n⚠️  To complete setup, get your API key:');
     console.log('   - Alpha Vantage: https://www.alphavantage.co/support/#api-key');
-    console.log('   - Tradier: https://tradier.com/products/market-data');
-    console.log('   Then update your .env file with the real keys.');
+    console.log('   Then update your .env file with the real key.');
   } else {
-    console.log('\n🎉 All API connections are ready!');
+    console.log('\n🎉 API connection is ready!');
   }
 }
 

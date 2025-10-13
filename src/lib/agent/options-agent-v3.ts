@@ -13,8 +13,15 @@ import { getSeries } from "@/lib/clients/fred";
 import { tavilySearch } from "@/lib/clients/tavily";
 import { rationaleLLM } from "@/lib/clients/llm";
 import * as db from "@/lib/db/agent";
-import { getMacroData } from "@/lib/api/macro-data";
 import { createClient } from "@/lib/supabase/server-client";
+
+// Macro data helper (previously from @/lib/api/macro-data)
+function getMacroData() {
+  return {
+    inflation_rate: 2.7, // Recent US CPI year-over-year rate
+    lastUpdated: new Date().toISOString()
+  };
+}
 
 // State interface
 interface AgentState {

@@ -488,6 +488,19 @@ export default function ExcelStyleTradesDashboard() {
     load()
   }, [])
 
+  // Auto-refresh every 5 minutes
+  useEffect(() => {
+    const AUTO_REFRESH_INTERVAL = 5 * 60 * 1000 // 5 minutes in milliseconds
+
+    const intervalId = setInterval(() => {
+      console.log('[Dashboard] Auto-refreshing trades...')
+      handleRefresh()
+    }, AUTO_REFRESH_INTERVAL)
+
+    // Cleanup on unmount
+    return () => clearInterval(intervalId)
+  }, []) // Empty deps - we want this to run once on mount
+
   // Refresh handler - updates all active trades with current market data
   const handleRefresh = async () => {
     try {

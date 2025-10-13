@@ -8,7 +8,7 @@
  */
 
 import * as dotenv from 'dotenv';
-import { getAlphaVantageClient } from '../src/lib/api/alpha-vantage';
+import { getAlphaVantageClient } from '../../src/lib/api/alpha-vantage';
 
 // Load environment variables
 dotenv.config();
