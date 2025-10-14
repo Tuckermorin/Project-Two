@@ -14,12 +14,7 @@ import {
   querySECFilings,
   queryOperationalRisks,
 } from "@/lib/clients/tavily-queries";
-import { createClient } from "@supabase/supabase-js";
-
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+import { getSupabaseServer } from "@/lib/utils/supabase-server";
 
 // ============================================================================
 // Types
@@ -161,6 +156,7 @@ async function queryRAGKnowledge(
 ): Promise<RAGKnowledgeResult> {
   try {
     // Query RAG documents (trade embeddings, post-mortems, etc.)
+    const supabase = getSupabaseServer();
     const { data, error } = await supabase
       .from("trade_embeddings")
       .select("*")

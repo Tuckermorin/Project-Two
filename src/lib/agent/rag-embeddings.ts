@@ -1,11 +1,25 @@
 // RAG Embedding Pipeline for Trade Historical Context
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Lazy initialization of Supabase client to ensure env vars are loaded
+let supabaseInstance: SupabaseClient | null = null;
+
+function getSupabase(): SupabaseClient {
+  if (!supabaseInstance) {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error(
+        'Missing Supabase credentials. Ensure NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are set in your environment.'
+      );
+    }
+
+    supabaseInstance = createClient(supabaseUrl, supabaseKey);
+  }
+  return supabaseInstance;
+}
 
 // Determine which embedding provider to use
 // Prefer OpenAI if API key is available, otherwise fall back to Ollama
@@ -89,6 +103,7 @@ export async function embedTradeOutcome(trade: any): Promise<void> {
     const embedding = await generateEmbedding(context);
 
     // Store in Supabase
+    const supabase = getSupabase();
     await supabase.from("trade_embeddings").insert({
       trade_id: trade.id,
       embedding: embedding,
@@ -302,6 +317,7 @@ export async function findSimilarTrades(
     const queryEmbedding = await generateEmbedding(queryText);
 
     // Query Supabase for similar trades
+    const supabase = getSupabase();
     const { data, error } = await supabase.rpc("match_trades", {
       query_embedding: queryEmbedding,
       match_threshold: matchThreshold,
@@ -463,6 +479,7 @@ export async function seedTradeEmbeddings(userId: string): Promise<number> {
   console.log("[RAG] Seeding trade embeddings for user", userId);
 
   // Fetch all closed trades without embeddings
+  const supabase = getSupabase();
   const { data: trades, error } = await supabase
     .from("trades")
     .select("*")
@@ -486,7 +503,7 @@ export async function seedTradeEmbeddings(userId: string): Promise<number> {
   for (const trade of trades) {
     try {
       // Check if embedding already exists
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabase()
         .from("trade_embeddings")
         .select("id")
         .eq("trade_id", trade.id)
@@ -519,6 +536,7 @@ export async function onTradeClose(tradeId: string): Promise<void> {
   console.log(`[RAG] Auto-embedding closed trade ${tradeId}`);
 
   // Fetch trade data
+  const supabase = getSupabase();
   const { data: trade, error } = await supabase
     .from("trades")
     .select("*")
@@ -565,6 +583,7 @@ export async function embedTradeSnapshot(
     const embedding = await generateEmbedding(context);
 
     // Store in trade_snapshot_embeddings table (will create migration for this)
+    const supabase = getSupabase();
     await supabase.from("trade_snapshot_embeddings").insert({
       snapshot_id: snapshot.id,
       trade_id: trade.id,
@@ -759,6 +778,7 @@ export async function findSimilarSnapshots(
     const queryEmbedding = await generateEmbedding(queryText);
 
     // Query for similar snapshots
+    const supabase = getSupabase();
     const { data, error } = await supabase.rpc("match_trade_snapshots", {
       query_embedding: queryEmbedding,
       match_threshold: matchThreshold,
@@ -794,6 +814,7 @@ export async function embedClosedTradeSnapshots(userId: string): Promise<number>
   console.log("[RAG] Embedding snapshots for closed trades");
 
   // Get all closed trades
+  const supabase = getSupabase();
   const { data: closedTrades, error: tradesError } = await supabase
     .from("trades")
     .select("id")
@@ -808,7 +829,7 @@ export async function embedClosedTradeSnapshots(userId: string): Promise<number>
   const tradeIds = closedTrades.map(t => t.id);
 
   // Get all snapshots for these trades
-  const { data: snapshots, error: snapshotsError } = await supabase
+  const { data: snapshots, error: snapshotsError } = await getSupabase()
     .from("trade_snapshots")
     .select("*, trades!inner(*)")
     .in("trade_id", tradeIds);
@@ -824,7 +845,7 @@ export async function embedClosedTradeSnapshots(userId: string): Promise<number>
   for (const snapshot of snapshots) {
     try {
       // Check if already embedded
-      const { data: existing } = await supabase
+      const { data: existing } = await getSupabase()
         .from("trade_snapshot_embeddings")
         .select("id")
         .eq("snapshot_id", snapshot.id)

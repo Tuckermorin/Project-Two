@@ -1,7 +1,7 @@
 // Historical Trade Post-Mortem Analysis
 // Deep dive analysis of closed trades to extract lessons learned and embed into RAG
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { tavilySearch } from "@/lib/clients/tavily";
 import {
   queryCatalysts,
@@ -12,10 +12,24 @@ import {
 import { embedTradeOutcome } from "./rag-embeddings";
 import { rationaleLLM } from "@/lib/clients/llm";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Lazy initialization of Supabase client to ensure env vars are loaded
+let supabaseInstance: SupabaseClient | null = null;
+
+function getSupabase(): SupabaseClient {
+  if (!supabaseInstance) {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error(
+        'Missing Supabase credentials. Ensure NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are set in your environment.'
+      );
+    }
+
+    supabaseInstance = createClient(supabaseUrl, supabaseKey);
+  }
+  return supabaseInstance;
+}
 
 // ============================================================================
 // Types
@@ -110,6 +124,7 @@ export async function analyzeTradePostMortem(
   console.log(`[PostMortem] Starting analysis for trade ${tradeId}`);
 
   // Fetch trade data
+  const supabase = getSupabase();
   const { data: trade, error: tradeError } = await supabase
     .from("trades")
     .select("*")
@@ -667,6 +682,7 @@ async function storePostMortem(
   postMortem: TradePostMortem
 ): Promise<void> {
   // Get user_id from the trade
+  const supabase = getSupabase();
   const { data: trade, error: tradeError } = await supabase
     .from("trades")
     .select("user_id")
@@ -698,6 +714,7 @@ async function storePostMortem(
 export async function getTradePostMortem(
   tradeId: string
 ): Promise<TradePostMortem | null> {
+  const supabase = getSupabase();
   const { data, error } = await supabase
     .from("trade_postmortems")
     .select("*")
@@ -737,6 +754,7 @@ async function analyzeTradeSnapshots(
 
   try {
     // Fetch all snapshots for this trade
+    const supabase = getSupabase();
     const { data: snapshots, error } = await supabase
       .from("trade_snapshots")
       .select("*")

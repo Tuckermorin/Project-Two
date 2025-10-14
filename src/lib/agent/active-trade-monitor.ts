@@ -1,7 +1,7 @@
 // Active Trade Monitoring System
 // Provides real-time context and risk alerts for open positions using deep Tavily research
 
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { tavilySearch } from "@/lib/clients/tavily";
 import {
   queryCatalysts,
@@ -12,10 +12,24 @@ import {
 import { embedTradeOutcome } from "./rag-embeddings";
 import { rationaleLLM } from "@/lib/clients/llm";
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+// Lazy initialization of Supabase client to ensure env vars are loaded
+let supabaseInstance: SupabaseClient | null = null;
+
+function getSupabase(): SupabaseClient {
+  if (!supabaseInstance) {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error(
+        'Missing Supabase credentials. Ensure NEXT_PUBLIC_SUPABASE_URL (or SUPABASE_URL) and SUPABASE_SERVICE_ROLE_KEY are set in your environment.'
+      );
+    }
+
+    supabaseInstance = createClient(supabaseUrl, supabaseKey);
+  }
+  return supabaseInstance;
+}
 
 // ============================================================================
 // Types
@@ -83,6 +97,7 @@ export async function monitorActiveTrade(
   console.log(`[ActiveMonitor] Starting deep analysis for trade ${tradeId}`);
 
   // Fetch trade data
+  const supabase = getSupabase();
   const { data: trade, error: tradeError } = await supabase
     .from("trades")
     .select("*")
@@ -200,7 +215,7 @@ export async function monitorActiveTrade(
   };
 
   // Store monitoring result for caching
-  await storeMonitorData(tradeId, result);
+  await storeMonitorData(tradeId, typedTrade.user_id, result);
 
   return result;
 }
@@ -490,6 +505,7 @@ Be direct and actionable. Focus on what matters for trade management.`;
 async function getRecentMonitorData(
   tradeId: string
 ): Promise<{ data: TradeMonitorResult; hours_old: number } | null> {
+  const supabase = getSupabase();
   const { data, error } = await supabase
     .from("trade_monitor_cache")
     .select("*")
@@ -512,9 +528,11 @@ function isMonitorFresh(monitor: { hours_old: number }, maxHours: number): boole
   return monitor.hours_old < maxHours;
 }
 
-async function storeMonitorData(tradeId: string, result: TradeMonitorResult): Promise<void> {
+async function storeMonitorData(tradeId: string, userId: string, result: TradeMonitorResult): Promise<void> {
+  const supabase = getSupabase();
   const { error } = await supabase.from("trade_monitor_cache").insert({
     trade_id: tradeId,
+    user_id: userId,
     monitor_data: result,
     created_at: new Date().toISOString(),
   });
@@ -552,6 +570,7 @@ export async function monitorAllActiveTrades(
   console.log(`[ActiveMonitor] Monitoring all active trades for user ${userId}`);
 
   // Fetch all active trades
+  const supabase = getSupabase();
   const { data: trades, error } = await supabase
     .from("trades")
     .select("*")
