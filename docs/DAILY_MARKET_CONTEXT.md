@@ -391,12 +391,17 @@ if (sentimentTrend > 1.0) {
 
 | Service | Usage | Cost |
 |---------|-------|------|
-| **Tavily API** | 10 queries × 5 results × 2 credits (advanced) | ~$0.01-0.02 |
-| **GPT-4-mini** | 1 analysis (2000 tokens) | ~$0.01 |
-| **OpenAI Embeddings** | 1 embedding (ada-002) | ~$0.0001 |
-| **Total** | Per day | **~$0.02-0.03** |
+| **Tavily API** | 10 queries × 2 credits (advanced) = 20 credits/day | Included in plan (4000 credits) |
+| **GPT-4-mini** | 1 analysis (~2000 tokens) | ~$0.01 |
+| **OpenAI Embeddings** | 1 embedding (ada-002, ~1000 tokens) | ~$0.0001 |
+| **Total out-of-pocket** | Per day | **~$0.01** |
 
-**Monthly cost:** ~$0.60-0.90/month
+**Monthly cost:** ~$0.30/month (GPT + embeddings only)
+
+**Tavily credit usage:**
+- 20 credits per day
+- 4000 credits = 200 days (~6.5 months)
+- After 200 days, need to refill Tavily credits
 
 ---
 

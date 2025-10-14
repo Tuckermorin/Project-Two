@@ -15,15 +15,17 @@ export const TavilySearchResultSchema = z.object({
   snippet: z.string().optional(),
   score: z.number().min(0).max(1),
   published_date: z.string().optional(), // Only present with topic:"news"
-  raw_content: z.string().optional(),
+  raw_content: z.string().nullable().optional(), // Can be null or missing
 });
 
 export const TavilySearchResponseSchema = z.object({
   query: z.string(),
   results: z.array(TavilySearchResultSchema),
-  answer: z.string().optional(),
+  answer: z.string().nullable().optional(), // Can be null or missing
   response_time: z.number().optional(),
   images: z.array(z.string()).optional(),
+  follow_up_questions: z.any().nullable().optional(), // Can be null
+  request_id: z.string().optional(), // Tavily includes this
 });
 
 /**

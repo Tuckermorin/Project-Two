@@ -420,7 +420,7 @@ class MarketDataService {
     try {
       // Get all watchlist stocks from database
       const { data: watchlistStocks, error } = await this.supabase
-        .from('watchlist_stocks')
+        .from('watchlist_items')
         .select('symbol');
 
       if (error) {
@@ -462,7 +462,7 @@ class MarketDataService {
         };
 
         const { error: updateError } = await this.supabase
-          .from('watchlist_stocks')
+          .from('watchlist_items')
           .update(updateData)
           .eq('symbol', symbol);
 

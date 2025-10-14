@@ -310,7 +310,7 @@ IMPORTANT:
       .from('daily_market_context')
       .select('*')
       .eq('as_of_date', asOfDate)
-      .single();
+      .maybeSingle(); // Use maybeSingle() instead of single() - returns null if no rows exist
 
     if (error || !data) {
       return null;
