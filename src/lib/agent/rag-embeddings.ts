@@ -1,6 +1,7 @@
 // RAG Embedding Pipeline for Trade Historical Context
 import { createClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
+import { getDailyMarketContextService } from "@/lib/services/daily-market-context-service";
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -846,4 +847,169 @@ export async function embedClosedTradeSnapshots(userId: string): Promise<number>
 
   console.log(`[RAG] ✓ Embedded ${embedded}/${snapshots.length} snapshots`);
   return embedded;
+}
+
+// ============================================================================
+// Market Context Augmentation for RAG
+// ============================================================================
+
+export interface MarketContextSummary {
+  date: string;
+  summary_preview: string;
+  key_themes: string[];
+  sentiment: string;
+  sentiment_score: number;
+  sector_themes?: Record<string, string>;
+}
+
+/**
+ * Get relevant market context for a trade candidate
+ * This provides the agent with recent economic/political news context
+ */
+export async function getMarketContextForCandidate(
+  candidate: any,
+  options: {
+    daysBack?: number;
+    includeSimilarDays?: boolean;
+  } = {}
+): Promise<{
+  recent_context: MarketContextSummary[];
+  similar_historical_context?: MarketContextSummary[];
+}> {
+  const { daysBack = 7, includeSimilarDays = false } = options;
+
+  try {
+    const marketContextService = getDailyMarketContextService();
+
+    // Get recent market context (last N days)
+    const recentContexts = await marketContextService.getRecentContext(daysBack);
+
+    const recentSummary: MarketContextSummary[] = recentContexts.map(ctx => ({
+      date: ctx.as_of_date,
+      summary_preview: ctx.summary.substring(0, 300) + '...',
+      key_themes: ctx.key_themes?.themes || [],
+      sentiment: ctx.overall_market_sentiment,
+      sentiment_score: ctx.sentiment_score,
+      sector_themes: ctx.sector_themes || undefined,
+    }));
+
+    // Optionally search for similar historical market conditions
+    let similarSummary: MarketContextSummary[] | undefined;
+
+    if (includeSimilarDays) {
+      // Build query from candidate characteristics
+      const query = buildMarketContextQuery(candidate);
+      const similarContexts = await marketContextService.searchSimilarContext(query, 3);
+
+      similarSummary = similarContexts.map(ctx => ({
+        date: ctx.as_of_date,
+        summary_preview: ctx.summary.substring(0, 300) + '...',
+        key_themes: ctx.key_themes?.themes || [],
+        sentiment: ctx.overall_market_sentiment,
+        sentiment_score: ctx.sentiment_score,
+        sector_themes: ctx.sector_themes || undefined,
+      }));
+    }
+
+    console.log(`[RAG] Retrieved market context: ${recentSummary.length} recent days${similarSummary ? `, ${similarSummary.length} similar days` : ''}`);
+
+    return {
+      recent_context: recentSummary,
+      similar_historical_context: similarSummary,
+    };
+  } catch (error: any) {
+    console.error(`[RAG] Failed to get market context:`, error.message);
+    return {
+      recent_context: [],
+      similar_historical_context: undefined,
+    };
+  }
+}
+
+/**
+ * Build a market context search query from candidate characteristics
+ */
+function buildMarketContextQuery(candidate: any): string {
+  const parts: string[] = [];
+
+  // Include symbol sector if known
+  if (candidate.sector) {
+    parts.push(`${candidate.sector} sector`);
+  }
+
+  // Include volatility context
+  if (candidate.iv_rank != null) {
+    if (candidate.iv_rank > 70) {
+      parts.push('high volatility elevated uncertainty');
+    } else if (candidate.iv_rank < 30) {
+      parts.push('low volatility calm market');
+    }
+  }
+
+  // Include strategy type implications
+  if (candidate.strategy === 'PUT_CREDIT_SPREAD') {
+    parts.push('bullish market conditions positive sentiment');
+  } else if (candidate.strategy === 'CALL_CREDIT_SPREAD') {
+    parts.push('bearish market conditions negative sentiment');
+  }
+
+  return parts.join(' ');
+}
+
+/**
+ * Format market context for agent prompts
+ * This creates a human-readable summary for the trading agent
+ */
+export function formatMarketContextForAgent(
+  marketContext: {
+    recent_context: MarketContextSummary[];
+    similar_historical_context?: MarketContextSummary[];
+  }
+): string {
+  const lines: string[] = [];
+
+  if (marketContext.recent_context.length > 0) {
+    lines.push('=== RECENT MARKET CONTEXT ===\n');
+
+    // Show most recent day in detail
+    const latest = marketContext.recent_context[0];
+    lines.push(`Latest (${latest.date}):`);
+    lines.push(`  Sentiment: ${latest.sentiment} (${latest.sentiment_score.toFixed(2)})`);
+    lines.push(`  Key Themes: ${latest.key_themes.slice(0, 3).join(', ')}`);
+    if (latest.sector_themes) {
+      const sectors = Object.entries(latest.sector_themes)
+        .slice(0, 3)
+        .map(([sector, theme]) => `${sector}: ${theme}`)
+        .join('; ');
+      lines.push(`  Sector Themes: ${sectors}`);
+    }
+    lines.push(`  Summary: ${latest.summary_preview}\n`);
+
+    // Show summary of other recent days
+    if (marketContext.recent_context.length > 1) {
+      lines.push('Previous Days Summary:');
+      marketContext.recent_context.slice(1, 4).forEach(ctx => {
+        lines.push(`  ${ctx.date}: ${ctx.sentiment} (${ctx.sentiment_score.toFixed(2)}) - ${ctx.key_themes.slice(0, 2).join(', ')}`);
+      });
+      lines.push('');
+    }
+  }
+
+  if (marketContext.similar_historical_context && marketContext.similar_historical_context.length > 0) {
+    lines.push('=== SIMILAR HISTORICAL CONDITIONS ===\n');
+    lines.push('Market conditions similar to current environment:\n');
+
+    marketContext.similar_historical_context.forEach((ctx, i) => {
+      lines.push(`${i + 1}. ${ctx.date}:`);
+      lines.push(`   Sentiment: ${ctx.sentiment} (${ctx.sentiment_score.toFixed(2)})`);
+      lines.push(`   Themes: ${ctx.key_themes.slice(0, 3).join(', ')}`);
+      lines.push(`   ${ctx.summary_preview}\n`);
+    });
+  }
+
+  if (lines.length === 0) {
+    return 'No recent market context available.';
+  }
+
+  return lines.join('\n');
 }
