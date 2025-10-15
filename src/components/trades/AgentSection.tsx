@@ -14,7 +14,9 @@ import { useAuth } from "@/components/auth/auth-provider";
 import { FactorScorecard } from "@/components/trades/factor-scorecard";
 import { AITradeScoreCard } from "@/components/trades/AITradeScoreCard";
 import { TradeTileCompact } from "@/components/trades/TradeTileCompact";
+import { TradeBarCompact } from "@/components/trades/TradeBarCompact";
 import { TradeDetailsModal } from "@/components/trades/TradeDetailsModal";
+import { AgentProgressBar } from "@/components/trades/AgentProgressBar";
 
 type Candidate = {
   id: string;
@@ -112,6 +114,78 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
   const [watchlistItems, setWatchlistItems] = useState<Array<{ symbol: string; company_name?: string }>>([]);
   const [selectedWatchlistSymbols, setSelectedWatchlistSymbols] = useState<Set<string>>(new Set());
   const [loadingWatchlist, setLoadingWatchlist] = useState(false);
+  const [showAllTrades, setShowAllTrades] = useState(false);
+  const [initialDisplayCount, setInitialDisplayCount] = useState(10);
+  const [loadingCache, setLoadingCache] = useState(true);
+  const [cacheLoaded, setCacheLoaded] = useState(false);
+  const [agentProgress, setAgentProgress] = useState({ step: 0, label: '' });
+  const [agentStartTime, setAgentStartTime] = useState<number | null>(null);
+
+  // Load cached results on mount
+  useEffect(() => {
+    loadCachedResults();
+  }, []);
+
+  // Progress simulation while agent is running
+  useEffect(() => {
+    if (!loading || !agentStartTime) return;
+
+    const STEPS = [
+      { time: 0, step: 1, label: '📋 Loading IPS Configuration...' },
+      { time: 3, step: 2, label: '📊 Fetching Market Data...' },
+      { time: 8, step: 3, label: '🔍 Pre-filtering Stocks...' },
+      { time: 20, step: 4, label: '⛓️ Fetching Options Chains...' },
+      { time: 60, step: 5, label: '📈 Scoring Candidates...' },
+      { time: 90, step: 6, label: '✨ Applying IPS Filters...' },
+      { time: 110, step: 7, label: '🤖 Generating AI Analysis...' },
+      { time: 130, step: 8, label: '✅ Finalizing Results...' },
+    ];
+
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - agentStartTime) / 1000);
+
+      // Find the current step based on elapsed time
+      let currentStep = STEPS[0];
+      for (const step of STEPS) {
+        if (elapsed >= step.time) {
+          currentStep = step;
+        } else {
+          break;
+        }
+      }
+
+      setAgentProgress({ step: currentStep.step, label: currentStep.label });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [loading, agentStartTime]);
+
+  async function loadCachedResults() {
+    setLoadingCache(true);
+    try {
+      const res = await fetch("/api/agent/latest");
+      const json = await res.json();
+
+      if (res.ok && json.hasCache && json.candidates?.length > 0) {
+        console.log(`[AgentSection] Loaded ${json.candidates.length} cached trade candidates`);
+        setRunId(json.run.runId);
+        setCands(json.candidates);
+        setCacheLoaded(true);
+
+        // Restore watchlist symbols if available
+        if (json.run.watchlist && Array.isArray(json.run.watchlist)) {
+          setSymbols(json.run.watchlist);
+        }
+      } else {
+        console.log("[AgentSection] No cached results found");
+      }
+    } catch (e: any) {
+      console.error("[AgentSection] Failed to load cached results:", e);
+      // Don't show error to user - just no cache available
+    } finally {
+      setLoadingCache(false);
+    }
+  }
 
   const handleAddSymbol = () => {
     const trimmed = symbolInput.trim().toUpperCase();
@@ -195,6 +269,8 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
 
     setLoading(true);
     setError(null);
+    setAgentStartTime(Date.now());
+    setAgentProgress({ step: 1, label: '📋 Loading IPS Configuration...' });
     try {
       const res = await fetch("/api/agent/run", {
         method: "POST",
@@ -236,10 +312,14 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
 
       setRunId(json.runId || null);
       setCands(json.selected || []);
+      setShowAllTrades(false); // Reset to showing top recommendations
+      setCacheLoaded(false); // Mark as fresh results, not from cache
     } catch (e: any) {
       setError(e.message);
     } finally {
       setLoading(false);
+      setAgentStartTime(null);
+      setAgentProgress({ step: 0, label: '' });
     }
   }
 
@@ -393,7 +473,7 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
               {loading ? (
                 <>
                   <span className="animate-spin mr-2">⚙️</span>
-                  Analyzing {symbols.length} symbol{symbols.length !== 1 ? "s" : ""}...
+                  Running Agent...
                 </>
               ) : (
                 <>
@@ -403,12 +483,25 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                 </>
               )}
             </Button>
-            {runId && (
+            {runId && !loading && (
               <span className="text-sm text-muted-foreground">
                 Run ID: {runId.slice(0, 8)}...
               </span>
             )}
           </div>
+
+          {/* Progress Bar */}
+          {loading && agentProgress.step > 0 && (
+            <Card className="border-2 border-primary/20 bg-primary/5">
+              <CardContent className="pt-6">
+                <AgentProgressBar
+                  currentStep={agentProgress.step}
+                  totalSteps={8}
+                  currentStepLabel={agentProgress.label}
+                />
+              </CardContent>
+            </Card>
+          )}
 
           {error && (
             <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 dark:bg-red-900/20 p-3 rounded">
@@ -417,19 +510,70 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
             </div>
           )}
 
-          {cands?.length > 0 && (
+          {/* Loading Cache Indicator */}
+          {loadingCache && (
+            <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground py-8">
+              <span className="animate-spin">⚙️</span>
+              Loading previous results...
+            </div>
+          )}
+
+          {/* No Results - First Time or No Cache */}
+          {!loadingCache && !loading && cands?.length === 0 && (
+            <div className="text-center py-8 text-muted-foreground text-sm">
+              <Bot className="h-12 w-12 mx-auto mb-3 opacity-50" />
+              <p>No agent results yet</p>
+              <p className="text-xs mt-1">Select an IPS, add symbols, and run the agent</p>
+            </div>
+          )}
+
+          {cands?.length > 0 && !loadingCache && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <div className="text-sm font-medium">
-                  Found {cands.length} potential trades
+                <div>
+                  <div className="flex items-center gap-2">
+                    <div className="text-sm font-medium">
+                      Found {cands.length} potential trades
+                      {!showAllTrades && cands.length > initialDisplayCount && (
+                        <span className="text-muted-foreground ml-2">
+                          (showing top {initialDisplayCount})
+                        </span>
+                      )}
+                    </div>
+                    {cacheLoaded && (
+                      <Badge variant="outline" className="text-xs">
+                        📂 Cached
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    {(() => {
+                      const uniqueSymbols = new Set(cands.map(c => c.symbol));
+                      const symbolCount = uniqueSymbols.size;
+                      const watchlistCount = symbols.length;
+                      const passRate = Math.round((symbolCount / watchlistCount) * 100);
+
+                      return (
+                        <>
+                          {symbolCount} unique {symbolCount === 1 ? 'stock' : 'stocks'} • {watchlistCount} in watchlist
+                          {symbolCount < watchlistCount && (
+                            <span className="ml-2 text-yellow-600 dark:text-yellow-500">
+                              ({passRate}% pass rate - {watchlistCount - symbolCount} filtered by IPS)
+                            </span>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
                 </div>
                 <div className="text-xs text-muted-foreground">
                   Sorted by IPS fit score
                 </div>
               </div>
-              {/* Compact Gamified Tiles Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 max-h-[600px] overflow-y-auto">
-                {cands.slice(0, 12).map((c) => {
+
+              {/* Compact Horizontal Bars */}
+              <div className="space-y-2">
+                {(showAllTrades ? cands : cands.slice(0, initialDisplayCount)).map((c) => {
                   // Calculate DTE
                   const getDTE = () => {
                     if (!c.contract_legs || c.contract_legs.length === 0) return 0;
@@ -448,7 +592,7 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                   const contractType = shortLeg?.right || 'P';
 
                   return (
-                    <TradeTileCompact
+                    <TradeBarCompact
                       key={c.id}
                       score={c.ips_score || c.composite_score || c.score || 0}
                       symbol={c.symbol}
@@ -468,6 +612,68 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                   );
                 })}
               </div>
+
+              {/* Show More / Show Less Button */}
+              {cands.length > initialDisplayCount && (
+                <div className="flex justify-center pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowAllTrades(!showAllTrades)}
+                    className="min-w-[200px]"
+                  >
+                    {showAllTrades ? (
+                      <>Show Top {initialDisplayCount} Only</>
+                    ) : (
+                      <>Show All {cands.length} Trades</>
+                    )}
+                  </Button>
+                </div>
+              )}
+
+              {/* Few Results Info Card */}
+              {(() => {
+                const uniqueSymbols = new Set(cands.map(c => c.symbol));
+                const symbolCount = uniqueSymbols.size;
+                const watchlistCount = symbols.length;
+                const filteredCount = watchlistCount - symbolCount;
+
+                if (symbolCount < watchlistCount * 0.3 && filteredCount > 5) {
+                  return (
+                    <Card className="border-yellow-200 dark:border-yellow-800 bg-yellow-50 dark:bg-yellow-900/10 mt-4">
+                      <CardContent className="pt-6">
+                        <div className="flex items-start gap-3">
+                          <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-500 flex-shrink-0 mt-0.5" />
+                          <div className="space-y-2 text-sm">
+                            <p className="font-medium text-yellow-900 dark:text-yellow-200">
+                              Limited Results: Only {symbolCount}/{watchlistCount} stocks passed IPS criteria
+                            </p>
+                            <p className="text-yellow-800 dark:text-yellow-300">
+                              The agent filtered out {filteredCount} stocks that didn't meet your IPS requirements.
+                              This is working as intended - the agent won't recommend trades that don't fit your strategy.
+                            </p>
+                            <div className="pt-2 space-y-1 text-xs text-yellow-700 dark:text-yellow-400">
+                              <p><strong>Common reasons for filtering:</strong></p>
+                              <ul className="list-disc list-inside space-y-0.5 ml-2">
+                                <li>IV Rank too low (stock not volatile enough)</li>
+                                <li>Poor liquidity (low open interest or volume)</li>
+                                <li>Unfavorable options chain structure</li>
+                                <li>Stock doesn't meet fundamental criteria</li>
+                                <li>No suitable contract strikes at target delta</li>
+                              </ul>
+                              <p className="pt-2">
+                                <strong>To get more recommendations:</strong> Consider adjusting your IPS thresholds or
+                                adding more stocks to your watchlist.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                }
+                return null;
+              })()}
             </div>
           )}
         </div>

@@ -15,6 +15,7 @@ import { rationaleLLM } from "@/lib/clients/llm";
 import * as db from "@/lib/db/agent";
 import { getMacroData } from "@/lib/api/macro-data";
 import { createClient } from "@/lib/supabase/server-client";
+import { AGENT_CONFIG } from "./config";
 
 // State interface
 interface AgentState {
@@ -845,10 +846,11 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
   console.log(`[FilterHighWeight] Median score: ${candidates[Math.floor(candidates.length / 2)]?.ips_score?.toFixed(1) || 0}/100`);
   console.log(`[FilterHighWeight] Lowest score: ${candidates[candidates.length - 1]?.ips_score?.toFixed(1) || 0}/100`);
 
-  // Return top 50 candidates (will be filtered down to top 20 after AI endorsement)
-  const topCandidates = candidates.slice(0, 50);
+  // Return top N candidates to ensure we have enough diversity across watchlist
+  // (will be filtered down after diversity filtering)
+  const topCandidates = candidates.slice(0, AGENT_CONFIG.filtering.topCandidatesAfterInitialFilter);
 
-  console.log(`[FilterHighWeight] Returning top ${topCandidates.length} candidates for AI endorsement`);
+  console.log(`[FilterHighWeight] Returning top ${topCandidates.length} candidates for diversity filtering`);
 
   return {
     candidates: topCandidates,
@@ -1579,11 +1581,32 @@ async function ragCorrelationScoring(state: AgentState): Promise<Partial<AgentSt
   return { candidates: scoredCandidates };
 }
 
-// Helper: Calculate yield score
+// Helper: Calculate yield score based on RISK-ADJUSTED returns
 function calculateYieldScore(candidate: any): number {
-  const riskReward = candidate.max_profit / (candidate.max_loss || 1);
-  // Normalize to 0-100 scale
-  return Math.min(100, riskReward * 100);
+  const { calculateRiskAdjustedScore } = require("./risk-adjusted-scoring");
+
+  // Get short leg delta for probability calculation
+  const shortLeg = candidate.contract_legs?.find((l: any) => l.type === "SELL");
+  const delta = shortLeg?.delta ? Math.abs(shortLeg.delta) : 0.25;
+
+  // Calculate risk-adjusted score
+  const riskAdjusted = calculateRiskAdjustedScore({
+    max_profit: candidate.max_profit || 0,
+    max_loss: candidate.max_loss || 1,
+    entry_mid: candidate.entry_mid || 0,
+    est_pop: candidate.est_pop || (1 - delta), // Use delta as proxy
+    dte: candidate.dte || 30,
+    delta,
+    theta: shortLeg?.theta,
+    vega: shortLeg?.vega,
+    iv_rank: candidate.iv_rank,
+  });
+
+  // Store detailed metrics on candidate for later analysis
+  candidate.risk_adjusted_metrics = riskAdjusted;
+
+  // Return the composite risk-adjusted score
+  return riskAdjusted.risk_adjusted_score;
 }
 
 // Helper: Calculate Reddit score
@@ -2080,34 +2103,38 @@ async function sortAndSelectTiered(state: AgentState): Promise<Partial<AgentStat
     return (b.composite_score || 0) - (a.composite_score || 0);
   });
 
-  // Take top 30 candidates before diversity filtering
-  let combined = sorted.slice(0, 30);
+  // Take top N candidates before diversity filtering to ensure we cover the watchlist
+  let combined = sorted.slice(0, AGENT_CONFIG.filtering.topCandidatesBeforeDiversity);
 
-  // Calculate diversity scores for each candidate
-  const selectedCandidates: any[] = [];
-  for (const candidate of combined) {
-    const diversityScore = calculateDiversityScore(selectedCandidates, candidate);
-    candidate.diversity_score = diversityScore;
-    selectedCandidates.push(candidate);
-  }
+  console.log(`[TieredSelection] Applying diversity filtering to ${combined.length} candidates`);
 
-  // Return top 20 by IPS score (already sorted)
-  const top20 = combined.slice(0, 20);
+  // Apply diversity filtering to ensure we get recommendations across many stocks
+  const { applyDiversificationFilters } = await import("./ips-enhanced-scoring");
+  const diversified = applyDiversificationFilters(combined, AGENT_CONFIG.diversity);
 
-  console.log(`[TieredSelection] Selected top 20 candidates by IPS score`);
+  console.log(`[TieredSelection] After diversity filtering: ${diversified.length} candidates remain`);
+
+  // Take top N by IPS score to maximize stock coverage
+  const finalCandidates = diversified.slice(0, AGENT_CONFIG.filtering.finalRecommendations);
+
+  console.log(`[TieredSelection] Selected top ${finalCandidates.length} candidates by IPS score`);
 
   // Log score distribution
-  const scores = top20.map(c => c.ips_score || 0);
+  const scores = finalCandidates.map(c => c.ips_score || 0);
   const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
   const minScore = Math.min(...scores);
   const maxScore = Math.max(...scores);
 
   console.log(`[TieredSelection] Score range: ${minScore.toFixed(1)}-${maxScore.toFixed(1)} (avg: ${avgScore.toFixed(1)})`);
 
+  // Log unique stocks coverage
+  const uniqueSymbols = new Set(finalCandidates.map(c => c.symbol));
+  console.log(`[TieredSelection] Covering ${uniqueSymbols.size} unique stocks from ${state.symbols.length}-stock watchlist`);
+
   // Log tier breakdown if tiers exist
-  const finalElite = top20.filter(c => c.tier === 'elite');
-  const finalQuality = top20.filter(c => c.tier === 'quality');
-  const finalSpeculative = top20.filter(c => c.tier === 'speculative');
+  const finalElite = finalCandidates.filter(c => c.tier === 'elite');
+  const finalQuality = finalCandidates.filter(c => c.tier === 'quality');
+  const finalSpeculative = finalCandidates.filter(c => c.tier === 'speculative');
 
   if (finalElite.length + finalQuality.length + finalSpeculative.length > 0) {
     console.log(`[TieredSelection] Tier breakdown:`);
@@ -2117,7 +2144,7 @@ async function sortAndSelectTiered(state: AgentState): Promise<Partial<AgentStat
   }
 
   // Attach general_data to each candidate for UI display (news sentiment, insider activity, etc.)
-  const enriched = top20.map(candidate => ({
+  const enriched = finalCandidates.map(candidate => ({
     ...candidate,
     general_data: state.generalData[candidate.symbol] || null
   }));

@@ -19,6 +19,26 @@ let schedulerStarted = false;
 let scheduledJobs: cron.ScheduledTask[] = [];
 
 /**
+ * Get all user IDs from the database for batch operations
+ */
+async function getAllUserIds(): Promise<string[]> {
+  try {
+    // Use admin API to get all users (requires service role key)
+    const { data: { users }, error } = await supabase.auth.admin.listUsers();
+
+    if (error) {
+      console.error('[Scheduler] Failed to fetch users:', error);
+      return [];
+    }
+
+    return users?.map(u => u.id) || [];
+  } catch (error) {
+    console.error('[Scheduler] Error fetching users:', error);
+    return [];
+  }
+}
+
+/**
  * Initialize and start all scheduled jobs
  * This is called automatically when the server starts
  */
@@ -47,18 +67,28 @@ export function initializeScheduler() {
       async () => {
         console.log('[Cron] Daily trade monitoring triggered');
         try {
-          const result = await monitorAllActiveTrades('default-user', {
-            daysBack: 7,
-            useCache: true,
-          });
-          console.log(`[Cron] Monitored ${result.monitored} trades, ${result.total_credits_used} credits used`);
+          const userIds = await getAllUserIds();
 
-          // Log critical/high risk trades
-          const urgent = result.results.filter(
-            r => r.risk_alerts.level === 'critical' || r.risk_alerts.level === 'high'
-          );
-          if (urgent.length > 0) {
-            console.log(`[Cron] ⚠️ ${urgent.length} URGENT TRADES requiring attention`);
+          if (userIds.length === 0) {
+            console.log('[Cron] No users found to monitor');
+            return;
+          }
+
+          for (const userId of userIds) {
+            console.log(`[Cron] Monitoring trades for user ${userId}`);
+            const result = await monitorAllActiveTrades(userId, {
+              daysBack: 7,
+              useCache: true,
+            });
+            console.log(`[Cron] User ${userId}: Monitored ${result.monitored} trades, ${result.total_credits_used} credits used`);
+
+            // Log critical/high risk trades
+            const urgent = result.results.filter(
+              r => r.risk_alerts.level === 'critical' || r.risk_alerts.level === 'high'
+            );
+            if (urgent.length > 0) {
+              console.log(`[Cron] ⚠️ User ${userId}: ${urgent.length} URGENT TRADES requiring attention`);
+            }
           }
         } catch (error) {
           console.error('[Cron] Daily monitoring failed:', error);
@@ -75,11 +105,20 @@ export function initializeScheduler() {
       async () => {
         console.log('[Cron] Midday trade check triggered');
         try {
-          const result = await monitorAllActiveTrades('default-user', {
-            daysBack: 1,
-            useCache: true,
-          });
-          console.log(`[Cron] Midday check complete, ${result.total_credits_used} credits (cached)`);
+          const userIds = await getAllUserIds();
+
+          if (userIds.length === 0) {
+            console.log('[Cron] No users found to monitor');
+            return;
+          }
+
+          for (const userId of userIds) {
+            const result = await monitorAllActiveTrades(userId, {
+              daysBack: 1,
+              useCache: true,
+            });
+            console.log(`[Cron] User ${userId}: Midday check complete, ${result.total_credits_used} credits (cached)`);
+          }
         } catch (error) {
           console.error('[Cron] Midday check failed:', error);
         }
@@ -145,26 +184,37 @@ export function initializeScheduler() {
       async () => {
         console.log('[Cron] Weekly RAG enrichment triggered');
         try {
-          const { data: watchlistItems } = await supabase
-            .from('watchlist_items')
-            .select('symbol')
-            .eq('user_id', 'default-user')
-            .limit(20);
+          const userIds = await getAllUserIds();
 
-          if (watchlistItems && watchlistItems.length > 0) {
-            const symbols = watchlistItems.map(item => item.symbol);
-            console.log(`[Cron] Enriching ${symbols.length} symbols`);
+          if (userIds.length === 0) {
+            console.log('[Cron] No users found for enrichment');
+            return;
+          }
 
-            const results = await batchIntelligentResearch(symbols, 'general', {
-              forceRefresh: false,
-              enableHybrid: true,
-            });
+          for (const userId of userIds) {
+            const { data: watchlistItems } = await supabase
+              .from('watchlist_items')
+              .select('symbol')
+              .eq('user_id', userId)
+              .limit(20);
 
-            const totalCredits = Object.values(results).reduce(
-              (sum, r) => sum + r.credits_used,
-              0
-            );
-            console.log(`[Cron] RAG enrichment complete, ${totalCredits} credits used`);
+            if (watchlistItems && watchlistItems.length > 0) {
+              const symbols = watchlistItems.map(item => item.symbol);
+              console.log(`[Cron] User ${userId}: Enriching ${symbols.length} symbols`);
+
+              const results = await batchIntelligentResearch(symbols, 'general', {
+                forceRefresh: false,
+                enableHybrid: true,
+              });
+
+              const totalCredits = Object.values(results).reduce(
+                (sum, r) => sum + r.credits_used,
+                0
+              );
+              console.log(`[Cron] User ${userId}: RAG enrichment complete, ${totalCredits} credits used`);
+            } else {
+              console.log(`[Cron] User ${userId}: No watchlist items to enrich`);
+            }
           }
         } catch (error) {
           console.error('[Cron] Weekly enrichment failed:', error);

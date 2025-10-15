@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server-client';
+import { getIVCacheService } from '@/lib/services/iv-cache-service';
 
 export async function GET(request: NextRequest) {
   try {
@@ -73,16 +74,18 @@ export async function POST(request: NextRequest) {
     if (error) throw error;
 
     // Trigger IV cache seeding in background (don't await - fire and forget)
-    const baseUrl = request.nextUrl.origin;
-    fetch(`${baseUrl}/api/watchlist/seed-cache`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ symbol: body.symbol })
-    }).catch(err => {
-      console.warn('IV cache seeding request failed:', err.message);
-    });
+    const ivCacheService = getIVCacheService();
+    ivCacheService.cacheHistoricalIVForSymbol(body.symbol, 252)
+      .then(result => {
+        if (result.success) {
+          console.log(`[Watchlist] Cached ${result.daysAdded} days of IV data for ${body.symbol}`);
+        } else {
+          console.warn(`[Watchlist] IV cache seeding failed for ${body.symbol}:`, result.error);
+        }
+      })
+      .catch(err => {
+        console.warn(`[Watchlist] IV cache seeding error for ${body.symbol}:`, err.message);
+      });
 
     console.log(`[Watchlist] Added ${body.symbol}, triggered IV cache seeding`);
 

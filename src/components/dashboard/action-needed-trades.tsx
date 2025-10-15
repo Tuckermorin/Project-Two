@@ -10,8 +10,10 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { AlertCircle, Loader2, RefreshCw, Trash2, MoreVertical } from 'lucide-react'
 import { dispatchTradesUpdated, TRADES_UPDATED_EVENT } from '@/lib/events'
+import { cn } from '@/lib/utils'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -465,37 +467,47 @@ export function ActionNeededTradesPanel() {
               <DialogTitle>Enter Close Details</DialogTitle>
             </DialogHeader>
             {closingDialog.trade && (
-              <div className="space-y-3">
+              <div className="space-y-4">
                 <div className="text-sm text-gray-600">{closingDialog.trade.name}</div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-sm">Close Date</Label>
-                    <Input type="date" value={closingDialog.closeDate} onChange={e => setClosingDialog(prev => ({ ...prev, closeDate: e.target.value }))} />
-                  </div>
-                  <div>
-                    <Label className="text-sm">Closing Reason</Label>
-                    <Select value={closingDialog.closeMethod} onValueChange={value => setClosingDialog(prev => ({ ...prev, closeMethod: value }))}>
-                      <SelectTrigger className="w-full">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {closeMethods.map(method => (
-                          <SelectItem key={method.key} value={method.key}>{method.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="md:col-span-2">
-                    <Label className="text-sm">Cost to Close (per spread)</Label>
-                    <Input
-                      inputMode="decimal"
-                      placeholder="e.g., 0.35"
-                      value={closingDialog.costToClosePerSpread}
-                      onChange={e => setClosingDialog(prev => ({ ...prev, costToClosePerSpread: e.target.value }))}
-                    />
-                    <div className="text-xs text-gray-500 mt-1">
-                      Initial credit: ${closingDialog.trade.creditReceived?.toFixed(2) ?? '0.00'} • Contracts: {closingDialog.trade.contracts}
-                    </div>
+                <div>
+                  <Label className="text-sm">Close Date</Label>
+                  <Input type="date" value={closingDialog.closeDate} onChange={e => setClosingDialog(prev => ({ ...prev, closeDate: e.target.value }))} />
+                </div>
+                <div>
+                  <Label className="text-sm mb-3 block">Closing Reason</Label>
+                  <RadioGroup
+                    value={closingDialog.closeMethod}
+                    onValueChange={value => setClosingDialog(prev => ({ ...prev, closeMethod: value }))}
+                    className="grid grid-cols-2 gap-3"
+                  >
+                    {closeMethods.map(method => (
+                      <Label
+                        key={method.key}
+                        htmlFor={method.key}
+                        className={cn(
+                          "flex items-center gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all",
+                          "hover:border-[var(--gradient-primary-start)] hover:bg-[var(--glass-bg-hover)]",
+                          closingDialog.closeMethod === method.key
+                            ? "border-[var(--gradient-primary-start)] bg-[var(--glass-bg-hover)]"
+                            : "border-[var(--glass-border)] bg-[var(--glass-bg)]"
+                        )}
+                      >
+                        <RadioGroupItem value={method.key} id={method.key} />
+                        <span className="text-sm font-medium">{method.label}</span>
+                      </Label>
+                    ))}
+                  </RadioGroup>
+                </div>
+                <div>
+                  <Label className="text-sm">Cost to Close (per spread)</Label>
+                  <Input
+                    inputMode="decimal"
+                    placeholder="e.g., 0.35"
+                    value={closingDialog.costToClosePerSpread}
+                    onChange={e => setClosingDialog(prev => ({ ...prev, costToClosePerSpread: e.target.value }))}
+                  />
+                  <div className="text-xs text-gray-500 mt-1">
+                    Initial credit: ${closingDialog.trade.creditReceived?.toFixed(2) ?? '0.00'} • Contracts: {closingDialog.trade.contracts}
                   </div>
                 </div>
                 {closingDialog.error && (

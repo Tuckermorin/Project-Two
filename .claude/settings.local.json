@@ -86,7 +86,16 @@
       "Bash(git push:*)",
       "Bash(git ls-tree:*)",
       "Bash(git stash push:*)",
-      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ''trade_snapshots'' ORDER BY ordinal_position;\")"
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ''trade_snapshots'' ORDER BY ordinal_position;\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\":*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT run_id, started_at, finished_at, mode, jsonb_array_length(watchlist) as watchlist_count FROM agent_runs ORDER BY started_at DESC LIMIT 5;\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT run_id, COUNT(*) as candidate_count, array_agg(DISTINCT symbol ORDER BY symbol) as symbols FROM trade_candidates GROUP BY run_id ORDER BY MAX(id) DESC LIMIT 3;\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT tc.run_id, COUNT(*) as candidate_count, array_agg(DISTINCT tc.symbol ORDER BY tc.symbol) as symbols FROM trade_candidates tc GROUP BY tc.run_id ORDER BY tc.run_id DESC LIMIT 3;\" -x)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT COUNT(*) as total_trades, COUNT(DISTINCT number_of_contracts) as distinct_contract_values FROM trades WHERE number_of_contracts IS NOT NULL;\")",
+      "Bash(test:*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"c:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251015_fix_closed_trade_percentages.sql\")",
+      "Bash(git restore:*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"c:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251015_rollback_normalization.sql\")"
     ],
     "deny": [],
     "ask": []
