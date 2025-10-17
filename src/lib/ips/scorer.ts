@@ -4,7 +4,6 @@ type Features = {
   iv_rank?: number;           // 0..1
   term_slope?: number;        // arbitrary; we map → 0..1
   put_skew?: number;          // arbitrary; we map → 0..1
-  dte_mode?: number;          // days; we map → 0..1
   volume_oi_ratio?: number;   // ratio
   macro_regime?: string;      // categorical
   [k: string]: any;
@@ -17,10 +16,6 @@ function normalize(featureKey: string, value: any): number {
     case "iv_rank": return Math.max(0, Math.min(1, Number(value)));
     case "term_slope": return Math.max(0, Math.min(1, (Number(value) * 0.5) + 0.5));
     case "put_skew": return Math.max(0, Math.min(1, (Number(value) * 0.5) + 0.5));
-    case "dte_mode": {
-      const dte = Number(value);
-      return Math.max(0, Math.min(1, (14 - Math.abs(dte - 10)) / 14));
-    }
     case "volume_oi_ratio": return Math.max(0, Math.min(1, Number(value)));
     case "macro_regime": {
       const map: Record<string, number> = { easing: 0.7, neutral: 0.5, tightening: 0.3 };

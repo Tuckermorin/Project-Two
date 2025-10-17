@@ -95,7 +95,12 @@
       "Bash(test:*)",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"c:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251015_fix_closed_trade_percentages.sql\")",
       "Bash(git restore:*)",
-      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"c:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251015_rollback_normalization.sql\")"
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"c:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251015_rollback_normalization.sql\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT COUNT(*) as with_pnl_percent, MIN(realized_pl_percent) as min_pnl_pct, MAX(realized_pl_percent) as max_pnl_pct, AVG(realized_pl_percent) as avg_pnl_pct FROM trades WHERE status = ''closed'' AND realized_pl_percent IS NOT NULL;\")",
+      "Bash(echo $DATABASE_URL)",
+      "Bash(PGPASSWORD='Cochabamba19342011!!' \"/c/Program Files/PostgreSQL/17/bin/psql\":*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"\\d ips_configurations\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT column_name, data_type, is_nullable, column_default FROM information_schema.columns WHERE table_name = ''ips_configurations'' AND column_name IN (''min_dte'', ''max_dte'');\")"
     ],
     "deny": [],
     "ask": []

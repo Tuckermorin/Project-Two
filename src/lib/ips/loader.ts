@@ -1,24 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
-
-type IPSFactor = {
-  factor_key: string;           // e.g. "iv_rank", "delta_max", "term_slope"
-  weight: number;               // 0..1
-  threshold?: number | null;    // optional gating threshold
-  threshold_max?: number | null; // optional max threshold for range
-  direction?: "gte" | "lte" | "range" | null; // how to interpret threshold
-  enabled?: boolean | null;
-  factor_scope?: "general" | "chain" | null; // scope: general (non-chain) or chain (requires options data)
-  // optional meta
-  display_name?: string | null;
-  description?: string | null;
-};
-
-export type IPSConfig = {
-  id: string;
-  name: string;
-  version: string | null;
-  factors: IPSFactor[];
-};
+import { IPSConfig, IPSFactor } from "@/lib/types/ips";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -62,6 +43,8 @@ export async function loadActiveIPS(userId?: string): Promise<IPSConfig> {
     id: cfgId,
     name: cfgRow.name ?? "Active IPS",
     version: null,
+    min_dte: Number(cfgRow.min_dte),
+    max_dte: Number(cfgRow.max_dte),
     factors: (factors ?? []).map(f => ({
       factor_key: f.factor_id, // Use factor_id as the key
       weight: Number(f.weight ?? 0) / 10, // Normalize from 1-10 scale to 0-1
@@ -129,6 +112,8 @@ export async function loadIPSById(ipsId: string): Promise<IPSConfig> {
     id: ipsId,
     name: cfgRow.name ?? "IPS",
     version: null,
+    min_dte: Number(cfgRow.min_dte),
+    max_dte: Number(cfgRow.max_dte),
     factors: (factors ?? []).map(f => {
       const factor = {
         factor_key: f.factor_id,

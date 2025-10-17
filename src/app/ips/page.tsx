@@ -45,6 +45,7 @@ import {
 import { IPSStrategySelector } from "@/components/ips/ips-strategy-selector";
 import { IPSFactorSelector } from "@/components/ips/ips-factor-selector";
 import { IPSExitWatchConfig } from "@/components/ips/ips-exit-watch-config";
+import { IPSDTEConfig } from "@/components/ips/ips-dte-config";
 import { IPSSummary } from "@/components/ips/ips-summary";
 import { TradeScoreDisplay } from "@/components/ips/trade-score-display";
 
@@ -181,6 +182,9 @@ function normalizeIpsRows(rows: unknown): IPSConfiguration[] {
       // Include exit strategies and watch criteria
       exit_strategies: r?.exit_strategies ?? undefined,
       watch_criteria: r?.watch_criteria ?? undefined,
+      // Include DTE configuration
+      min_dte: r?.min_dte ?? undefined,
+      max_dte: r?.max_dte ?? undefined,
       // Include any passthrough timestamps if present
       created_at: r?.created_at ?? undefined,
       updated_at: r?.updated_at ?? undefined,
@@ -200,6 +204,8 @@ interface IPSFlowState {
   factorConfigurations: Record<string, any>;
   exitStrategies?: any;
   watchCriteria?: any;
+  minDTE?: number;
+  maxDTE?: number;
   currentIPSId: string | null;
   isLoading: boolean;
 }
@@ -531,6 +537,8 @@ export default function IPSPage() {
       factorConfigurations: configurations,
       exitStrategies: (ips as any).exit_strategies || undefined,
       watchCriteria: (ips as any).watch_criteria || undefined,
+      minDTE: (ips as any).min_dte || undefined,
+      maxDTE: (ips as any).max_dte || undefined,
       currentIPSId: ipsId,
     }));
   };
@@ -654,6 +662,12 @@ const handleSaveIPS = async (ipsData: any) => {
   try {
     setCreating(true);
 
+    // Validate DTE configuration
+    if (!state.minDTE || !state.maxDTE) {
+      toast.error('Please configure the DTE (Days to Expiration) window');
+      return;
+    }
+
     // Build the complete IPS data INCLUDING the transformed factors
     const completeIPSData = {
       name: ipsData.name,
@@ -665,6 +679,8 @@ const handleSaveIPS = async (ipsData: any) => {
       active_factors: factors.filter((f: any) => f.enabled !== false).length,
       exit_strategies: state.exitStrategies,
       watch_criteria: state.watchCriteria,
+      min_dte: state.minDTE,
+      max_dte: state.maxDTE,
       created_at: new Date().toISOString(),
     };
 
@@ -817,13 +833,28 @@ const handleSaveIPS = async (ipsData: any) => {
         )}
 
         {state.step === "exit_watch" && (
-          <div className="max-w-4xl mx-auto">
+          <div className="max-w-4xl mx-auto space-y-6">
             <div className="mb-6">
-              <h2 className="text-2xl font-bold">Exit Strategies & Watch Criteria</h2>
+              <h2 className="text-2xl font-bold">Configuration & Risk Management</h2>
               <p className="text-gray-600 mt-1">
-                Define when to exit your positions and what conditions should trigger alerts
+                Configure DTE window, exit strategies, and watch criteria
               </p>
             </div>
+
+            {/* DTE Configuration */}
+            <IPSDTEConfig
+              minDTE={state.minDTE}
+              maxDTE={state.maxDTE}
+              onChange={({ min_dte, max_dte }) => {
+                setState(prev => ({
+                  ...prev,
+                  minDTE: min_dte,
+                  maxDTE: max_dte
+                }));
+              }}
+            />
+
+            {/* Exit & Watch Configuration */}
             <IPSExitWatchConfig
               exitStrategies={state.exitStrategies}
               watchCriteria={state.watchCriteria}
@@ -842,6 +873,7 @@ const handleSaveIPS = async (ipsData: any) => {
                 }));
               }}
             />
+
             <div className="flex justify-between mt-6">
               <Button
                 variant="outline"
@@ -851,6 +883,7 @@ const handleSaveIPS = async (ipsData: any) => {
               </Button>
               <Button
                 onClick={() => handleStepNavigation("summary")}
+                disabled={!state.minDTE || !state.maxDTE}
               >
                 Continue to Summary
               </Button>
@@ -1073,6 +1106,22 @@ const handleSaveIPS = async (ipsData: any) => {
               </DialogHeader>
 
               <div className="space-y-6 py-2">
+                {/* DTE Configuration Summary */}
+                {detailsDialog.ips?.min_dte && detailsDialog.ips?.max_dte && (
+                  <div className="p-4 bg-orange-50 rounded-lg border border-orange-200">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Settings className="h-5 w-5 text-orange-600" />
+                      <h4 className="font-semibold text-orange-900">DTE Configuration</h4>
+                    </div>
+                    <div className="text-sm text-orange-800">
+                      Options window: <strong>{detailsDialog.ips.min_dte}-{detailsDialog.ips.max_dte} days</strong> to expiration
+                      <p className="text-xs mt-1 text-orange-700">
+                        The agent will only consider options expiring within this range
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="p-3 bg-blue-50 rounded-lg">
                     <div className="flex items-center gap-2 mb-2">

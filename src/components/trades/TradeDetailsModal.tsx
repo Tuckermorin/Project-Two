@@ -29,6 +29,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { FactorScorecard } from '@/components/trades/factor-scorecard';
+import { PriceRangeChart } from '@/components/trades/PriceRangeChart';
 
 interface NewsSentiment {
   sentiment_label: string;
@@ -213,6 +214,18 @@ export function TradeDetailsModal({
                 )}
               </CardContent>
             </Card>
+
+            {/* 52-Week Price Range Chart */}
+            {candidate.current_price && candidate.high_52week && candidate.low_52week && (
+              <PriceRangeChart
+                symbol={candidate.symbol}
+                currentPrice={candidate.current_price}
+                high52Week={candidate.high_52week}
+                low52Week={candidate.low_52week}
+                high52WeekDate={candidate.high_52week_date || new Date().toISOString()}
+                low52WeekDate={candidate.low_52week_date || new Date().toISOString()}
+              />
+            )}
 
             {/* News Sentiment Card */}
             {newsSentiment && newsSentiment.count > 0 && (

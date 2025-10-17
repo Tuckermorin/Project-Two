@@ -538,6 +538,11 @@ async function fetchOptionsChains(state: AgentState): Promise<Partial<AgentState
         console.warn(`[FetchOptionsChains] Failed to calculate Put/Call ratios for ${symbol}:`, error);
       }
 
+      // Extract current price from quote for 52-week chart
+      const currentPrice = quote?.["Global Quote"]?.["05. price"]
+        ? parseFloat(quote["Global Quote"]["05. price"])
+        : null;
+
       marketData[symbol] = {
         contracts: normalized,
         quote,
@@ -548,8 +553,13 @@ async function fetchOptionsChains(state: AgentState): Promise<Partial<AgentState
         iv_percentile: state.generalData[symbol]?.iv_percentile || null,
       };
 
+      // Add current price to generalData for 52-week chart
+      if (state.generalData[symbol] && currentPrice) {
+        state.generalData[symbol].current_price = currentPrice;
+      }
+
       // Use general data directly - it already has overview fields spread at root level
-      // plus sma200, sma50, momentum, iv_rank, iv_percentile, news
+      // plus sma200, sma50, momentum, iv_rank, iv_percentile, news, current_price
       fundamentalData[symbol] = state.generalData[symbol] || {};
 
       console.log(`[FetchOptionsChains] Got ${normalized.length} contracts for ${symbol}`);
@@ -858,6 +868,17 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
   };
 }
 
+// Helper: Calculate days to expiration from date string
+function calculateDTE(expiryDate: string): number {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0); // Normalize to start of day
+  const expiry = new Date(expiryDate);
+  expiry.setHours(0, 0, 0, 0);
+  const diffTime = expiry.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+  return diffDays;
+}
+
 // Helper: Generate candidate trades for a symbol
 async function generateCandidatesForSymbol(
   symbol: string,
@@ -873,11 +894,39 @@ async function generateCandidatesForSymbol(
 
   const candidates: any[] = [];
 
+  // Get DTE configuration from IPS
+  const minDTE = ipsConfig.min_dte || 1;
+  const maxDTE = ipsConfig.max_dte || 365;
+
+  console.log(`[${symbol}] IPS DTE filter: ${minDTE}-${maxDTE} days`);
+
   // Filter for put credit spreads (same logic as original agent)
   const puts = contracts.filter((c: any) => c.option_type === "P" && c.expiry);
-  const expirations = [...new Set(puts.map((p: any) => p.expiry))];
+  const allExpirations = [...new Set(puts.map((p: any) => p.expiry))];
 
-  for (const expiry of expirations.slice(0, 3)) {
+  // Filter expirations by DTE range from IPS configuration
+  const validExpirations = allExpirations.filter(expiry => {
+    const dte = calculateDTE(expiry);
+    const isValid = dte >= minDTE && dte <= maxDTE;
+    if (!isValid) {
+      console.log(`[${symbol}] Filtered out expiry ${expiry} (DTE: ${dte}, outside range ${minDTE}-${maxDTE})`);
+    }
+    return isValid;
+  });
+
+  // Sort by DTE (earliest first) and take up to 3 valid expirations
+  const expirations = validExpirations
+    .map(expiry => ({ expiry, dte: calculateDTE(expiry) }))
+    .sort((a, b) => a.dte - b.dte)
+    .slice(0, 3)
+    .map(e => e.expiry);
+
+  console.log(`[${symbol}] Found ${allExpirations.length} total expirations, ${validExpirations.length} within DTE range, considering ${expirations.length}`);
+
+  for (const expiry of expirations) {
+    const dte = calculateDTE(expiry);
+    console.log(`[${symbol}] Processing expiry ${expiry} (DTE: ${dte})`);
+
     const expiryPuts = puts
       .filter((p: any) => p.expiry === expiry)
       .filter((p: any) => p.strike && p.bid && p.ask && p.strike < currentPrice)
@@ -918,6 +967,7 @@ async function generateCandidatesForSymbol(
         id: uuidv4(),
         symbol,
         strategy: "put_credit_spread",
+        dte: dte, // Add DTE to candidate for display and filtering
         contract_legs: [
           {
             type: "SELL",
@@ -2106,21 +2156,60 @@ async function sortAndSelectTiered(state: AgentState): Promise<Partial<AgentStat
   // Take top N candidates before diversity filtering to ensure we cover the watchlist
   let combined = sorted.slice(0, AGENT_CONFIG.filtering.topCandidatesBeforeDiversity);
 
-  console.log(`[TieredSelection] Applying diversity filtering to ${combined.length} candidates`);
+  console.log(`[TieredSelection] Ensuring at least one trade per stock first`);
 
-  // Apply diversity filtering to ensure we get recommendations across many stocks
+  // STEP 1: Ensure at least ONE trade per unique stock (highest IPS score per stock)
+  const symbolMap = new Map<string, any>();
+  for (const candidate of combined) {
+    const existing = symbolMap.get(candidate.symbol);
+    if (!existing || candidate.ips_score > existing.ips_score) {
+      symbolMap.set(candidate.symbol, candidate);
+    }
+  }
+
+  const onePerStock = Array.from(symbolMap.values()).sort((a, b) => (b.ips_score || 0) - (a.ips_score || 0));
+  console.log(`[TieredSelection] Guaranteed ${onePerStock.length} trades (one per stock with viable candidates)`);
+
+  // STEP 2: Add additional high-scoring trades from the same stocks (up to diversity limits)
   const { applyDiversificationFilters } = await import("./ips-enhanced-scoring");
-  const diversified = applyDiversificationFilters(combined, AGENT_CONFIG.diversity);
 
-  console.log(`[TieredSelection] After diversity filtering: ${diversified.length} candidates remain`);
+  // Start with one per stock, then add more from the remaining candidates
+  const remaining = combined.filter(c => !onePerStock.includes(c));
+  const additional = applyDiversificationFilters(remaining, {
+    ...AGENT_CONFIG.diversity,
+    maxPerSymbol: 2, // Allow up to 2 MORE per symbol (total of 3 including the guaranteed one)
+  });
 
-  // Take top N by IPS score to maximize stock coverage
-  const finalCandidates = diversified.slice(0, AGENT_CONFIG.filtering.finalRecommendations);
+  const diversified = [...onePerStock, ...additional].sort((a, b) => (b.ips_score || 0) - (a.ips_score || 0));
 
-  console.log(`[TieredSelection] Selected top ${finalCandidates.length} candidates by IPS score`);
+  console.log(`[TieredSelection] After adding additional trades: ${diversified.length} total candidates`);
+
+  // Dynamically set final recommendations to match stocks with viable candidates
+  // Minimum of onePerStock.length (all stocks), maximum of configured value
+  const targetRecommendations = Math.max(onePerStock.length, AGENT_CONFIG.filtering.finalRecommendations);
+
+  // Take top N recommendations (at least one per stock)
+  const finalCandidates = diversified.slice(0, targetRecommendations);
+
+  console.log(`[TieredSelection] Selected ${finalCandidates.length} trades (covering ${onePerStock.length} stocks)`);
+
+  // Take additional candidates for failure analysis
+  const failureAnalysisCandidates = diversified.slice(
+    targetRecommendations,
+    targetRecommendations + AGENT_CONFIG.filtering.failureAnalysisCount
+  );
+
+  console.log(`[TieredSelection] Including ${failureAnalysisCandidates.length} additional candidates for failure analysis`);
+
+  // Combine for full top 40 display
+  const allCandidates = [...finalCandidates, ...failureAnalysisCandidates];
+
+  // Add status flag to distinguish recommendations vs analysis
+  finalCandidates.forEach(c => { c.recommendation_status = 'RECOMMENDED'; });
+  failureAnalysisCandidates.forEach(c => { c.recommendation_status = 'ANALYSIS_ONLY'; });
 
   // Log score distribution
-  const scores = finalCandidates.map(c => c.ips_score || 0);
+  const scores = allCandidates.map(c => c.ips_score || 0);
   const avgScore = scores.reduce((a, b) => a + b, 0) / scores.length;
   const minScore = Math.min(...scores);
   const maxScore = Math.max(...scores);
@@ -2128,8 +2217,19 @@ async function sortAndSelectTiered(state: AgentState): Promise<Partial<AgentStat
   console.log(`[TieredSelection] Score range: ${minScore.toFixed(1)}-${maxScore.toFixed(1)} (avg: ${avgScore.toFixed(1)})`);
 
   // Log unique stocks coverage
-  const uniqueSymbols = new Set(finalCandidates.map(c => c.symbol));
+  const uniqueSymbols = new Set(allCandidates.map(c => c.symbol));
   console.log(`[TieredSelection] Covering ${uniqueSymbols.size} unique stocks from ${state.symbols.length}-stock watchlist`);
+
+  // Identify which stocks from watchlist have NO candidates
+  const symbolsWithCandidates = new Set(allCandidates.map(c => c.symbol));
+  const symbolsWithoutCandidates = state.symbols.filter(s => !symbolsWithCandidates.has(s));
+
+  if (symbolsWithoutCandidates.length > 0) {
+    console.log(`[TieredSelection] ⚠️  ${symbolsWithoutCandidates.length} stocks had NO viable candidates:`);
+    symbolsWithoutCandidates.forEach(symbol => {
+      console.log(`  - ${symbol}: Filtered out during early stages (check pre-filter logs)`);
+    });
+  }
 
   // Log tier breakdown if tiers exist
   const finalElite = finalCandidates.filter(c => c.tier === 'elite');
@@ -2137,17 +2237,84 @@ async function sortAndSelectTiered(state: AgentState): Promise<Partial<AgentStat
   const finalSpeculative = finalCandidates.filter(c => c.tier === 'speculative');
 
   if (finalElite.length + finalQuality.length + finalSpeculative.length > 0) {
-    console.log(`[TieredSelection] Tier breakdown:`);
+    console.log(`[TieredSelection] Top 20 Tier breakdown:`);
     console.log(`  Elite (IPS≥90): ${finalElite.length} trades`);
     console.log(`  Quality (IPS 75-89): ${finalQuality.length} trades`);
     console.log(`  Speculative (IPS 60-74): ${finalSpeculative.length} trades`);
   }
 
-  // Attach general_data to each candidate for UI display (news sentiment, insider activity, etc.)
-  const enriched = finalCandidates.map(candidate => ({
-    ...candidate,
-    general_data: state.generalData[candidate.symbol] || null
-  }));
+  // Attach general_data and failure reasons to each candidate for UI display
+  const enriched = allCandidates.map(candidate => {
+    const failures = [];
+
+    // Analyze why this candidate might not be top-tier
+    if (candidate.ips_factor_details) {
+      const majorMisses = candidate.ips_factor_details.major_misses || [];
+      const minorMisses = candidate.ips_factor_details.minor_misses || [];
+
+      if (majorMisses.length > 0) {
+        failures.push({
+          category: 'IPS Violations',
+          details: majorMisses.map(m => `${m.factor_name}: ${m.actual_display} (needed ${m.target_display})`)
+        });
+      }
+
+      if (minorMisses.length > 0 && candidate.recommendation_status === 'ANALYSIS_ONLY') {
+        failures.push({
+          category: 'Minor Issues',
+          details: minorMisses.map(m => `${m.factor_name}: ${m.actual_display}`)
+        });
+      }
+    }
+
+    // Check for liquidity issues
+    if (candidate.contract_legs) {
+      const shortLeg = candidate.contract_legs.find(l => l.type === 'SELL');
+      if (shortLeg && shortLeg.volume < 100) {
+        failures.push({
+          category: 'Liquidity',
+          details: [`Low volume: ${shortLeg.volume} contracts`]
+        });
+      }
+      if (shortLeg && shortLeg.oi < 500) {
+        failures.push({
+          category: 'Liquidity',
+          details: [`Low open interest: ${shortLeg.oi} contracts`]
+        });
+      }
+    }
+
+    // Check for risk/reward issues
+    if (candidate.max_profit && candidate.max_loss) {
+      const riskReward = candidate.max_profit / candidate.max_loss;
+      if (riskReward < 0.20) {
+        failures.push({
+          category: 'Risk/Reward',
+          details: [`Poor ratio: ${(riskReward * 100).toFixed(1)}% (target: >20%)`]
+        });
+      }
+    }
+
+    // Extract 52-week price range data for chart display
+    const generalData = state.generalData[candidate.symbol];
+    const high52Week = generalData?.["52WeekHigh"] ? parseFloat(generalData["52WeekHigh"]) : null;
+    const low52Week = generalData?.["52WeekLow"] ? parseFloat(generalData["52WeekLow"]) : null;
+    const currentPrice = generalData?.current_price || null;
+
+    return {
+      ...candidate,
+      general_data: generalData || null,
+      failure_analysis: failures.length > 0 ? failures : null,
+      // Add 52-week price range data for PriceRangeChart component
+      current_price: currentPrice,
+      high_52week: high52Week,
+      low_52week: low52Week,
+      // Alpha Vantage doesn't provide exact dates for 52-week high/low
+      // We'll use approximate dates (1 year ago to today) as placeholders
+      high_52week_date: high52Week ? new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString() : null,
+      low_52week_date: low52Week ? new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString() : null,
+    };
+  });
 
   return { selected: enriched };
 

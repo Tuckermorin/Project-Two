@@ -190,10 +190,26 @@ export async function POST(req: NextRequest) {
       is_active = true,
       strategies = [] as string[],
       factors = [] as NewFactor[],
+      min_dte,
+      max_dte,
     } = body || {};
 
     if (!name || !Array.isArray(factors)) {
       return new Response(JSON.stringify({ error: 'name and factors[] required' }), { status: 400 });
+    }
+
+    // Validate DTE configuration - required fields
+    if (typeof min_dte !== 'number' || typeof max_dte !== 'number') {
+      return new Response(JSON.stringify({ error: 'min_dte and max_dte are required and must be numbers' }), { status: 400 });
+    }
+    if (min_dte < 1) {
+      return new Response(JSON.stringify({ error: 'min_dte must be at least 1 day' }), { status: 400 });
+    }
+    if (max_dte < min_dte) {
+      return new Response(JSON.stringify({ error: 'max_dte must be greater than or equal to min_dte' }), { status: 400 });
+    }
+    if (max_dte > 365) {
+      return new Response(JSON.stringify({ error: 'max_dte cannot exceed 365 days' }), { status: 400 });
     }
 
     const user_id = user.id;
@@ -218,7 +234,7 @@ export async function POST(req: NextRequest) {
 
     const { data: ipsRows, error: ipsErr } = await supabase
       .from('ips_configurations')
-      .insert([{ user_id, name, description, is_active, strategies, exit_strategies, watch_criteria }])
+      .insert([{ user_id, name, description, is_active, strategies, exit_strategies, watch_criteria, min_dte, max_dte }])
       .select('id')
       .single();
 
@@ -362,16 +378,39 @@ export async function PUT(req: NextRequest) {
       factors = [] as NewFactor[],
       exit_strategies = null,
       watch_criteria = null,
+      min_dte,
+      max_dte,
     } = body || {};
 
     if (!id) {
       return new Response(JSON.stringify({ error: 'id required' }), { status: 400 });
     }
 
+    // Validate DTE if provided
+    if (min_dte !== undefined && max_dte !== undefined) {
+      if (typeof min_dte !== 'number' || typeof max_dte !== 'number') {
+        return new Response(JSON.stringify({ error: 'min_dte and max_dte must be numbers' }), { status: 400 });
+      }
+      if (min_dte < 1) {
+        return new Response(JSON.stringify({ error: 'min_dte must be at least 1 day' }), { status: 400 });
+      }
+      if (max_dte < min_dte) {
+        return new Response(JSON.stringify({ error: 'max_dte must be greater than or equal to min_dte' }), { status: 400 });
+      }
+      if (max_dte > 365) {
+        return new Response(JSON.stringify({ error: 'max_dte cannot exceed 365 days' }), { status: 400 });
+      }
+    }
+
+    // Build update object
+    const updateData: any = { name, description, is_active, strategies, exit_strategies, watch_criteria };
+    if (min_dte !== undefined) updateData.min_dte = min_dte;
+    if (max_dte !== undefined) updateData.max_dte = max_dte;
+
     // RLS automatically enforces user ownership - no need for .eq('user_id', user.id)
     const { error: ipsErr } = await supabase
       .from('ips_configurations')
-      .update({ name, description, is_active, strategies, exit_strategies, watch_criteria })
+      .update(updateData)
       .eq('id', id);
 
     if (ipsErr) {

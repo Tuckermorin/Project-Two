@@ -5,13 +5,16 @@ export const AGENT_CONFIG = {
   // Candidate pool sizes at each filtering stage
   filtering: {
     // Number of candidates to keep after initial high-weight factor filtering
-    topCandidatesAfterInitialFilter: 100,
+    topCandidatesAfterInitialFilter: 150,
 
     // Number of candidates to consider before diversity filtering
-    topCandidatesBeforeDiversity: 80,
+    topCandidatesBeforeDiversity: 100,
 
-    // Final number of recommendations to return
-    finalRecommendations: 40,
+    // Final number of recommendations to return (top 20 with detailed analysis)
+    finalRecommendations: 20,
+
+    // Number of additional candidates to show with failure analysis
+    failureAnalysisCount: 20,
   },
 
   // Diversity constraints to ensure portfolio balance

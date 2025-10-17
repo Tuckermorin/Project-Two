@@ -99,12 +99,6 @@ export function calculateEnhancedIPSScore(
         targetMin = factor.threshold ?? 0.95;
         targetDesc = `≥${targetMin}`;
         break;
-      case "dte_mode":
-        actualValue = candidate.dte ?? null;
-        targetMin = factor.threshold_min ?? 30;
-        targetMax = factor.threshold_max ?? 45;
-        targetDesc = `${targetMin}-${targetMax} days`;
-        break;
       default:
         // Try to get from candidate directly
         actualValue = candidate[factorKey] ?? null;
