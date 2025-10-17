@@ -154,6 +154,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to finalize trade close' }, { status: 500 });
     }
 
+    // Capture final snapshot before closing
+    try {
+      console.log(`[Snapshot] Capturing final snapshot for closed trade ${tradeId}`);
+      const { getTradeSnapshotService } = await import('@/lib/services/trade-snapshot-service');
+      const snapshotService = getTradeSnapshotService();
+      await snapshotService.captureSnapshot(tradeId, 'manual');
+      console.log(`[Snapshot] ✓ Final snapshot captured for trade ${tradeId}`);
+    } catch (snapshotError) {
+      // Don't fail the request if snapshot fails
+      console.error('[Snapshot] Final snapshot failed (non-critical):', snapshotError);
+    }
+
     // Automatically create RAG embedding for the closed trade
     try {
       console.log(`[RAG] Creating embedding for closed trade ${tradeId}`);

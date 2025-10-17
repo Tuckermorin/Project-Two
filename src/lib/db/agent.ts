@@ -91,6 +91,15 @@ export async function persistCandidate(runId: string, c: any) {
   await supabase.from("trade_candidates").insert({
     run_id: runId,
     ...c,
+    // Explicitly include IPS scoring fields to ensure they're saved
+    ips_score: c.ips_score ?? null,
+    ips_factor_details: c.ips_factor_details ?? null,
+    tier: c.tier ?? null,
+    composite_score: c.composite_score ?? null,
+    yield_score: c.yield_score ?? null,
+    reddit_score: c.reddit_score ?? null,
+    diversity_score: c.diversity_score ?? null,
+    historical_analysis: c.historical_analysis ?? null,
   });
 }
 

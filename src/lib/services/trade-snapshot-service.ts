@@ -4,6 +4,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { getMarketDataService } from './market-data-service';
 import { getAlphaVantageClient } from '@/lib/api/alpha-vantage';
+import { computeIpsScore } from './trade-scoring-service';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -63,6 +64,9 @@ export interface TradeSnapshotInput {
 
   // IPS Factor Data (all factors - let AI discover patterns)
   ips_factor_data?: Record<string, any>;
+  ips_score?: number;
+  ips_targets_met?: number;
+  ips_target_percentage?: number;
   raw_data?: Record<string, any>;
 }
 
@@ -176,6 +180,37 @@ export class TradeSnapshotService {
 
     // Fetch ALL IPS factors for this trade's IPS configuration
     const ipsFactorData = await this.fetchIPSFactorData(trade, stockData);
+
+    // Calculate current IPS score with updated factor values
+    let ipsScore: number | undefined;
+    let ipsTargetsMet: number | undefined;
+    let ipsTargetPercentage: number | undefined;
+
+    if (trade.ips_id && Object.keys(ipsFactorData).length > 0) {
+      try {
+        // Build factor values from the fetched data
+        const factorValues: Record<string, any> = {};
+
+        for (const [key, data] of Object.entries(ipsFactorData)) {
+          if (typeof data === 'object' && data.value !== undefined) {
+            factorValues[key] = data.value;
+          } else {
+            factorValues[key] = data;
+          }
+        }
+
+        console.log(`[Snapshot] Calculating IPS score for trade ${trade.id} with ${Object.keys(factorValues).length} factors`);
+
+        const scoreResult = await computeIpsScore(supabase, trade.ips_id, factorValues);
+        ipsScore = scoreResult.finalScore;
+        ipsTargetsMet = scoreResult.targetsMetCount;
+        ipsTargetPercentage = scoreResult.targetPercentage;
+
+        console.log(`[Snapshot] IPS score: ${ipsScore.toFixed(1)}/100 (${ipsTargetsMet}/${scoreResult.factorScores.length} targets met)`);
+      } catch (error) {
+        console.error(`[Snapshot] Failed to calculate IPS score:`, error);
+      }
+    }
 
     // Get options data for both legs
     const shortLegData = await marketData.getOptionsData(
@@ -303,6 +338,9 @@ export class TradeSnapshotService {
 
       // IPS Factor Data - all factors that went into the IPS calculation
       ips_factor_data: ipsFactorData,
+      ips_score: ipsScore,
+      ips_targets_met: ipsTargetsMet,
+      ips_target_percentage: ipsTargetPercentage,
 
       // Raw data - store complete snapshot for AI analysis
       raw_data: {

@@ -60,13 +60,13 @@ function scoreAgainstIPS(spread, ticker) {
   const delta = Math.abs(parseFloat(spread.delta));
   if (delta >= 0.08 && delta <= 0.15) {
     score += 10;
-    breakdown.delta = { score: 10, status: '✅', value: delta.toFixed(3) };
+    breakdown.delta = { score: 10, status: '✅', value: delta.toFixed(2) };
   } else if (delta <= 0.18) {
     score += 7;
-    breakdown.delta = { score: 7, status: '⚠️', value: delta.toFixed(3) };
+    breakdown.delta = { score: 7, status: '⚠️', value: delta.toFixed(2) };
   } else {
     score += 3;
-    breakdown.delta = { score: 3, status: '❌', value: delta.toFixed(3) };
+    breakdown.delta = { score: 3, status: '❌', value: delta.toFixed(2) };
   }
 
   // 2. IV Rank - Weight: 9 (using IV as proxy since we don't have historical IV)
@@ -126,26 +126,26 @@ function scoreAgainstIPS(spread, ticker) {
   const vega = parseFloat(spread.vega);
   if (vega <= 0) {
     score += 4;
-    breakdown.vega = { score: 4, status: '✅', value: vega.toFixed(3) };
+    breakdown.vega = { score: 4, status: '✅', value: vega.toFixed(2) };
   } else if (vega <= 0.05) {
     score += 2;
-    breakdown.vega = { score: 2, status: '⚠️', value: vega.toFixed(3) };
+    breakdown.vega = { score: 2, status: '⚠️', value: vega.toFixed(2) };
   } else {
     score += 0;
-    breakdown.vega = { score: 0, status: '❌', value: vega.toFixed(3) };
+    breakdown.vega = { score: 0, status: '❌', value: vega.toFixed(2) };
   }
 
   // 7. Theta - Weight: 4 (should be ≥ 0.01 per share)
   const theta = parseFloat(spread.theta);
   if (theta >= 0.01) {
     score += 4;
-    breakdown.theta = { score: 4, status: '✅', value: theta.toFixed(3) };
+    breakdown.theta = { score: 4, status: '✅', value: theta.toFixed(2) };
   } else if (theta >= 0.005) {
     score += 2;
-    breakdown.theta = { score: 2, status: '⚠️', value: theta.toFixed(3) };
+    breakdown.theta = { score: 2, status: '⚠️', value: theta.toFixed(2) };
   } else {
     score += 0;
-    breakdown.theta = { score: 0, status: '❌', value: theta.toFixed(3) };
+    breakdown.theta = { score: 0, status: '❌', value: theta.toFixed(2) };
   }
 
   // 8. DTE Check (must be 1-14 for this IPS)
@@ -249,7 +249,7 @@ function analyzePutCreditSpread(symbol, price, optionsData) {
           vega: shortPut.vega,
           oi_short: shortPut.open_interest,
           oi_long: longPut.open_interest,
-          bidAskSpread: avgBidAskSpread.toFixed(3)
+          bidAskSpread: avgBidAskSpread.toFixed(2)
         };
 
         const { score, breakdown, maxPossibleScore } = scoreAgainstIPS(spread, symbol);

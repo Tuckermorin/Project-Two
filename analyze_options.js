@@ -117,7 +117,7 @@ function analyzePutCreditSpread(symbol, price, optionsData) {
           vega: shortPut.vega,
           oi_short: shortPut.open_interest,
           oi_long: longPut.open_interest,
-          bidAskSpread: avgBidAskSpread.toFixed(3),
+          bidAskSpread: avgBidAskSpread.toFixed(2),
           score: 0 // Will calculate
         });
       });

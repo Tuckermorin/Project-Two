@@ -734,7 +734,7 @@ export default function HistoricTradesDashboard() {
       case 'gammaAtClose':
       case 'rho':
       case 'rhoAtClose':
-        return value.toFixed(3)
+        return value.toFixed(2)
       case 'ipsScore':
       case 'ipsAtClose':
         return typeof value === 'number' ? `${value.toFixed(1)}/100` : '-'

@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
 import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2, Columns3, TrendingUp, TrendingDown, Clock, X, Search, Pin, GripVertical, RefreshCw } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
@@ -187,9 +188,8 @@ const allColumns: Column[] = [
 
 // Default visible columns
 const defaultColumns = [
-  'status', 'name', 'placed', 'currentPrice', 'currentSpreadPrice', 'currentPL',
-  'currentPLPercent', 'expDate', 'dte', 'contractType', 'contracts',
-  'shortStrike', 'longStrike', 'creditReceived', 'percentCurrentToShort'
+  'status', 'name', 'placed', 'currentPrice', 'expDate', 'dte', 'contractType', 'ipsScore',
+  'currentSpreadPrice', 'currentPL', 'currentPLPercent', 'creditReceived'
 ]
 
 // Preset interface
@@ -492,6 +492,25 @@ export default function ExcelStyleTradesDashboard() {
   const handleRefresh = async () => {
     try {
       setRefreshing(true)
+
+      // First, backfill any missing IPS scores
+      try {
+        console.log('[Refresh] Checking for missing IPS scores...')
+        const backfillRes = await fetch('/api/trades/backfill-ips', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          cache: 'no-store'
+        })
+        const backfillData = await backfillRes.json()
+        if (backfillRes.ok && backfillData.summary?.updated > 0) {
+          console.log(`[Refresh] Backfilled ${backfillData.summary.updated} IPS scores`)
+        }
+      } catch (backfillError) {
+        console.error('[Refresh] IPS backfill failed (non-critical):', backfillError)
+        // Don't fail the whole refresh if backfill fails
+      }
+
+      // Then refresh market data
       const res = await fetch('/api/trades/refresh-active', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -613,46 +632,64 @@ export default function ExcelStyleTradesDashboard() {
     }
   }
 
-  // Load pinned columns, column order, and presets from localStorage
+  // Load column preferences from database on mount
   useEffect(() => {
-    try {
-      const savedPinned = localStorage.getItem('tradeColumnPins')
-      if (savedPinned) {
-        setPinnedColumns(new Set(JSON.parse(savedPinned)))
+    const loadPreferences = async () => {
+      try {
+        const res = await fetch('/api/preferences?key=dashboard_columns')
+        if (res.ok) {
+          const { value } = await res.json()
+          if (value) {
+            if (value.visible) {
+              setVisibleColumns(new Set(value.visible))
+            }
+            if (value.pinned) {
+              setPinnedColumns(new Set(value.pinned))
+            }
+            if (value.order) {
+              setColumnOrder(value.order)
+            }
+            if (value.presets) {
+              setPresets([...defaultPresets, ...value.presets])
+            }
+          }
+        }
+      } catch (e) {
+        console.error('Failed to load column preferences from database', e)
       }
-
-      const savedOrder = localStorage.getItem('tradeColumnOrder')
-      if (savedOrder) {
-        setColumnOrder(JSON.parse(savedOrder))
-      }
-
-      const savedPresets = localStorage.getItem('tradeColumnPresets')
-      if (savedPresets) {
-        const userPresets = JSON.parse(savedPresets)
-        setPresets([...defaultPresets, ...userPresets])
-      }
-    } catch (e) {
-      console.error('Failed to load column settings', e)
     }
+    loadPreferences()
   }, [])
 
-  // Save pinned columns to localStorage
+  // Save all column preferences to database whenever they change
   useEffect(() => {
-    try {
-      localStorage.setItem('tradeColumnPins', JSON.stringify(Array.from(pinnedColumns)))
-    } catch (e) {
-      console.error('Failed to save pinned columns', e)
-    }
-  }, [pinnedColumns])
+    const savePreferences = async () => {
+      try {
+        // Get only user-created presets (exclude default presets)
+        const userPresets = presets.filter(p => !defaultPresets.some(dp => dp.id === p.id))
 
-  // Save column order to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem('tradeColumnOrder', JSON.stringify(columnOrder))
-    } catch (e) {
-      console.error('Failed to save column order', e)
+        await fetch('/api/preferences', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            key: 'dashboard_columns',
+            value: {
+              visible: Array.from(visibleColumns),
+              pinned: Array.from(pinnedColumns),
+              order: columnOrder,
+              presets: userPresets,
+            }
+          })
+        })
+      } catch (e) {
+        console.error('Failed to save column preferences to database', e)
+      }
     }
-  }, [columnOrder])
+
+    // Debounce the save operation to avoid too many API calls
+    const timeoutId = setTimeout(savePreferences, 500)
+    return () => clearTimeout(timeoutId)
+  }, [visibleColumns, pinnedColumns, columnOrder, presets])
 
   const hasActiveIPS = false
   const activeIPSFactors: string[] = []
@@ -808,17 +845,10 @@ export default function ExcelStyleTradesDashboard() {
       order: columnOrder
     }
 
-    const userPresets = presets.filter(p => !defaultPresets.some(dp => dp.id === p.id))
-    const updatedPresets = [...userPresets, newPreset]
-
-    try {
-      localStorage.setItem('tradeColumnPresets', JSON.stringify(updatedPresets))
-      setPresets([...defaultPresets, ...updatedPresets])
-      setPresetName('')
-      setShowSavePreset(false)
-    } catch (e) {
-      console.error('Failed to save preset', e)
-    }
+    // Add new preset to state (will be saved to database by useEffect)
+    setPresets([...presets, newPreset])
+    setPresetName('')
+    setShowSavePreset(false)
   }
 
   // Handle sort
@@ -960,7 +990,7 @@ export default function ExcelStyleTradesDashboard() {
       case 'deltaShortLeg':
       case 'theta':
       case 'vega':
-        return value.toFixed(3)
+        return value.toFixed(2)
       default:
         return value
     }
@@ -1261,18 +1291,32 @@ export default function ExcelStyleTradesDashboard() {
                 <Input type="date" value={closing.date} onChange={(e)=> setClosing(prev => ({ ...prev, date: e.target.value }))} />
               </div>
               <div>
-                <Label className="text-sm">Closing Reason</Label>
-                <Select value={closing.reason} onValueChange={(v)=> setClosing(prev => ({ ...prev, reason: v }))}>
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select reason" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="manual close">Manual Close</SelectItem>
-                    <SelectItem value="expired">Expired</SelectItem>
-                    <SelectItem value="exit (profit)">Exit (Profit)</SelectItem>
-                    <SelectItem value="exit (loss)">Exit (Loss)</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label className="text-sm mb-3 block">Closing Reason</Label>
+                <RadioGroup
+                  value={closing.reason}
+                  onValueChange={(value) => setClosing(prev => ({ ...prev, reason: value }))}
+                  className="grid grid-cols-2 gap-3"
+                >
+                  {[
+                    { key: 'manual close', label: 'Manual Close' },
+                    { key: 'expired', label: 'Expired' },
+                    { key: 'exit (profit)', label: 'Exit (Profit)' },
+                    { key: 'exit (loss)', label: 'Exit (Loss)' },
+                  ].map(method => (
+                    <Label
+                      key={method.key}
+                      htmlFor={`reason-${method.key}`}
+                      className={`flex items-center gap-3 p-4 rounded-xl border-2 cursor-pointer transition-all hover:border-[var(--gradient-primary-start)] hover:bg-[var(--glass-bg-hover)] ${
+                        closing.reason === method.key
+                          ? 'border-[var(--gradient-primary-start)] bg-[var(--glass-bg-hover)]'
+                          : 'border-[var(--glass-border)] bg-[var(--glass-bg)]'
+                      }`}
+                    >
+                      <RadioGroupItem value={method.key} id={`reason-${method.key}`} />
+                      <span className="text-sm font-medium">{method.label}</span>
+                    </Label>
+                  ))}
+                </RadioGroup>
               </div>
               <div>
                 <Label className="text-sm">Cost to Close (per spread)</Label>

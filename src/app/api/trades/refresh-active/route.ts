@@ -5,6 +5,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server-client";
 import { getAlphaVantageClient } from "@/lib/api/alpha-vantage";
 import { getMarketDataService } from "@/lib/services/market-data-service";
+import { computeIpsScore } from "@/lib/services/trade-scoring-service";
+import { collectTradeFactors, saveTradeFactors } from "@/lib/services/factor-collection-service";
 
 interface RefreshResult {
   tradeId: string;
@@ -17,6 +19,7 @@ interface RefreshResult {
     currentPLPercent?: number;
     greeks?: any;
     factors?: any;
+    ipsScore?: number;
   };
   error?: string;
 }
@@ -191,6 +194,12 @@ export async function POST(request: NextRequest) {
                     rho: shortLegData.rho,
                     impliedVolatility: shortLegData.impliedVolatility
                   };
+
+                  // Store additional options metrics for IPS scoring
+                  updates.factors = {
+                    openInterest: shortLegData.openInterest,
+                    bidAskSpread: shortLegData.ask && shortLegData.bid ? shortLegData.ask - shortLegData.bid : null
+                  };
                 } else {
                   console.warn(`[Refresh] ${symbol} Could not find both legs - shortLeg: ${!!shortLegData}, longLeg: ${!!longLegData}`);
                   // Log available strikes to help debug
@@ -206,20 +215,82 @@ export async function POST(request: NextRequest) {
               }
             }
 
+            // Recalculate IPS score with comprehensive factor collection
+            let newIpsScore: number | undefined;
+            if (trade.ips_id) {
+              try {
+                console.log(`[Refresh] Collecting factors for ${symbol} trade ${trade.id}`);
+
+                // Collect all factor values
+                const { factors, errors } = await collectTradeFactors(
+                  supabase,
+                  {
+                    id: trade.id,
+                    symbol: trade.symbol,
+                    ips_id: trade.ips_id,
+                    short_strike: shortStrike,
+                    long_strike: longStrike,
+                    expiration_date: expiration,
+                    contract_type: contractType,
+                    current_price: currentPrice
+                  },
+                  {
+                    greeks: updates.greeks,
+                    bidAskSpread: updates.factors?.bidAskSpread,
+                    openInterest: updates.factors?.openInterest
+                  }
+                );
+
+                if (errors.length > 0) {
+                  console.warn(`[Refresh] Factor collection warnings for ${symbol}:`, errors);
+                }
+
+                console.log(`[Refresh] Collected ${factors.length} factors for ${symbol}`);
+
+                // Build factor values object for scoring
+                const factorValues: Record<string, number | null> = {};
+                factors.forEach(f => {
+                  if (f.value !== null) {
+                    factorValues[f.factorName] = f.value;
+                  }
+                });
+
+                // Save factors to trade_factors table for audit trail
+                await saveTradeFactors(supabase, trade.id, user.id, factors);
+
+                // Recalculate IPS score with collected factors
+                const scoreResult = await computeIpsScore(supabase, trade.ips_id, factorValues);
+                newIpsScore = scoreResult.finalScore;
+                updates.ipsScore = newIpsScore;
+
+                console.log(`[Refresh] ${symbol} IPS score: ${newIpsScore.toFixed(1)}/100 (${scoreResult.targetsMetCount}/${scoreResult.factorScores.length} targets met)`);
+              } catch (scoreError) {
+                console.error(`[Refresh] Failed to recalculate IPS score for ${symbol}:`, scoreError);
+                // Don't fail the whole refresh if IPS scoring fails
+              }
+            }
+
             // Update the trade in database
             if (Object.keys(updates).length > 0) {
+              const updatePayload: any = {
+                current_price: updates.currentPrice,
+                current_spread_price: updates.currentSpreadPrice,
+                spread_price_updated_at: new Date().toISOString(),
+                delta_short_leg: updates.greeks?.delta,
+                theta: updates.greeks?.theta,
+                vega: updates.greeks?.vega,
+                iv_at_entry: updates.greeks?.impliedVolatility,
+                updated_at: new Date().toISOString()
+              };
+
+              // Update IPS score if recalculated
+              if (newIpsScore !== undefined) {
+                updatePayload.ips_score = newIpsScore;
+              }
+
               const { error: updateError } = await supabase
                 .from('trades')
-                .update({
-                  current_price: updates.currentPrice,
-                  current_spread_price: updates.currentSpreadPrice,
-                  spread_price_updated_at: new Date().toISOString(),
-                  delta_short_leg: updates.greeks?.delta,
-                  theta: updates.greeks?.theta,
-                  vega: updates.greeks?.vega,
-                  iv_at_entry: updates.greeks?.impliedVolatility,
-                  updated_at: new Date().toISOString()
-                })
+                .update(updatePayload)
                 .eq('id', trade.id);
 
               if (updateError) {

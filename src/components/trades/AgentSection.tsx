@@ -356,7 +356,7 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
           rationale: candidate.rationale,
           guardrail_flags: candidate.guardrail_flags,
           ips_id: selectedIpsId,
-          ips_score: candidate.score,
+          ips_score: candidate.ips_score,
           expiration_date: candidate.contract_legs?.[0]?.expiry,
           number_of_contracts: contracts,
           delta_short_leg: deltaValue,

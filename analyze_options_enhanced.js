@@ -258,15 +258,15 @@ async function scoreAgainstFullIPS(spread, ticker, currentPrice) {
   const delta = Math.abs(parseFloat(spread.delta));
   if (delta >= 0.12 && delta <= 0.15) {
     score += 10;
-    breakdown.delta = { score: 10, status: '✅', value: delta.toFixed(3), note: 'Optimal' };
+    breakdown.delta = { score: 10, status: '✅', value: delta.toFixed(2), note: 'Optimal' };
   } else if (delta >= 0.08 && delta <= 0.18) {
     score += 7;
-    breakdown.delta = { score: 7, status: '⚠️', value: delta.toFixed(3), note: 'Acceptable' };
+    breakdown.delta = { score: 7, status: '⚠️', value: delta.toFixed(2), note: 'Acceptable' };
   } else if (delta <= 0.20) {
     score += 4;
-    breakdown.delta = { score: 4, status: '⚠️', value: delta.toFixed(3), note: 'Sub-optimal' };
+    breakdown.delta = { score: 4, status: '⚠️', value: delta.toFixed(2), note: 'Sub-optimal' };
   } else {
-    breakdown.delta = { score: 0, status: '❌', value: delta.toFixed(3), note: 'Too high' };
+    breakdown.delta = { score: 0, status: '❌', value: delta.toFixed(2), note: 'Too high' };
   }
 
   // 2. IV Rank (9 pts) - Need ≥35 and ≤80
@@ -326,24 +326,24 @@ async function scoreAgainstFullIPS(spread, ticker, currentPrice) {
   const vega = Math.abs(parseFloat(spread.vega));
   if (vega <= 0.15) {
     score += 3;
-    breakdown.vega = { score: 3, status: '✅', value: vega.toFixed(3) };
+    breakdown.vega = { score: 3, status: '✅', value: vega.toFixed(2) };
   } else if (vega <= 0.30) {
     score += 2;
-    breakdown.vega = { score: 2, status: '⚠️', value: vega.toFixed(3) };
+    breakdown.vega = { score: 2, status: '⚠️', value: vega.toFixed(2) };
   } else {
-    breakdown.vega = { score: 0, status: '❌', value: vega.toFixed(3) };
+    breakdown.vega = { score: 0, status: '❌', value: vega.toFixed(2) };
   }
 
   // 7. Theta (2 pts) - ≥-0.05
   const theta = parseFloat(spread.theta);
   if (theta >= -0.05) {
     score += 2;
-    breakdown.theta = { score: 2, status: '✅', value: theta.toFixed(3) };
+    breakdown.theta = { score: 2, status: '✅', value: theta.toFixed(2) };
   } else if (theta >= -0.20) {
     score += 1;
-    breakdown.theta = { score: 1, status: '⚠️', value: theta.toFixed(3) };
+    breakdown.theta = { score: 1, status: '⚠️', value: theta.toFixed(2) };
   } else {
-    breakdown.theta = { score: 0, status: '❌', value: theta.toFixed(3) };
+    breakdown.theta = { score: 0, status: '❌', value: theta.toFixed(2) };
   }
 
   // 8. DTE (5 pts) - 7-14 preferred
@@ -568,7 +568,7 @@ async function analyzeTicker(ticker) {
     console.log(`   💰 Credit: $${spread.credit.toFixed(2)} | Max Profit: $${spread.maxProfit.toFixed(2)} | Max Loss: $${spread.maxLoss.toFixed(2)}`);
     console.log(`   📊 POP: ${spread.pop.toFixed(1)}% | ROI: ${spread.roi.toFixed(1)}%`);
     console.log(`   📈 Delta: ${spread.delta} | IV: ${(parseFloat(spread.iv) * 100).toFixed(1)}% | Theta: ${spread.theta} | Vega: ${spread.vega}`);
-    console.log(`   🔄 OI: ${spread.sellOI}/${spread.buyOI} | Bid-Ask: $${spread.bidAskSpread.toFixed(3)}`);
+    console.log(`   🔄 OI: ${spread.sellOI}/${spread.buyOI} | Bid-Ask: $${spread.bidAskSpread.toFixed(2)}`);
     console.log(`   ⭐ IPS FIT: ${ipsResult.score}/${ipsResult.maxPossibleScore} (${Math.round(ipsResult.score/ipsResult.maxPossibleScore*100)}%)\n`);
 
     console.log(`   📋 FACTOR BREAKDOWN:`);
