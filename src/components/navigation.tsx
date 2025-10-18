@@ -14,7 +14,8 @@ import {
   UserCircle,
   LogOut,
   Sun,
-  Moon
+  Moon,
+  Target
 } from 'lucide-react'
 import { useAuth } from '@/components/auth/auth-provider'
 import { useTheme } from '@/hooks/use-theme'
@@ -34,6 +35,7 @@ const navigation = [
   { name: 'Trades', href: '/trades', icon: TrendingUp },
   { name: 'Watchlist', href: '/watchlist', icon: Eye },
   { name: 'Journal', href: '/journal', icon: BookOpen },
+  { name: 'Audit', href: '/audit', icon: Target },
   { name: 'History', href: '/history', icon: History },
 ]
 
@@ -70,7 +72,7 @@ export function Navigation() {
             </div>
             {/* Only show navigation links when user is authenticated */}
             {user && (
-              <div className="hidden sm:ml-6 sm:flex sm:space-x-1">
+              <div className="hidden sm:ml-4 sm:flex sm:space-x-0.5">
                 {navigation.map((item) => {
                   const Icon = item.icon
                   return (
@@ -78,7 +80,7 @@ export function Navigation() {
                       key={item.name}
                       href={item.href}
                       className={cn(
-                        'inline-flex items-center px-4 py-2 text-sm font-medium rounded-lg transition-all',
+                        'inline-flex items-center px-2.5 py-2 text-xs font-medium rounded-lg transition-all',
                         pathname === item.href
                           ? 'bg-[var(--glass-bg-hover)] border-b-2 border-[var(--gradient-primary-start)]'
                           : 'hover:bg-[var(--glass-bg)]'
@@ -87,7 +89,7 @@ export function Navigation() {
                         color: pathname === item.href ? 'var(--text-primary)' : 'var(--text-secondary)'
                       }}
                     >
-                      <Icon className="h-4 w-4 mr-2" />
+                      <Icon className="h-3.5 w-3.5 mr-1.5" />
                       {item.name}
                     </Link>
                   )
@@ -95,27 +97,27 @@ export function Navigation() {
               </div>
             )}
           </div>
-          <div className="hidden sm:flex items-center gap-3">
+          <div className="hidden sm:flex items-center gap-2">
             {/* Theme Toggle */}
             <button
               onClick={toggleTheme}
-              className="inline-flex items-center gap-2 px-3 py-2 rounded-lg transition-all"
+              className="inline-flex items-center justify-center p-2 rounded-lg transition-all"
               style={{
                 background: 'var(--glass-bg)',
                 border: '1px solid var(--glass-border)',
                 color: 'var(--text-primary)'
               }}
+              title={isDarkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
             >
               {isDarkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-              <span className="text-sm">{isDarkMode ? 'Light' : 'Dark'}</span>
             </button>
 
             {user ? (
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="flex items-center gap-2">
-                    <UserCircle className="h-5 w-5" />
-                    <span className="text-sm">{user.email}</span>
+                  <Button variant="ghost" className="flex items-center gap-1.5 px-2.5 text-xs">
+                    <UserCircle className="h-4 w-4" />
+                    <span className="max-w-[120px] truncate">{user.email}</span>
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-56 glass-card">
