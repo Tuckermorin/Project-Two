@@ -886,14 +886,13 @@ async function generateCandidatesForSymbol(
     return isValid;
   });
 
-  // Sort by DTE (earliest first) and take up to 3 valid expirations
+  // Sort by DTE (earliest first) and consider ALL valid expirations (not just 3)
   const expirations = validExpirations
     .map(expiry => ({ expiry, dte: calculateDTE(expiry) }))
     .sort((a, b) => a.dte - b.dte)
-    .slice(0, 3)
     .map(e => e.expiry);
 
-  console.log(`[${symbol}] Found ${allExpirations.length} total expirations, ${validExpirations.length} within DTE range, considering ${expirations.length}`);
+  console.log(`[${symbol}] Found ${allExpirations.length} total expirations, ${validExpirations.length} within DTE range, considering ALL ${expirations.length} expirations`);
 
   for (const expiry of expirations) {
     const dte = calculateDTE(expiry);
@@ -906,77 +905,100 @@ async function generateCandidatesForSymbol(
 
     if (expiryPuts.length < 2) continue;
 
-    // Create spread candidates - search through up to 100 strikes to find suitable low-delta spreads
-    // For far OTM spreads (delta ≤0.18), we need to look deep in the chain
-    // Many symbols have 100+ strikes, and OTM options are usually at the end of the list
-    // Strategy: Start from ATM and work down to find low-delta, high-probability spreads
-    for (let i = 0; i < Math.min(100, expiryPuts.length - 1); i++) {
+    // Define spread widths to test (same as audit for consistency)
+    const spreadWidths = [1, 2, 3, 5, 10];
+
+    // Group puts by strike for efficient lookup
+    const putsByStrike = new Map<number, any>();
+    expiryPuts.forEach((p: any) => putsByStrike.set(p.strike, p));
+
+    console.log(`[${symbol}] Processing ${expiryPuts.length} strikes with ${spreadWidths.length} spread widths`);
+
+    // Test all strike combinations with multiple spread widths
+    // Limit to 100 short strikes to keep runtime reasonable, but test ALL spread widths for each
+    for (let i = 0; i < Math.min(100, expiryPuts.length); i++) {
       const shortPut = expiryPuts[i];
 
-      // Skip if delta is too high (we want far OTM for safety)
-      // Note: Delta is negative for puts, so we check absolute value
+      // Skip if delta is too high (we want OTM for safety)
       const shortDelta = Math.abs(shortPut.delta || 0);
       if (shortDelta > 0.5) continue; // Skip deep ITM/ATM options
 
-      // Use i+1 for long put to create tighter spreads (better risk:reward)
-      // Then also try i+2 for wider spreads as backup
-      const longPut = expiryPuts[i + 1] || expiryPuts[i + 2] || expiryPuts[expiryPuts.length - 1];
+      // Test each spread width
+      for (const width of spreadWidths) {
+        const targetLongStrike = shortPut.strike - width;
 
-      const width = shortPut.strike - longPut.strike;
-      if (width <= 0) continue;
+        // Find the closest available long strike
+        let longPut = putsByStrike.get(targetLongStrike);
 
-      const entryMid = ((shortPut.bid + shortPut.ask) / 2) - ((longPut.bid + longPut.ask) / 2);
-      if (entryMid <= 0) continue;
+        // If exact strike doesn't exist, find nearest below
+        if (!longPut) {
+          const availableStrikes = Array.from(putsByStrike.keys())
+            .filter(s => s < shortPut.strike && s >= targetLongStrike - 1)
+            .sort((a, b) => b - a); // Descending
 
-      const maxProfit = entryMid;
-      const maxLoss = width - entryMid;
-      const breakeven = shortPut.strike - entryMid;
-      const riskReward = maxProfit / maxLoss;
+          if (availableStrikes.length > 0) {
+            longPut = putsByStrike.get(availableStrikes[0]);
+          }
+        }
 
-      if (riskReward < 0.15) continue;
+        if (!longPut) continue;
 
-      candidates.push({
-        id: uuidv4(),
-        symbol,
-        strategy: "put_credit_spread",
-        dte: dte, // Add DTE to candidate for display and filtering
-        contract_legs: [
-          {
-            type: "SELL",
-            right: "P",
-            strike: shortPut.strike,
-            expiry: shortPut.expiry,
-            delta: shortPut.delta,
-            theta: shortPut.theta,
-            vega: shortPut.vega,
-            iv: shortPut.iv,
-            bid: shortPut.bid,
-            ask: shortPut.ask,
-            oi: shortPut.oi,
-            volume: shortPut.volume,
-          },
-          {
-            type: "BUY",
-            right: "P",
-            strike: longPut.strike,
-            expiry: longPut.expiry,
-            delta: longPut.delta,
-            theta: longPut.theta,
-            vega: longPut.vega,
-            iv: longPut.iv,
-            bid: longPut.bid,
-            ask: longPut.ask,
-            oi: longPut.oi,
-            volume: longPut.volume,
-          },
-        ],
-        entry_mid: entryMid,
-        est_pop: shortPut.delta ? 1 - Math.abs(shortPut.delta) : 0.7,
-        breakeven,
-        max_loss: maxLoss,
-        max_profit: maxProfit,
-        guardrail_flags: {},
-      });
+        const actualWidth = shortPut.strike - longPut.strike;
+        if (actualWidth <= 0) continue;
+
+        const entryMid = ((shortPut.bid + shortPut.ask) / 2) - ((longPut.bid + longPut.ask) / 2);
+        if (entryMid <= 0) continue;
+
+        const maxProfit = entryMid;
+        const maxLoss = actualWidth - entryMid;
+        const breakeven = shortPut.strike - entryMid;
+        const riskReward = maxProfit / maxLoss;
+
+        if (riskReward < 0.15) continue; // Minimum risk/reward filter
+
+        candidates.push({
+          id: uuidv4(),
+          symbol,
+          strategy: "put_credit_spread",
+          dte: dte,
+          contract_legs: [
+            {
+              type: "SELL",
+              right: "P",
+              strike: shortPut.strike,
+              expiry: shortPut.expiry,
+              delta: shortPut.delta,
+              theta: shortPut.theta,
+              vega: shortPut.vega,
+              iv: shortPut.iv,
+              bid: shortPut.bid,
+              ask: shortPut.ask,
+              oi: shortPut.oi,
+              volume: shortPut.volume,
+            },
+            {
+              type: "BUY",
+              right: "P",
+              strike: longPut.strike,
+              expiry: longPut.expiry,
+              delta: longPut.delta,
+              theta: longPut.theta,
+              vega: longPut.vega,
+              iv: longPut.iv,
+              bid: longPut.bid,
+              ask: longPut.ask,
+              oi: longPut.oi,
+              volume: longPut.volume,
+            },
+          ],
+          entry_mid: entryMid,
+          est_pop: shortPut.delta ? 1 - Math.abs(shortPut.delta) : 0.7,
+          breakeven,
+          max_loss: maxLoss,
+          max_profit: maxProfit,
+          guardrail_flags: {},
+        });
+      }
     }
   }
 
@@ -1299,9 +1321,11 @@ async function filterLowWeightFactors(state: AgentState): Promise<Partial<AgentS
       }
     }
 
-    // For low-weight factors, we're more lenient - only reject if multiple failures
+    // For low-weight factors, we're VERY lenient - allow up to 75% failures
+    // Since we now generate many more candidates (multiple spread widths), we want to keep more options
+    // and let the final scoring/ranking decide which are best
     const failureCount = violations.length;
-    const failureThreshold = Math.ceil(lowWeightFactors.length * 0.5); // Allow up to 50% failures
+    const failureThreshold = Math.ceil(lowWeightFactors.length * 0.75); // Allow up to 75% failures
 
     if (failureCount < failureThreshold || lowWeightFactors.length === 0) {
       candidate.low_weight_factor_scores = factorScores;
@@ -2094,11 +2118,24 @@ async function sortAndSelectTiered(state: AgentState): Promise<Partial<AgentStat
   // STEP 2: Add additional high-scoring trades from the same stocks (up to diversity limits)
   const { applyDiversificationFilters } = await import("./ips-enhanced-scoring");
 
+  // Determine how many symbols we're analyzing - if it's just one symbol, allow many more trades from it
+  const uniqueSymbols = [...new Set(combined.map(c => c.symbol))];
+  const isSingleSymbolAnalysis = uniqueSymbols.length === 1;
+
+  console.log(`[TieredSelection] Analysis mode: ${isSingleSymbolAnalysis ? 'SINGLE-SYMBOL' : 'MULTI-SYMBOL'} (${uniqueSymbols.length} symbol${uniqueSymbols.length > 1 ? 's' : ''})`);
+  console.log(`[TieredSelection] maxPerSymbol set to: ${isSingleSymbolAnalysis ? 19 : 2} (allowing ${isSingleSymbolAnalysis ? '~20 total trades' : '~3 trades per symbol'})`);
+
   // Start with one per stock, then add more from the remaining candidates
   const remaining = combined.filter(c => !onePerStock.includes(c));
   const additional = applyDiversificationFilters(remaining, {
     ...AGENT_CONFIG.diversity,
-    maxPerSymbol: 2, // Allow up to 2 MORE per symbol (total of 3 including the guaranteed one)
+    // If analyzing a single symbol, allow up to 19 more trades (total of 20)
+    // If analyzing multiple symbols, allow up to 2 more per symbol (total of 3)
+    maxPerSymbol: isSingleSymbolAnalysis ? 19 : 2,
+    // Also relax sector limits for single-symbol analysis since all trades will be from same sector
+    maxPerSector: isSingleSymbolAnalysis ? 100 : AGENT_CONFIG.diversity.maxPerSector,
+    // Same for strategy - allow all strategies for single symbol
+    maxPerStrategy: isSingleSymbolAnalysis ? 100 : AGENT_CONFIG.diversity.maxPerStrategy,
   });
 
   const diversified = [...onePerStock, ...additional].sort((a, b) => (b.ips_score || 0) - (a.ips_score || 0));
@@ -2138,11 +2175,10 @@ async function sortAndSelectTiered(state: AgentState): Promise<Partial<AgentStat
   console.log(`[TieredSelection] Score range: ${minScore.toFixed(1)}-${maxScore.toFixed(1)} (avg: ${avgScore.toFixed(1)})`);
 
   // Log unique stocks coverage
-  const uniqueSymbols = new Set(allCandidates.map(c => c.symbol));
-  console.log(`[TieredSelection] Covering ${uniqueSymbols.size} unique stocks from ${state.symbols.length}-stock watchlist`);
+  const symbolsWithCandidates = new Set(allCandidates.map(c => c.symbol));
+  console.log(`[TieredSelection] Covering ${symbolsWithCandidates.size} unique stocks from ${state.symbols.length}-stock watchlist`);
 
   // Identify which stocks from watchlist have NO candidates
-  const symbolsWithCandidates = new Set(allCandidates.map(c => c.symbol));
   const symbolsWithoutCandidates = state.symbols.filter(s => !symbolsWithCandidates.has(s));
 
   if (symbolsWithoutCandidates.length > 0) {
@@ -2263,29 +2299,72 @@ async function generateTradeRationales(state: AgentState): Promise<Partial<Agent
 
   for (const candidate of state.selected) {
     try {
-      // Build context for rationale generation
-      const prompt = `You are a professional options trading analyst. Generate a clear, concise rationale for this trade opportunity.
+      // Calculate additional metrics for the analysis
+      const shortLeg = candidate.contract_legs?.find((l: any) => l.type === 'SELL');
+      const longLeg = candidate.contract_legs?.find((l: any) => l.type === 'BUY');
+      const spreadWidth = shortLeg && longLeg ? Math.abs(shortLeg.strike - longLeg.strike) : 0;
+      const credit = candidate.entry_mid || 0;
+      const maxLoss = candidate.max_loss || 0;
+      const roi = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
 
-TRADE DETAILS:
+      // Calculate DTE
+      const expiry = candidate.contract_legs?.[0]?.expiry;
+      let dte = 0;
+      if (expiry) {
+        const expiryDate = new Date(expiry);
+        const today = new Date();
+        const diffTime = expiryDate.getTime() - today.getTime();
+        dte = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      }
+
+      // Get IPS factor summary from ips_factor_details
+      const passedFactors = candidate.ips_factor_details?.passed_factors || [];
+      const minorMisses = candidate.ips_factor_details?.minor_misses || [];
+      const majorMisses = candidate.ips_factor_details?.major_misses || [];
+      const failedFactors = [...minorMisses, ...majorMisses];
+
+      // Debug log to verify data
+      if (passedFactors.length === 0 && failedFactors.length === 0) {
+        console.log(`[GenerateRationales] WARNING: ${candidate.symbol} has no IPS factor data. ips_factor_details:`, candidate.ips_factor_details);
+      }
+
+      const topPassedFactors = passedFactors.slice(0, 5).map((f: any) => {
+        const value = typeof f.value === 'number' ? f.value.toFixed(2) : f.value;
+        return `${f.factor_name || f.name}: ${value}`;
+      }).join(', ');
+
+      const keyFailedFactors = failedFactors.slice(0, 3).map((f: any) => {
+        const actual = typeof f.value === 'number' ? f.value.toFixed(2) : f.value;
+        const target = f.threshold || f.target || 'N/A';
+        return `${f.factor_name || f.name} (target: ${target}, actual: ${actual})`;
+      }).join(', ');
+
+      // Build context for rationale generation
+      const prompt = `You are a professional options trading analyst. Generate a comprehensive, insightful analysis for this trade opportunity that covers IPS fit, risk/reward metrics, and market context.
+
+TRADE SETUP:
 Symbol: ${candidate.symbol}
 Strategy: ${candidate.strategy}
-Contract Legs: ${JSON.stringify(candidate.contract_legs, null, 2)}
-Entry Price: $${candidate.entry_mid?.toFixed(2)}
+Strikes: ${shortLeg?.strike || 'N/A'} (short) / ${longLeg?.strike || 'N/A'} (long)
+Spread Width: $${spreadWidth.toFixed(2)}
+Days to Expiration: ${dte} days
+Entry Credit: $${credit.toFixed(2)}
 Max Profit: $${candidate.max_profit?.toFixed(2)}
-Max Loss: $${candidate.max_loss?.toFixed(2)}
+Max Loss: $${maxLoss.toFixed(2)}
+ROI: ${roi.toFixed(1)}%
 Breakeven: $${candidate.breakeven?.toFixed(2)}
-Probability of Profit: ${candidate.est_pop?.toFixed(0)}%
+Probability of Profit: ${((candidate.est_pop || 0) * 100).toFixed(0)}%
 
-SCORING:
+SCORING & FIT:
 Composite Score: ${candidate.composite_score?.toFixed(1)}/100
-IPS Score: ${candidate.ips_score?.toFixed(1)}%
-Yield Score: ${candidate.yield_score?.toFixed(1)}
-${candidate.historical_analysis?.has_data ? `
-Historical Performance:
-- Win Rate: ${(candidate.historical_analysis.win_rate * 100).toFixed(1)}%
-- Similar Trades: ${candidate.historical_analysis.trade_count}
-- Avg ROI: ${candidate.historical_analysis.avg_roi?.toFixed(1)}%
-- Confidence: ${candidate.historical_analysis.confidence}` : ''}
+IPS Score: ${candidate.ips_score?.toFixed(1)}% (${passedFactors.length} passed, ${failedFactors.length} failed)
+Yield Score: ${candidate.yield_score?.toFixed(1)}/100
+${candidate.historical_analysis?.has_data ? `Historical Win Rate: ${(candidate.historical_analysis.win_rate * 100).toFixed(1)}% (${candidate.historical_analysis.trade_count} similar trades)` : 'No historical data available'}
+
+IPS FACTOR ANALYSIS:
+Strategy: ${state.ipsConfig?.name || 'N/A'}
+Key Passed Factors: ${topPassedFactors || 'None'}
+${keyFailedFactors ? `Key Failed Factors: ${keyFailedFactors}` : ''}
 
 MARKET DATA:
 ${state.fundamentalData?.[candidate.symbol] ? `
@@ -2294,7 +2373,9 @@ Sector: ${state.fundamentalData[candidate.symbol].Sector || 'N/A'}
 Industry: ${state.fundamentalData[candidate.symbol].Industry || 'N/A'}
 Market Cap: ${state.fundamentalData[candidate.symbol].MarketCapitalization || 'N/A'}
 P/E Ratio: ${state.fundamentalData[candidate.symbol].PERatio || 'N/A'}
-Beta: ${state.fundamentalData[candidate.symbol].Beta || 'N/A'}` : 'Fundamental data unavailable'}
+Beta: ${state.fundamentalData[candidate.symbol].Beta || 'N/A'}
+52W High: ${state.fundamentalData[candidate.symbol]['52WeekHigh'] || 'N/A'}
+52W Low: ${state.fundamentalData[candidate.symbol]['52WeekLow'] || 'N/A'}` : 'Fundamental data unavailable'}
 
 ${state.generalData?.[candidate.symbol]?.news_results ? `
 RECENT NEWS (Top 3):
@@ -2302,19 +2383,28 @@ ${state.generalData[candidate.symbol].news_results.slice(0, 3).map((n: any, i: n
   `${i + 1}. ${n.title}`
 ).join('\n')}` : ''}
 
-Generate a professional trade rationale with these sections:
+Generate a comprehensive, user-friendly analysis that helps a trader make an informed decision. This should NOT just repeat the numbers - analyze what they mean.
 
-1. RATIONALE (2-3 sentences): Why this trade makes sense right now
-2. NEWS_SUMMARY (1-2 sentences): Key market context from recent news
-3. MACRO_CONTEXT (1 sentence): Relevant macro/sector trends
-4. OUT_OF_IPS_JUSTIFICATION (if IPS score < 70): Why this trade is still recommended despite lower IPS score
+WHAT TO INCLUDE:
+1. Opening hook: What makes this trade attractive or interesting? (e.g., "Strong setup in a consolidating market", "High-conviction play on oversold conditions")
+2. Key strengths (2-3 pros): What's working in favor of this trade? Consider:
+   - IPS factor alignment (which key factors passed?)
+   - Technical setup (price action, support levels, IV)
+   - Risk/reward efficiency (is ROI strong? good credit for the risk?)
+   - Market timing (sector momentum, news catalysts)
+3. Considerations/risks (1-2 cons): What should the trader watch out for?
+   - Failed IPS factors (if any are important)
+   - Tight PoP or high risk scenarios
+   - Market headwinds or upcoming events
+4. Bottom line: Clear verdict on why this trade fits the strategy
+
+TONE: Conversational, insightful, like a mentor explaining to a fellow trader. Use phrases like "What I like here...", "The risk to watch...", "This setup shines because..."
+
+AVOID: Just listing metrics. Don't say "This trade has X ROI and Y% PoP" - explain WHY that ROI is good/bad, WHAT that PoP tells us about the setup.
 
 Respond with JSON:
 {
-  "rationale": "string",
-  "news_summary": "string or null",
-  "macro_context": "string or null",
-  "out_of_ips_justification": "string or null (only if IPS score < 70)"
+  "rationale": "4-5 sentence analysis with clear pros/cons structure. Start with what's attractive, highlight 2-3 strengths, mention 1-2 risks, and close with why it fits the strategy. Make it conversational and insightful, not just data regurgitation."
 }`;
 
       const response = await rationaleLLM(prompt);
@@ -2330,11 +2420,34 @@ Respond with JSON:
           parsed = JSON.parse(jsonMatch[0]);
         } else {
           console.warn(`[GenerateRationales] Failed to parse JSON for ${candidate.symbol}, using fallback`);
+
+          // Generate insightful fallback based on the metrics
+          let strengths = [];
+          let concerns = [];
+
+          const popPercent = (candidate.est_pop || 0) * 100;
+
+          if (candidate.ips_score >= 85) strengths.push("strong IPS alignment with " + passedFactors.length + " key factors passed");
+          else if (candidate.ips_score >= 70) strengths.push("solid IPS fit");
+
+          if (roi >= 50) strengths.push("excellent " + roi.toFixed(0) + "% ROI");
+          else if (roi >= 30) strengths.push("attractive " + roi.toFixed(0) + "% return potential");
+
+          if (popPercent >= 70) strengths.push("high " + popPercent.toFixed(0) + "% probability of success");
+          else if (popPercent >= 60) strengths.push(popPercent.toFixed(0) + "% probability setup");
+
+          if (dte >= 20 && dte <= 45) strengths.push("optimal " + dte + "-day theta decay window");
+
+          if (candidate.ips_score < 70) concerns.push("some IPS factors need attention (" + failedFactors.length + " failed)");
+          if (popPercent < 50) concerns.push("lower " + popPercent.toFixed(0) + "% probability requires careful monitoring");
+          if (spreadWidth > 10) concerns.push("wider $" + spreadWidth.toFixed(0) + " spread increases max loss");
+
+          const hookPhrase = strengths.length >= 2 ? "This setup offers " + strengths.slice(0, 2).join(" and ") : "Balanced risk/reward setup";
+          const riskPhrase = concerns.length > 0 ? " Watch for " + concerns[0] + "." : "";
+          const verdictPhrase = candidate.ips_score >= 75 ? " Fits the strategy well with " + passedFactors.length + " factors aligned." : " Consider if comfortable with the risk profile.";
+
           parsed = {
-            rationale: `${candidate.strategy} on ${candidate.symbol} with ${candidate.composite_score?.toFixed(1)}/100 composite score. Max profit: $${candidate.max_profit?.toFixed(2)}, Max loss: $${candidate.max_loss?.toFixed(2)}, PoP: ${candidate.est_pop?.toFixed(0)}%.`,
-            news_summary: null,
-            macro_context: null,
-            out_of_ips_justification: null,
+            rationale: `${hookPhrase} on ${candidate.symbol} ${shortLeg?.strike || 'N/A'}/${longLeg?.strike || 'N/A'} put spread.${riskPhrase}${verdictPhrase}`,
           };
         }
       }

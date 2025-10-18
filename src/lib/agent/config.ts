@@ -5,12 +5,13 @@ export const AGENT_CONFIG = {
   // Candidate pool sizes at each filtering stage
   filtering: {
     // Number of candidates to keep after initial high-weight factor filtering
-    topCandidatesAfterInitialFilter: 150,
+    // Increased to accommodate comprehensive testing (all expirations × all spread widths)
+    topCandidatesAfterInitialFilter: 500,
 
     // Number of candidates to consider before diversity filtering
-    topCandidatesBeforeDiversity: 100,
+    topCandidatesBeforeDiversity: 200,
 
-    // Final number of recommendations to return (top 20 with detailed analysis)
+    // Final number of recommendations to return (minimum 20, more if available)
     finalRecommendations: 20,
 
     // Number of additional candidates to show with failure analysis

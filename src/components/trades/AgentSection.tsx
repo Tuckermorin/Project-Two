@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight, List } from "lucide-react";
+import { Bot, TrendingUp, AlertCircle, X, Eye, ChevronRight, List, BarChart } from "lucide-react";
 import { useAuth } from "@/components/auth/auth-provider";
 import { FactorScorecard } from "@/components/trades/factor-scorecard";
 import { AITradeScoreCard } from "@/components/trades/AITradeScoreCard";
@@ -17,6 +17,16 @@ import { TradeTileCompact } from "@/components/trades/TradeTileCompact";
 import { TradeBarCompact } from "@/components/trades/TradeBarCompact";
 import { TradeDetailsModal } from "@/components/trades/TradeDetailsModal";
 import { AgentProgressBar } from "@/components/trades/AgentProgressBar";
+import {
+  ScatterChart,
+  Scatter,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Cell,
+} from "recharts";
 
 type Candidate = {
   id: string;
@@ -529,6 +539,127 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
 
           {cands?.length > 0 && !loadingCache && (
             <div className="space-y-4">
+              {/* IPS vs ROI Visualization */}
+              {cands.length >= 3 && (
+                <Card className="glass-card">
+                  <CardHeader>
+                    <CardTitle className="text-base flex items-center gap-2">
+                      <BarChart className="h-4 w-4" />
+                      IPS Fit vs ROI Analysis
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-xs text-muted-foreground mb-4">
+                      Shows which trades have both high IPS fit (strategy alignment) and high ROI potential. <strong>Click any dot to view details.</strong>
+                    </p>
+                    <ResponsiveContainer width="100%" height={300}>
+                      <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                        <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
+                        <XAxis
+                          type="number"
+                          dataKey="ips_score"
+                          name="IPS Score"
+                          domain={[50, 100]}
+                          label={{ value: "IPS Score (%)", position: "insideBottom", offset: -10, fill: "var(--text-secondary)" }}
+                          tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
+                        />
+                        <YAxis
+                          type="number"
+                          dataKey={(entry: any) => {
+                            // Calculate ROI as (credit / max_loss) * 100
+                            const shortLeg = entry.contract_legs?.find((l: any) => l.type === 'SELL');
+                            const longLeg = entry.contract_legs?.find((l: any) => l.type === 'BUY');
+                            const credit = entry.entry_mid || 0;
+                            const spreadWidth = (shortLeg?.strike || 0) - (longLeg?.strike || 0);
+                            const maxLoss = spreadWidth - credit;
+                            return maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
+                          }}
+                          name="ROI %"
+                          domain={[0, 'auto']}
+                          label={{ value: "ROI %", angle: -90, position: "insideLeft", fill: "var(--text-secondary)" }}
+                          tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
+                        />
+                        <Tooltip
+                          content={({ active, payload }) => {
+                            if (active && payload && payload.length) {
+                              const data = payload[0].payload;
+                              const shortLeg = data.contract_legs?.find((l: any) => l.type === 'SELL');
+                              const longLeg = data.contract_legs?.find((l: any) => l.type === 'BUY');
+                              const credit = data.entry_mid || 0;
+                              const spreadWidth = (shortLeg?.strike || 0) - (longLeg?.strike || 0);
+                              const maxLoss = spreadWidth - credit;
+                              const roi = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
+
+                              // Calculate DTE
+                              const expiry = data.contract_legs?.[0]?.expiry;
+                              let dte = 0;
+                              if (expiry) {
+                                const expiryDate = new Date(expiry);
+                                const today = new Date();
+                                const diffTime = expiryDate.getTime() - today.getTime();
+                                dte = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+                              }
+
+                              return (
+                                <div className="glass-card p-3 text-xs border border-[var(--glass-border)]">
+                                  <p className="font-semibold">{data.symbol} ${shortLeg?.strike}/{longLeg?.strike}</p>
+                                  <p className="text-xs text-muted-foreground">{dte}d to expiration</p>
+                                  <p className="text-green-500 mt-1">IPS: {data.ips_score?.toFixed(1)}%</p>
+                                  <p className="text-blue-500">ROI: {roi.toFixed(1)}%</p>
+                                  <p className="text-yellow-500">Credit: ${credit.toFixed(2)}</p>
+                                </div>
+                              );
+                            }
+                            return null;
+                          }}
+                        />
+                        <Scatter
+                          name="All Trades"
+                          data={cands}
+                          fill="#8884d8"
+                          onClick={(data: any) => {
+                            setSelectedCandidate(data);
+                            setNumberOfContracts("1");
+                            setDetailsDialogOpen(true);
+                          }}
+                          style={{ cursor: 'pointer' }}
+                        >
+                          {cands.map((entry: any, index: number) => {
+                            // Color by IPS score tier
+                            let color = "#666"; // Low tier
+                            if (entry.ips_score >= 90) color = "#10b981"; // Elite (green)
+                            else if (entry.ips_score >= 75) color = "#3b82f6"; // Quality (blue)
+                            else if (entry.ips_score >= 60) color = "#eab308"; // Speculative (yellow)
+
+                            return (
+                              <Cell
+                                key={`cell-roi-${index}`}
+                                fill={color}
+                                opacity={0.8}
+                              />
+                            );
+                          })}
+                        </Scatter>
+                      </ScatterChart>
+                    </ResponsiveContainer>
+                    <div className="flex items-center justify-center gap-4 mt-3 text-xs flex-wrap">
+                      <div className="flex items-center gap-1">
+                        <div className="w-3 h-3 rounded-full bg-[#10b981]"></div>
+                        <span className="text-muted-foreground">Elite (≥90)</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-3 h-3 rounded-full bg-[#3b82f6]"></div>
+                        <span className="text-muted-foreground">Quality (75-89)</span>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <div className="w-3 h-3 rounded-full bg-[#eab308]"></div>
+                        <span className="text-muted-foreground">Speculative (60-74)</span>
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+              )}
+
               <div className="flex items-center justify-between">
                 <div>
                   <div className="flex items-center gap-2">

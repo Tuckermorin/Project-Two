@@ -317,6 +317,104 @@ export default function OptimalityAuditPage() {
 
           {/* Visualization Section */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Scatter Plot: IPS vs ROI */}
+            <Card className="glass-card p-6">
+              <h3 className="text-lg font-bold mb-4" style={{ color: "var(--text-primary)" }}>
+                IPS Fit vs ROI Potential
+              </h3>
+              <p className="text-xs text-[var(--text-secondary)] mb-4">
+                Shows highest IPS scores compared to potential return on investment. <strong>Click any dot to see factor breakdown.</strong>
+              </p>
+              <ResponsiveContainer width="100%" height={300}>
+                <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--glass-border)" />
+                  <XAxis
+                    type="number"
+                    dataKey="ips_score"
+                    name="IPS Score"
+                    domain={[50, 100]}
+                    label={{ value: "IPS Score (%)", position: "insideBottom", offset: -10, fill: "var(--text-secondary)" }}
+                    tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
+                  />
+                  <YAxis
+                    type="number"
+                    dataKey={(entry: any) => {
+                      // Calculate ROI as (credit / max_loss) * 100
+                      const credit = entry.entry_mid || 0;
+                      const maxLoss = (entry.long_strike - entry.short_strike) - credit;
+                      return maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
+                    }}
+                    name="ROI %"
+                    domain={[0, 'auto']}
+                    label={{ value: "ROI %", angle: -90, position: "insideLeft", fill: "var(--text-secondary)" }}
+                    tick={{ fill: "var(--text-secondary)", fontSize: 12 }}
+                  />
+                  <ZAxis type="number" dataKey="composite_score" range={[20, 400]} />
+                  <Tooltip
+                    content={({ active, payload }) => {
+                      if (active && payload && payload.length) {
+                        const data = payload[0].payload;
+                        const credit = data.entry_mid || 0;
+                        const maxLoss = (data.long_strike - data.short_strike) - credit;
+                        const roi = maxLoss > 0 ? (credit / maxLoss) * 100 : 0;
+                        return (
+                          <div className="glass-card p-3 text-xs">
+                            <p className="font-semibold">${data.short_strike}/{data.long_strike} - {data.dte}d</p>
+                            <p className="text-green-500">IPS: {data.ips_score?.toFixed(1)}%</p>
+                            <p className="text-blue-500">ROI: {roi.toFixed(1)}%</p>
+                            <p className="text-yellow-500">Credit: ${credit.toFixed(2)}</p>
+                          </div>
+                        );
+                      }
+                      return null;
+                    }}
+                  />
+                  <Scatter name="All Trades" data={result.topByComposite.slice(0, 50)} fill="#8884d8" onClick={(data: any) => handleTradeClick(data)}>
+                    {result.topByComposite.slice(0, 50).map((entry: any, index: number) => {
+                      const isAgent = result.agentTrade &&
+                        Math.abs(entry.short_strike - result.agentTrade.short_strike) < 0.01 &&
+                        Math.abs(entry.long_strike - result.agentTrade.long_strike) < 0.01;
+
+                      // Color by composite score tier
+                      let color = "#666"; // Low tier
+                      if (entry.composite_score >= 65) color = "#10b981"; // Elite (green)
+                      else if (entry.composite_score >= 60) color = "#3b82f6"; // Quality (blue)
+                      else if (entry.composite_score >= 55) color = "#eab308"; // Speculative (yellow)
+
+                      return (
+                        <Cell
+                          key={`cell-roi-${index}`}
+                          fill={isAgent ? "#f59e0b" : color}
+                          stroke={isAgent ? "#fff" : "none"}
+                          strokeWidth={isAgent ? 2 : 0}
+                        />
+                      );
+                    })}
+                  </Scatter>
+                </ScatterChart>
+              </ResponsiveContainer>
+              <div className="flex items-center justify-center gap-4 mt-2 text-xs">
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full bg-[#10b981]"></div>
+                  <span className="text-[var(--text-secondary)]">Elite (≥65)</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full bg-[#3b82f6]"></div>
+                  <span className="text-[var(--text-secondary)]">Quality (60-65)</span>
+                </div>
+                <div className="flex items-center gap-1">
+                  <div className="w-3 h-3 rounded-full bg-[#eab308]"></div>
+                  <span className="text-[var(--text-secondary)]">Speculative (55-60)</span>
+                </div>
+                {result.agentTrade && (
+                  <div className="flex items-center gap-1">
+                    <div className="w-3 h-3 rounded-full bg-[#f59e0b] border-2 border-white"></div>
+                    <span className="text-[var(--text-secondary)]">Agent Pick</span>
+                  </div>
+                )}
+              </div>
+            </Card>
+
             {/* Scatter Plot: IPS vs Yield */}
             <Card className="glass-card p-6">
               <h3 className="text-lg font-bold mb-4" style={{ color: "var(--text-primary)" }}>
