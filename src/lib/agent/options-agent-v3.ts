@@ -2123,19 +2123,43 @@ async function sortAndSelectTiered(state: AgentState): Promise<Partial<AgentStat
   const isSingleSymbolAnalysis = uniqueSymbols.length === 1;
 
   console.log(`[TieredSelection] Analysis mode: ${isSingleSymbolAnalysis ? 'SINGLE-SYMBOL' : 'MULTI-SYMBOL'} (${uniqueSymbols.length} symbol${uniqueSymbols.length > 1 ? 's' : ''})`);
-  console.log(`[TieredSelection] maxPerSymbol set to: ${isSingleSymbolAnalysis ? 19 : 2} (allowing ${isSingleSymbolAnalysis ? '~20 total trades' : '~3 trades per symbol'})`);
+
+  // Calculate how many additional trades we need beyond the guaranteed one-per-stock
+  const guaranteedCount = onePerStock.length;
+  const targetTotal = Math.max(20, guaranteedCount); // Always aim for at least 20
+  const additionalNeeded = targetTotal - guaranteedCount;
+
+  // Determine diversity limits based on analysis mode and target
+  let maxPerSymbol, maxPerSector, maxPerStrategy;
+
+  if (isSingleSymbolAnalysis) {
+    // Single symbol: very relaxed limits to show full 20 trades
+    maxPerSymbol = 19;
+    maxPerSector = 100;
+    maxPerStrategy = 100;
+    console.log(`[TieredSelection] Single-symbol mode: aiming for 20 total trades from ${uniqueSymbols[0]}`);
+  } else {
+    // Multi-symbol: balance diversity with hitting our target of 20 trades
+    // If we have 10 stocks and need 10 more trades, allow 1 more per symbol
+    // If we have 5 stocks and need 15 more trades, allow 3 more per symbol
+    const suggestedPerSymbol = Math.ceil(additionalNeeded / guaranteedCount);
+    maxPerSymbol = Math.max(2, Math.min(5, suggestedPerSymbol)); // Between 2-5 per symbol
+
+    // Sector limits: if we have fewer than 10 stocks, be more generous
+    maxPerSector = guaranteedCount <= 10 ? 10 : 6;
+    maxPerStrategy = 100; // Don't limit by strategy for multi-symbol
+
+    console.log(`[TieredSelection] Multi-symbol mode: ${guaranteedCount} stocks, need ${additionalNeeded} more trades to reach ${targetTotal}`);
+    console.log(`[TieredSelection] Diversity limits: ${maxPerSymbol} per symbol, ${maxPerSector} per sector`);
+  }
 
   // Start with one per stock, then add more from the remaining candidates
   const remaining = combined.filter(c => !onePerStock.includes(c));
   const additional = applyDiversificationFilters(remaining, {
     ...AGENT_CONFIG.diversity,
-    // If analyzing a single symbol, allow up to 19 more trades (total of 20)
-    // If analyzing multiple symbols, allow up to 2 more per symbol (total of 3)
-    maxPerSymbol: isSingleSymbolAnalysis ? 19 : 2,
-    // Also relax sector limits for single-symbol analysis since all trades will be from same sector
-    maxPerSector: isSingleSymbolAnalysis ? 100 : AGENT_CONFIG.diversity.maxPerSector,
-    // Same for strategy - allow all strategies for single symbol
-    maxPerStrategy: isSingleSymbolAnalysis ? 100 : AGENT_CONFIG.diversity.maxPerStrategy,
+    maxPerSymbol,
+    maxPerSector,
+    maxPerStrategy,
   });
 
   const diversified = [...onePerStock, ...additional].sort((a, b) => (b.ips_score || 0) - (a.ips_score || 0));
@@ -2383,71 +2407,86 @@ ${state.generalData[candidate.symbol].news_results.slice(0, 3).map((n: any, i: n
   `${i + 1}. ${n.title}`
 ).join('\n')}` : ''}
 
-Generate a comprehensive, user-friendly analysis that helps a trader make an informed decision. This should NOT just repeat the numbers - analyze what they mean.
+Generate a comprehensive, conversational analysis that helps a trader understand WHY this trade makes sense. Be specific and insightful.
 
-WHAT TO INCLUDE:
-1. Opening hook: What makes this trade attractive or interesting? (e.g., "Strong setup in a consolidating market", "High-conviction play on oversold conditions")
-2. Key strengths (2-3 pros): What's working in favor of this trade? Consider:
-   - IPS factor alignment (which key factors passed?)
-   - Technical setup (price action, support levels, IV)
-   - Risk/reward efficiency (is ROI strong? good credit for the risk?)
-   - Market timing (sector momentum, news catalysts)
-3. Considerations/risks (1-2 cons): What should the trader watch out for?
-   - Failed IPS factors (if any are important)
-   - Tight PoP or high risk scenarios
-   - Market headwinds or upcoming events
-4. Bottom line: Clear verdict on why this trade fits the strategy
+STRUCTURE (4-5 sentences):
+1. OPENING HOOK: Start with "What I like here is..." - mention the most compelling strength with specifics
+2. KEY STRENGTHS: Highlight 2-3 pros with actual numbers:
+   - IPS factors: Mention specific ones that passed (e.g., "excellent IV rank at 68%", "delta at 0.25")
+   - Risk/reward: Explain WHY the ROI is attractive (e.g., "72% ROI on just $1 max loss")
+   - Technicals/timing: Reference support, momentum, or catalysts
+3. MAIN RISK: Use "The risk to watch..." or "Main concern is..." - be honest about 1-2 cons
+4. VERDICT: Close with "This setup shines because..." or "Overall this fits the strategy because..."
 
-TONE: Conversational, insightful, like a mentor explaining to a fellow trader. Use phrases like "What I like here...", "The risk to watch...", "This setup shines because..."
+GOOD EXAMPLE:
+"What I like here is the strong IPS alignment - 13 of 17 factors passed including excellent IV rank at 68% and solid technical support at the 200-day MA. The 70% ROI on just $2.95 max loss makes this an efficient capital deployment with quick 20-day theta decay. The risk to watch is the 67% probability of profit means we need price to stay above $205, but given current support that's a reasonable ask. This setup shines because it balances high returns with controlled risk while fitting the strategy's preference for high-IV environments."
 
-AVOID: Just listing metrics. Don't say "This trade has X ROI and Y% PoP" - explain WHY that ROI is good/bad, WHAT that PoP tells us about the setup.
+ANOTHER EXAMPLE:
+"What I like here is the exceptional 72% ROI efficiency on VRT's tight 1-wide spread with 14 of 17 IPS factors aligned including strong 52% IV and favorable put/call ratios. The 35-day timeframe provides optimal theta decay while the $1 max loss keeps capital requirements minimal. Main concern is the narrow strikes require precise entry timing, but the high 75% probability of profit provides good cushion. Overall this fits the strategy perfectly with high IPS score, efficient capital use, and strong technical backdrop."
 
-Respond with JSON:
+CRITICAL: Return ONLY valid JSON (no markdown, no code blocks):
 {
-  "rationale": "4-5 sentence analysis with clear pros/cons structure. Start with what's attractive, highlight 2-3 strengths, mention 1-2 risks, and close with why it fits the strategy. Make it conversational and insightful, not just data regurgitation."
+  "rationale": "your 4-5 sentence conversational analysis here"
 }`;
 
       const response = await rationaleLLM(prompt);
 
+      console.log(`[GenerateRationales] ${candidate.symbol}: LLM response length: ${response.length} chars`);
+
       // Parse the LLM response
       let parsed;
       try {
-        parsed = JSON.parse(response);
+        // Strip markdown code blocks if present (```json ... ```)
+        let cleanResponse = response.trim();
+        if (cleanResponse.startsWith('```')) {
+          cleanResponse = cleanResponse.replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
+          console.log(`[GenerateRationales] ${candidate.symbol}: Stripped markdown code blocks`);
+        }
+        parsed = JSON.parse(cleanResponse);
+        console.log(`[GenerateRationales] ${candidate.symbol}: Successfully parsed JSON from LLM`);
       } catch (e) {
         // Try to find JSON in the response
         const jsonMatch = response.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
-          parsed = JSON.parse(jsonMatch[0]);
+          try {
+            parsed = JSON.parse(jsonMatch[0]);
+          } catch (e2) {
+            console.warn(`[GenerateRationales] Failed to parse extracted JSON for ${candidate.symbol}`);
+            parsed = null;
+          }
         } else {
+          parsed = null;
+        }
+
+        if (!parsed) {
           console.warn(`[GenerateRationales] Failed to parse JSON for ${candidate.symbol}, using fallback`);
 
           // Generate insightful fallback based on the metrics
-          let strengths = [];
-          let concerns = [];
-
           const popPercent = (candidate.est_pop || 0) * 100;
+          const totalFactors = passedFactors.length + failedFactors.length;
 
-          if (candidate.ips_score >= 85) strengths.push("strong IPS alignment with " + passedFactors.length + " key factors passed");
-          else if (candidate.ips_score >= 70) strengths.push("solid IPS fit");
+          // Get top passed factors for specific mention
+          const topFactorMentions = passedFactors.slice(0, 2).map((f: any) => {
+            const value = typeof f.value === 'number' ? f.value.toFixed(1) : f.value;
+            return `${f.factor_name || f.name} at ${value}`;
+          }).join(" and ");
 
-          if (roi >= 50) strengths.push("excellent " + roi.toFixed(0) + "% ROI");
-          else if (roi >= 30) strengths.push("attractive " + roi.toFixed(0) + "% return potential");
+          // Build conversational sentences
+          const hook = `What I like here is the ${candidate.ips_score >= 85 ? 'strong' : 'solid'} IPS alignment - ${passedFactors.length} of ${totalFactors} factors passed${topFactorMentions ? ' including ' + topFactorMentions : ''}.`;
 
-          if (popPercent >= 70) strengths.push("high " + popPercent.toFixed(0) + "% probability of success");
-          else if (popPercent >= 60) strengths.push(popPercent.toFixed(0) + "% probability setup");
+          const roiDetail = roi >= 50 ? `exceptional ${roi.toFixed(0)}% ROI` : roi >= 30 ? `attractive ${roi.toFixed(0)}% ROI` : `${roi.toFixed(0)}% ROI`;
+          const maxLossDetail = maxLoss <= 3 ? `just $${maxLoss.toFixed(2)} max loss` : `$${maxLoss.toFixed(2)} max loss`;
+          const strengths = `The ${roiDetail} on ${maxLossDetail} makes this an efficient capital deployment${dte >= 20 && dte <= 45 ? ` with ${dte}-day theta decay window` : ''}.`;
 
-          if (dte >= 20 && dte <= 45) strengths.push("optimal " + dte + "-day theta decay window");
+          let risk = "";
+          if (popPercent < 60 || failedFactors.length > 5) {
+            risk = ` The risk to watch is ${popPercent < 60 ? `the ${popPercent.toFixed(0)}% probability of profit means we need ${candidate.symbol} to stay above $${longLeg?.strike || 'N/A'}` : `${failedFactors.length} factors missed, though most are lower-weight items`}.`;
+          }
 
-          if (candidate.ips_score < 70) concerns.push("some IPS factors need attention (" + failedFactors.length + " failed)");
-          if (popPercent < 50) concerns.push("lower " + popPercent.toFixed(0) + "% probability requires careful monitoring");
-          if (spreadWidth > 10) concerns.push("wider $" + spreadWidth.toFixed(0) + " spread increases max loss");
-
-          const hookPhrase = strengths.length >= 2 ? "This setup offers " + strengths.slice(0, 2).join(" and ") : "Balanced risk/reward setup";
-          const riskPhrase = concerns.length > 0 ? " Watch for " + concerns[0] + "." : "";
-          const verdictPhrase = candidate.ips_score >= 75 ? " Fits the strategy well with " + passedFactors.length + " factors aligned." : " Consider if comfortable with the risk profile.";
+          const verdict = ` This setup ${candidate.ips_score >= 75 ? 'fits the strategy well' : 'offers balanced risk/reward'} with ${passedFactors.length} key factors aligned${spreadWidth <= 5 ? ' and tight strike spacing controlling max loss' : ''}.`;
 
           parsed = {
-            rationale: `${hookPhrase} on ${candidate.symbol} ${shortLeg?.strike || 'N/A'}/${longLeg?.strike || 'N/A'} put spread.${riskPhrase}${verdictPhrase}`,
+            rationale: `${hook} ${strengths}${risk}${verdict}`,
           };
         }
       }
