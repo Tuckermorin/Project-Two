@@ -131,7 +131,13 @@
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT column_name, data_type FROM information_schema.columns WHERE table_name = ''ips_factors'' ORDER BY ordinal_position;\")",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT ips_id, factor_key, factor_name, weight, enabled FROM ips_factors WHERE ips_id = ''20edfe58-2e44-4234-96cd-503011577cf4'' LIMIT 5;\")",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT COUNT(*) as total_factors, COUNT(*) FILTER (WHERE enabled = true) as enabled_factors FROM ips_factors WHERE ips_id = ''f6b1f402-2c5c-49a3-8af3-848f2e4ee638'';\")",
-      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT table_name, pg_size_pretty(pg_total_relation_size(quote_ident(table_name))) as size FROM information_schema.tables WHERE table_schema = ''public'' AND table_name IN (''historical_options_data'', ''historical_stock_data'') ORDER BY pg_total_relation_size(quote_ident(table_name)) DESC;\")"
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT table_name, pg_size_pretty(pg_total_relation_size(quote_ident(table_name))) as size FROM information_schema.tables WHERE table_schema = ''public'' AND table_name IN (''historical_options_data'', ''historical_stock_data'') ORDER BY pg_total_relation_size(quote_ident(table_name)) DESC;\")",
+      "Bash(echo \"Checking Ollama configuration...\" echo \"OLLAMA_BASE_URL: $OLLAMA_BASE_URL:-not set\" echo \"OLLAMA_HOST: $OLLAMA_HOST:-not set\" echo \"\" echo \"Testing connection to golem:11434...\" curl -s --max-time 3 http://golem:11434/api/tags)",
+      "Bash(echo:*)",
+      "Bash(ping:*)",
+      "Bash(ipconfig)",
+      "Bash(ipconfig:*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT factor_key, display_name, target_value, target_operator, weight, enabled FROM ips_factors WHERE ips_id = (SELECT id FROM ips_configurations LIMIT 1) AND factor_key LIKE ''%delta%'' ORDER BY weight DESC;\")"
     ],
     "deny": [],
     "ask": []

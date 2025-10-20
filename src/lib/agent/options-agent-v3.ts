@@ -920,8 +920,16 @@ async function generateCandidatesForSymbol(
       const shortPut = expiryPuts[i];
 
       // Skip if delta is too high (we want OTM for safety)
+      // PRUDENT GUARDRAIL: Most established strategies recommend delta 0.10-0.30 for put credit spreads
+      // - TastyTrade: 0.16 delta (~84% PoP)
+      // - The Wheel: 0.20-0.30 delta
+      // - Conservative: 0.10-0.15 delta
+      // We set a hard limit at 0.35 to prevent obviously imprudent high-delta trades
       const shortDelta = Math.abs(shortPut.delta || 0);
-      if (shortDelta > 0.5) continue; // Skip deep ITM/ATM options
+      if (shortDelta > 0.35) {
+        console.log(`[GenerateCandidates] ${symbol}: Skipping ${shortPut.strike} put (delta=${shortDelta.toFixed(2)} too high, limit=0.35)`);
+        continue;
+      }
 
       // Test each spread width
       for (const width of spreadWidths) {
@@ -2399,7 +2407,39 @@ Market Cap: ${state.fundamentalData[candidate.symbol].MarketCapitalization || 'N
 P/E Ratio: ${state.fundamentalData[candidate.symbol].PERatio || 'N/A'}
 Beta: ${state.fundamentalData[candidate.symbol].Beta || 'N/A'}
 52W High: ${state.fundamentalData[candidate.symbol]['52WeekHigh'] || 'N/A'}
-52W Low: ${state.fundamentalData[candidate.symbol]['52WeekLow'] || 'N/A'}` : 'Fundamental data unavailable'}
+52W Low: ${state.fundamentalData[candidate.symbol]['52WeekLow'] || 'N/A'}
+Current Price: $${state.generalData?.[candidate.symbol]?.current_price || 'N/A'}
+52W Range Position: ${state.fundamentalData[candidate.symbol]['52WeekHigh'] && state.generalData?.[candidate.symbol]?.current_price ?
+  (((state.generalData[candidate.symbol].current_price - parseFloat(state.fundamentalData[candidate.symbol]['52WeekLow'])) /
+    (parseFloat(state.fundamentalData[candidate.symbol]['52WeekHigh']) - parseFloat(state.fundamentalData[candidate.symbol]['52WeekLow'])) * 100).toFixed(1)) + '% of range' : 'N/A'}` : 'Fundamental data unavailable'}
+
+${state.generalData?.[candidate.symbol]?.insider_activity ? `
+INSIDER TRANSACTION ACTIVITY (90 days):
+Buy/Sell Ratio: ${state.generalData[candidate.symbol].insider_activity.buy_ratio.toFixed(2)} (${state.generalData[candidate.symbol].insider_activity.buy_ratio < 0.5 ? 'SELLING' : state.generalData[candidate.symbol].insider_activity.buy_ratio > 2.0 ? 'BUYING' : 'Neutral'})
+Acquisitions: ${state.generalData[candidate.symbol].insider_activity.acquisition_count || 0}
+Disposals: ${state.generalData[candidate.symbol].insider_activity.disposal_count || 0}
+Total Transactions: ${state.generalData[candidate.symbol].insider_activity.transaction_count || 0}
+Net Value: ${state.generalData[candidate.symbol].insider_activity.net_value ? '$' + (state.generalData[candidate.symbol].insider_activity.net_value / 1000000).toFixed(2) + 'M' : 'N/A'}
+Activity Trend: ${state.generalData[candidate.symbol].insider_activity.activity_trend > 0 ? 'Bullish' : state.generalData[candidate.symbol].insider_activity.activity_trend < 0 ? 'Bearish' : 'Neutral'}` : ''}
+
+${state.generalData?.[candidate.symbol]?.av_news_sentiment ? `
+NEWS SENTIMENT (Alpha Vantage):
+Overall Sentiment: ${state.generalData[candidate.symbol].av_news_sentiment.sentiment_label || 'N/A'} (score: ${state.generalData[candidate.symbol].av_news_sentiment.average_score?.toFixed(2) || 'N/A'})
+Article Count: ${state.generalData[candidate.symbol].av_news_sentiment.count || 0} (${state.generalData[candidate.symbol].av_news_sentiment.positive || 0} positive, ${state.generalData[candidate.symbol].av_news_sentiment.neutral || 0} neutral, ${state.generalData[candidate.symbol].av_news_sentiment.negative || 0} negative)
+Avg Relevance: ${state.generalData[candidate.symbol].av_news_sentiment.avg_relevance?.toFixed(2) || 'N/A'}
+${state.generalData[candidate.symbol].av_news_sentiment.topic_sentiment?.Earnings !== undefined ? `Earnings Sentiment: ${state.generalData[candidate.symbol].av_news_sentiment.topic_sentiment.Earnings.toFixed(2)}` : ''}` : ''}
+
+${state.generalData?.[candidate.symbol]?.reddit ? `
+REDDIT SENTIMENT:
+Sentiment Score: ${state.generalData[candidate.symbol].reddit.sentiment_score.toFixed(2)} (${state.generalData[candidate.symbol].reddit.sentiment_score > 0.5 ? 'Bullish' : state.generalData[candidate.symbol].reddit.sentiment_score < -0.5 ? 'Bearish' : 'Neutral'})
+Mention Count: ${state.generalData[candidate.symbol].reddit.mention_count}
+Mention Velocity: ${state.generalData[candidate.symbol].reddit.mention_velocity}%
+${state.generalData[candidate.symbol].reddit.trending_rank ? `Trending Rank: #${state.generalData[candidate.symbol].reddit.trending_rank}` : ''}
+Confidence: ${state.generalData[candidate.symbol].reddit.confidence}` : ''}
+
+${candidate.intelligence_adjustments && candidate.intelligence_adjustments !== 'none' ? `
+INTELLIGENCE ADJUSTMENTS APPLIED:
+${candidate.intelligence_adjustments}` : ''}
 
 ${state.generalData?.[candidate.symbol]?.news_results ? `
 RECENT NEWS (Top 3):
@@ -2407,26 +2447,35 @@ ${state.generalData[candidate.symbol].news_results.slice(0, 3).map((n: any, i: n
   `${i + 1}. ${n.title}`
 ).join('\n')}` : ''}
 
-Generate a comprehensive, conversational analysis that helps a trader understand WHY this trade makes sense. Be specific and insightful.
+You are an expert options trader analyzing this trade opportunity. Think critically and provide genuine insight by connecting dots between multiple data points.
 
-STRUCTURE (4-5 sentences):
-1. OPENING HOOK: Start with "What I like here is..." - mention the most compelling strength with specifics
-2. KEY STRENGTHS: Highlight 2-3 pros with actual numbers:
-   - IPS factors: Mention specific ones that passed (e.g., "excellent IV rank at 68%", "delta at 0.25")
-   - Risk/reward: Explain WHY the ROI is attractive (e.g., "72% ROI on just $1 max loss")
-   - Technicals/timing: Reference support, momentum, or catalysts
-3. MAIN RISK: Use "The risk to watch..." or "Main concern is..." - be honest about 1-2 cons
-4. VERDICT: Close with "This setup shines because..." or "Overall this fits the strategy because..."
+YOUR ANALYSIS APPROACH:
+1. START with "What I like here is..." - highlight 1-2 key strengths with specific numbers from the data above
+2. THEN provide a FREE-FORM ANALYSIS where you:
+   - **CRITICAL**: Flag if delta is too high (>0.30 is risky, sweet spot is 0.15-0.25 for put credit spreads)
+   - Connect the dots between different factors (e.g., "The insider selling combined with proximity to 52W high suggests...")
+   - Apply your trading knowledge (e.g., "Research shows selling premium near resistance typically faces headwinds...")
+   - Identify non-obvious risks (e.g., "While IV is high, the earnings date proximity means...")
+   - Reference specific data points like insider activity, sentiment, technical levels, news, **and especially delta risk**
+   - Be honest about concerns - don't sugarcoat if you see red flags
+   - Provide actionable guidance (e.g., "I'd wait for...", "Consider wider strikes because...", "Lower delta strikes would be safer")
 
-GOOD EXAMPLE:
-"What I like here is the strong IPS alignment - 13 of 17 factors passed including excellent IV rank at 68% and solid technical support at the 200-day MA. The 70% ROI on just $2.95 max loss makes this an efficient capital deployment with quick 20-day theta decay. The risk to watch is the 67% probability of profit means we need price to stay above $205, but given current support that's a reasonable ask. This setup shines because it balances high returns with controlled risk while fitting the strategy's preference for high-IV environments."
+THINK LIKE A MENTOR: If a fellow trader showed you this exact setup with these specific numbers, what would you really say? Don't just list pros/cons - tell a story that helps them understand the complete picture.
 
-ANOTHER EXAMPLE:
-"What I like here is the exceptional 72% ROI efficiency on VRT's tight 1-wide spread with 14 of 17 IPS factors aligned including strong 52% IV and favorable put/call ratios. The 35-day timeframe provides optimal theta decay while the $1 max loss keeps capital requirements minimal. Main concern is the narrow strikes require precise entry timing, but the high 75% probability of profit provides good cushion. Overall this fits the strategy perfectly with high IPS score, efficient capital use, and strong technical backdrop."
+EXAMPLE OF GOOD ANALYSIS:
+"What I like here is the strong IPS alignment with 14 of 17 factors passed including excellent IV rank at 67% and solid put/call ratios showing bearish sentiment priced in. However, I have serious concerns about the insider selling - executives dumped nearly $10M with a 0.49 buy/sell ratio, which historically signals they know something we don't. The stock is also trading at 85.7% of its 52-week range near resistance at $219, making this vulnerable for selling premium. While the -10 intelligence adjustment notes this, the combination of heavy insider selling, proximity to resistance, and tight 1-wide spread means one bad earnings surprise could quickly turn this trade. I'd either wait for a pullback to better support or look for wider strikes given these headwinds."
 
-CRITICAL: Return ONLY valid JSON (no markdown, no code blocks):
+IMPORTANT GUIDELINES:
+- Be specific with numbers from the data (don't make up stats)
+- Connect multiple data points to tell a coherent story
+- Be honest about red flags - your job is to help traders avoid bad setups
+- Provide actionable next steps or considerations
+- Write 4-6 sentences in a natural, conversational flow
+- Don't force a rigid structure - let your analysis flow naturally based on what the data shows
+
+Return ONLY valid JSON (no markdown, no code blocks):
 {
-  "rationale": "your 4-5 sentence conversational analysis here"
+  "rationale": "Your natural, insightful analysis here (4-6 sentences)"
 }`;
 
       const response = await rationaleLLM(prompt);
@@ -2459,34 +2508,124 @@ CRITICAL: Return ONLY valid JSON (no markdown, no code blocks):
         }
 
         if (!parsed) {
-          console.warn(`[GenerateRationales] Failed to parse JSON for ${candidate.symbol}, using fallback`);
+          console.warn(`[GenerateRationales] Failed to parse JSON for ${candidate.symbol}, using enhanced fallback`);
 
-          // Generate insightful fallback based on the metrics
+          // Generate intelligent fallback based on ALL available data
           const popPercent = (candidate.est_pop || 0) * 100;
           const totalFactors = passedFactors.length + failedFactors.length;
+          const generalData = state.generalData?.[candidate.symbol];
+          const fundData = state.fundamentalData?.[candidate.symbol];
 
-          // Get top passed factors for specific mention
-          const topFactorMentions = passedFactors.slice(0, 2).map((f: any) => {
-            const value = typeof f.value === 'number' ? f.value.toFixed(1) : f.value;
-            return `${f.factor_name || f.name} at ${value}`;
-          }).join(" and ");
+          // Analyze all data points
+          const insiderData = generalData?.insider_activity;
+          const sentimentData = generalData?.av_news_sentiment;
+          const redditData = generalData?.reddit;
 
-          // Build conversational sentences
-          const hook = `What I like here is the ${candidate.ips_score >= 85 ? 'strong' : 'solid'} IPS alignment - ${passedFactors.length} of ${totalFactors} factors passed${topFactorMentions ? ' including ' + topFactorMentions : ''}.`;
-
-          const roiDetail = roi >= 50 ? `exceptional ${roi.toFixed(0)}% ROI` : roi >= 30 ? `attractive ${roi.toFixed(0)}% ROI` : `${roi.toFixed(0)}% ROI`;
-          const maxLossDetail = maxLoss <= 3 ? `just $${maxLoss.toFixed(2)} max loss` : `$${maxLoss.toFixed(2)} max loss`;
-          const strengths = `The ${roiDetail} on ${maxLossDetail} makes this an efficient capital deployment${dte >= 20 && dte <= 45 ? ` with ${dte}-day theta decay window` : ''}.`;
-
-          let risk = "";
-          if (popPercent < 60 || failedFactors.length > 5) {
-            risk = ` The risk to watch is ${popPercent < 60 ? `the ${popPercent.toFixed(0)}% probability of profit means we need ${candidate.symbol} to stay above $${longLeg?.strike || 'N/A'}` : `${failedFactors.length} factors missed, though most are lower-weight items`}.`;
+          // Calculate 52W range position if available
+          let rangePosition = null;
+          if (fundData?.['52WeekHigh'] && fundData?.['52WeekLow'] && generalData?.current_price) {
+            const high = parseFloat(fundData['52WeekHigh']);
+            const low = parseFloat(fundData['52WeekLow']);
+            const current = generalData.current_price;
+            rangePosition = ((current - low) / (high - low)) * 100;
           }
 
-          const verdict = ` This setup ${candidate.ips_score >= 75 ? 'fits the strategy well' : 'offers balanced risk/reward'} with ${passedFactors.length} key factors aligned${spreadWidth <= 5 ? ' and tight strike spacing controlling max loss' : ''}.`;
+          // Build dynamic, data-driven analysis
+          const parts = [];
+
+          // 1. Opening hook with best factors
+          const bestFactors = passedFactors.slice(0, 2).map((f: any) => {
+            const value = typeof f.value === 'number' ? f.value.toFixed(2) : f.value;
+            const name = (f.factor_name || f.name || '').replace(/_/g, ' ');
+            return `${name} at ${value}`;
+          }).filter(Boolean);
+
+          parts.push(`What I like here is the ${candidate.ips_score >= 85 ? 'strong' : 'solid'} IPS alignment - ${passedFactors.length} of ${totalFactors} factors passed${bestFactors.length > 0 ? ' including ' + bestFactors.join(' and ') : ''}.`);
+
+          // 2. Main analysis - connect multiple data points
+          const analysisPoints = [];
+
+          // ROI and capital efficiency
+          if (roi >= 50) {
+            analysisPoints.push(`The exceptional ${roi.toFixed(0)}% ROI on ${maxLoss <= 3 ? `just $${maxLoss.toFixed(2)}` : `$${maxLoss.toFixed(2)}`} max loss makes this capital-efficient`);
+          } else if (roi >= 30) {
+            analysisPoints.push(`The attractive ${roi.toFixed(0)}% ROI provides solid returns for the risk`);
+          }
+
+          // Insider activity insights
+          if (insiderData && insiderData.transaction_count >= 5) {
+            const buyRatio = insiderData.buy_ratio;
+            if (buyRatio < 0.5) {
+              analysisPoints.push(`However, insider selling is a concern with a ${buyRatio.toFixed(2)} buy/sell ratio (${insiderData.disposal_count} disposals) suggesting executives may know something we don't`);
+            } else if (buyRatio > 2.0) {
+              analysisPoints.push(`Insider buying activity (${buyRatio.toFixed(2)} buy/sell ratio, ${insiderData.acquisition_count} acquisitions) adds conviction to this setup`);
+            }
+          }
+
+          // 52W range position
+          if (rangePosition !== null) {
+            if (rangePosition > 85) {
+              analysisPoints.push(`Trading at ${rangePosition.toFixed(1)}% of the 52-week range near resistance increases risk for premium selling`);
+            } else if (rangePosition < 30) {
+              analysisPoints.push(`Trading at ${rangePosition.toFixed(1)}% of the 52-week range provides good support for this put spread`);
+            }
+          }
+
+          // News sentiment
+          if (sentimentData && sentimentData.count >= 3) {
+            const sentScore = sentimentData.average_score || 0;
+            const negCount = sentimentData.negative || 0;
+            if (sentScore < -0.3 && negCount >= 3) {
+              analysisPoints.push(`Bearish news sentiment (${sentScore.toFixed(2)} score, ${negCount} negative articles) adds headwinds`);
+            } else if (sentScore > 0.3) {
+              analysisPoints.push(`Positive news sentiment (${sentScore.toFixed(2)} score) supports the bullish case`);
+            }
+          }
+
+          // Reddit/social sentiment
+          if (redditData && redditData.mention_count > 50) {
+            if (redditData.mention_velocity > 100) {
+              analysisPoints.push(`High Reddit velocity (${redditData.mention_velocity}% with ${redditData.mention_count} mentions) suggests viral risk`);
+            }
+          }
+
+          // Delta risk assessment (critical for put credit spreads)
+          const shortDelta = Math.abs(shortLeg?.delta || 0);
+          if (shortDelta > 0.30) {
+            analysisPoints.push(`The ${shortDelta.toFixed(2)} delta is higher than most established strategies recommend (0.10-0.30 range), increasing assignment risk`);
+          } else if (shortDelta > 0.25) {
+            analysisPoints.push(`The ${shortDelta.toFixed(2)} delta is on the higher end but still within acceptable range for moderate strategies`);
+          } else if (shortDelta >= 0.15 && shortDelta <= 0.20) {
+            analysisPoints.push(`The ${shortDelta.toFixed(2)} delta is in the sweet spot for balancing premium vs. safety`);
+          }
+
+          // Probability of profit
+          if (popPercent < 60) {
+            analysisPoints.push(`The ${popPercent.toFixed(0)}% probability of profit means price needs to stay above $${longLeg?.strike || 'N/A'}`);
+          } else if (popPercent >= 70) {
+            analysisPoints.push(`Strong ${popPercent.toFixed(0)}% probability of profit provides good cushion`);
+          }
+
+          // DTE timing
+          if (dte >= 20 && dte <= 45) {
+            analysisPoints.push(`The ${dte}-day timeframe provides optimal theta decay`);
+          }
+
+          // Combine analysis points
+          if (analysisPoints.length > 0) {
+            parts.push(analysisPoints.slice(0, 3).join('. ') + '.');
+          }
+
+          // 3. Verdict
+          const hasSignificantRisk = (insiderData && insiderData.buy_ratio < 0.5) || (rangePosition && rangePosition > 85) || popPercent < 55;
+          if (hasSignificantRisk) {
+            parts.push(`Given these factors, ${spreadWidth <= 5 ? 'consider the tight spread spacing' : 'wider strikes might provide better cushion'} or wait for improved conditions.`);
+          } else {
+            parts.push(`This setup ${candidate.ips_score >= 75 ? 'fits the strategy well' : 'offers balanced risk/reward'} with ${passedFactors.length} key factors aligned${spreadWidth <= 5 ? ' and tight strike spacing controlling risk' : ''}.`);
+          }
 
           parsed = {
-            rationale: `${hook} ${strengths}${risk}${verdict}`,
+            rationale: parts.join(' '),
           };
         }
       }

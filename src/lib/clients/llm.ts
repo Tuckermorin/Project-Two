@@ -24,6 +24,8 @@ const normalizeBaseUrl = (raw?: string | null): string => {
 
 const ollamaBaseUrl = normalizeBaseUrl(process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST);
 
+console.log(`[LLM] Connecting to Ollama at: ${ollamaBaseUrl}`);
+
 const llm = new ChatOllama({
   model: DEFAULT_MODEL,
   temperature: DEFAULT_TEMPERATURE,
