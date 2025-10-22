@@ -1,6 +1,9 @@
-// Intelligent RAG Query Router
-// Routes research queries through RAG first, then Tavily only when needed
-// Maximizes cost efficiency by reducing duplicate Tavily searches
+// Intelligent RAG Query Router (Enhanced with External Intelligence)
+// Routes research queries through multiple sources:
+// 1. Internal RAG (trade embeddings, post-mortems)
+// 2. External Market Intelligence (earnings transcripts, news, sentiment)
+// 3. Tavily (only when needed for fresh data)
+// Maximizes cost efficiency by reducing duplicate searches
 
 import { findSimilarTrades, analyzeHistoricalPerformance } from "./rag-embeddings";
 import {
@@ -15,13 +18,17 @@ import {
   queryOperationalRisks,
 } from "@/lib/clients/tavily-queries";
 import { getSupabaseServer } from "@/lib/utils/supabase-server";
+import {
+  getMarketIntelligenceService,
+  type MarketIntelligenceReport
+} from "@/lib/services/market-intelligence-service";
 
 // ============================================================================
 // Types
 // ============================================================================
 
 export interface IntelligentResearchResult {
-  source: "rag" | "tavily" | "hybrid";
+  source: "rag" | "tavily" | "external_intelligence" | "hybrid" | "multi_source";
   cached: boolean;
   freshness_score: number; // 0-1, where 1 is very fresh
   relevance_score: number; // 0-1, where 1 is highly relevant
@@ -29,6 +36,8 @@ export interface IntelligentResearchResult {
   credits_used: number;
   rag_results_count: number;
   tavily_results_count: number;
+  external_intelligence_count: number; // New: count from external DB
+  market_intelligence?: MarketIntelligenceReport; // New: structured intelligence
 }
 
 export interface QueryRouterOptions {
@@ -36,6 +45,9 @@ export interface QueryRouterOptions {
   ragRelevanceThreshold?: number; // Min relevance for using RAG (default: 0.75)
   forceRefresh?: boolean; // Force Tavily fetch even if RAG has data
   enableHybrid?: boolean; // Combine RAG + Tavily (default: true)
+  includeExternalIntelligence?: boolean; // Include market intelligence from external DB (default: true)
+  maxNewsArticles?: number; // Max news articles to fetch (default: 20)
+  maxEarningsQuarters?: number; // Max earnings quarters to fetch (default: 4)
 }
 
 // ============================================================================

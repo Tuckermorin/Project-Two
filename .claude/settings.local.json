@@ -137,7 +137,19 @@
       "Bash(ping:*)",
       "Bash(ipconfig)",
       "Bash(ipconfig:*)",
-      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT factor_key, display_name, target_value, target_operator, weight, enabled FROM ips_factors WHERE ips_id = (SELECT id FROM ips_configurations LIMIT 1) AND factor_key LIKE ''%delta%'' ORDER BY weight DESC;\")"
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT factor_key, display_name, target_value, target_operator, weight, enabled FROM ips_factors WHERE ips_id = (SELECT id FROM ips_configurations LIMIT 1) AND factor_key LIKE ''%delta%'' ORDER BY weight DESC;\")",
+      "Bash(arp:*)",
+      "Bash(nslookup:*)",
+      "Bash(getent hosts:*)",
+      "Bash(tailscale status:*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"supabase/migrations/20251022_create_ips_backtest_tables.sql\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"COMMENT ON VIEW v_ips_leaderboard IS ''Best performing IPSs ranked by Sharpe ratio and ROI'';\")",
+      "Bash(if [ -f .env ])",
+      "Bash(then echo \"Found .env file\")",
+      "Bash(else echo \"No .env file found\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"c:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251022_fix_ips_leaderboard_view.sql\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"c:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251022_create_ai_trade_evaluations.sql\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT table_name FROM information_schema.tables WHERE table_name LIKE ''%evaluat%'' OR table_name LIKE ''%ai%'' ORDER BY table_name;\")"
     ],
     "deny": [],
     "ask": []

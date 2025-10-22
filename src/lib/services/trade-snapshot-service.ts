@@ -503,23 +503,32 @@ export class TradeSnapshotService {
 
   private async calculateHV20(symbol: string): Promise<number | null> {
     try {
-      // Fetch 30 days of historical data to calculate 20-day HV
-      const endDate = new Date();
-      const startDate = new Date();
-      startDate.setDate(startDate.getDate() - 30);
+      // Fetch daily price data to calculate 20-day historical volatility
+      const timeSeries = await alphaVantage.getDailyAdjustedSeries(symbol, 'compact');
 
-      const timeSeries = await alphaVantage.getTimeSeries(symbol, 'daily', 'compact');
+      if (!timeSeries) return null;
 
-      if (!timeSeries || timeSeries.length < 20) return null;
+      // Convert the object to an array of [date, data] pairs and sort by date descending
+      const sortedDates = Object.keys(timeSeries).sort().reverse();
 
-      // Calculate daily returns
+      if (sortedDates.length < 21) return null;
+
+      // Calculate daily returns using the most recent 21 days (to get 20 returns)
       const returns: number[] = [];
-      for (let i = 1; i < Math.min(21, timeSeries.length); i++) {
-        const prevClose = timeSeries[i - 1].close;
-        const currClose = timeSeries[i].close;
-        const dailyReturn = Math.log(currClose / prevClose);
+      for (let i = 0; i < 20; i++) {
+        const currentDate = sortedDates[i];
+        const previousDate = sortedDates[i + 1];
+
+        const currentClose = parseFloat(timeSeries[currentDate]['5. adjusted close']);
+        const previousClose = parseFloat(timeSeries[previousDate]['5. adjusted close']);
+
+        if (isNaN(currentClose) || isNaN(previousClose) || previousClose === 0) continue;
+
+        const dailyReturn = Math.log(currentClose / previousClose);
         returns.push(dailyReturn);
       }
+
+      if (returns.length < 20) return null;
 
       // Calculate standard deviation
       const mean = returns.reduce((a, b) => a + b, 0) / returns.length;

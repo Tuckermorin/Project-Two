@@ -136,12 +136,13 @@ export function initializeScheduler() {
         try {
           const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
 
-          // Find all closed trades from the last 2 hours (don't require realized_pnl)
+          // Find all closed trades from the last 2 hours
+          // Use updated_at as primary filter since closed_at is often set to midnight
           const { data: closedTrades } = await supabase
             .from('trades')
-            .select('id, symbol, status, closed_at, realized_pnl')
+            .select('id, symbol, status, closed_at, updated_at, realized_pnl')
             .eq('status', 'closed')
-            .gte('closed_at', twoHoursAgo);
+            .gte('updated_at', twoHoursAgo);
 
           if (closedTrades && closedTrades.length > 0) {
             console.log(`[Cron] Found ${closedTrades.length} newly closed trades`);
