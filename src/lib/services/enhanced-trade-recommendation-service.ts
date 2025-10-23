@@ -120,16 +120,37 @@ export class EnhancedTradeRecommendationService {
       forceWeighting: force_weighting,
     });
 
-    // Step 3: Save evaluation if requested
+    // Step 3: Save evaluation if requested and get the ID
+    let evaluationId: string | undefined;
     if (save_evaluation) {
       console.log(`[EnhancedTradeRecommendation] Step 3: Saving evaluation...`);
-      await this.saveEvaluation(evaluation, user_id);
+      evaluationId = await this.saveEvaluation(evaluation, user_id);
+
+      // Step 4: Generate and save enhanced rationale with embedding (now that we have evaluation ID)
+      if (evaluationId && evaluation.structured_rationale) {
+        console.log(`[EnhancedTradeRecommendation] Step 4: Saving rationale embedding...`);
+        try {
+          const { getEnhancedRationaleGenerator } = await import('./enhanced-rationale-generator');
+          const rationaleGen = getEnhancedRationaleGenerator();
+          await rationaleGen.createRationaleEmbedding(
+            evaluation.structured_rationale,
+            enrichedContext,
+            evaluationId
+          );
+        } catch (error) {
+          console.warn(`[EnhancedTradeRecommendation] Failed to save rationale embedding:`, error);
+          // Non-critical, continue
+        }
+      }
     }
 
     console.log(`[EnhancedTradeRecommendation] Recommendation complete`);
     console.log(`  Final: ${evaluation.final_recommendation}`);
     console.log(`  Composite Score: ${evaluation.weighted_score.composite_score.toFixed(2)}`);
     console.log(`  Confidence: ${evaluation.weighted_score.confidence_level}`);
+    if (evaluationId) {
+      console.log(`  Evaluation ID: ${evaluationId}`);
+    }
 
     return evaluation;
   }
@@ -310,7 +331,7 @@ export class EnhancedTradeRecommendationService {
   // ============================================================================
 
   /**
-   * Save evaluation to database
+   * Save evaluation to database (including structured rationale with embedding)
    */
   private async saveEvaluation(
     evaluation: TradeEvaluationResult,
@@ -338,6 +359,7 @@ export class EnhancedTradeRecommendationService {
           ai_evaluation: evaluation.ai_evaluation,
           weighted_score: evaluation.weighted_score,
           enriched_context: evaluation.enriched_context, // Include full context with live news
+          structured_rationale: evaluation.structured_rationale, // Include enhanced rationale
         },
         explainability: evaluation.explainability,
       })

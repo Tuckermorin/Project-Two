@@ -674,13 +674,15 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
     const avNews = generalData?.av_news_sentiment;
     const insider = generalData?.insider_activity;
 
-    // Guardrail 1: Viral Meme Stock Detection (Reddit)
+    // Guardrail 1: Viral Meme Stock Detection (Reddit) - REMOVED
+    // Now relying on IPS factors and risk scoring to handle high-velocity stocks
+    // instead of blanket blocking them
     if (reddit) {
       const isMemeStock = reddit.trending_rank !== null && reddit.trending_rank <= 10 && reddit.mention_velocity > 100;
 
       if (isMemeStock) {
-        console.log(`[FilterHighWeight] ⚠️  MEME STOCK DETECTED: ${symbol} (Rank: ${reddit.trending_rank}, Velocity: +${reddit.mention_velocity}%) - SKIPPING ALL CANDIDATES`);
-        continue; // Skip all candidates for this symbol
+        console.log(`[FilterHighWeight] ℹ️  HIGH SOCIAL ACTIVITY: ${symbol} (Rank: ${reddit.trending_rank}, Velocity: +${reddit.mention_velocity}%) - Proceeding with scoring`);
+        // Note: Previously this would skip all candidates, now we just log and continue
       }
     }
 
@@ -1971,6 +1973,79 @@ function getFactorValue(factor: any, candidate: any, state: AgentState): { value
         // Normalize to -1 to 1 scale
         const normalized = Math.max(-1, Math.min(1, avgSentiment / 2));
         return { value: normalized, target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    // Additional Alpha Vantage News Sentiment factors
+    case 'av-news-earnings-sentiment':
+    case 'Earnings News Sentiment': {
+      const avSentiment = generalData?.av_news_sentiment;
+      if (avSentiment?.topic_sentiment?.['Earnings'] !== null && avSentiment?.topic_sentiment?.['Earnings'] !== undefined) {
+        return { value: avSentiment.topic_sentiment['Earnings'], target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    case 'av-news-negative-count':
+    case 'Negative News Article Count': {
+      const avSentiment = generalData?.av_news_sentiment;
+      if (avSentiment?.negative !== null && avSentiment?.negative !== undefined) {
+        return { value: avSentiment.negative, target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    case 'av-news-positive-count':
+    case 'Positive News Article Count': {
+      const avSentiment = generalData?.av_news_sentiment;
+      if (avSentiment?.positive !== null && avSentiment?.positive !== undefined) {
+        return { value: avSentiment.positive, target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    case 'av-news-neutral-count':
+    case 'Neutral News Article Count': {
+      const avSentiment = generalData?.av_news_sentiment;
+      if (avSentiment?.neutral !== null && avSentiment?.neutral !== undefined) {
+        return { value: avSentiment.neutral, target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    case 'av-news-total-count':
+    case 'Total News Article Count': {
+      const avSentiment = generalData?.av_news_sentiment;
+      if (avSentiment?.count !== null && avSentiment?.count !== undefined) {
+        return { value: avSentiment.count, target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    case 'av-news-relevance-avg':
+    case 'News Relevance Average': {
+      const avSentiment = generalData?.av_news_sentiment;
+      if (avSentiment?.avg_relevance !== null && avSentiment?.avg_relevance !== undefined) {
+        return { value: avSentiment.avg_relevance, target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    case 'av-news-ma-sentiment':
+    case 'M&A News Sentiment': {
+      const avSentiment = generalData?.av_news_sentiment;
+      if (avSentiment?.topic_sentiment?.['Mergers & Acquisitions'] !== null && avSentiment?.topic_sentiment?.['Mergers & Acquisitions'] !== undefined) {
+        return { value: avSentiment.topic_sentiment['Mergers & Acquisitions'], target: formatTarget(factor.threshold, factor.direction) };
+      }
+      return { value: null, target: formatTarget(factor.threshold, factor.direction) };
+    }
+
+    case 'av-news-tech-sentiment':
+    case 'Technology News Sentiment': {
+      const avSentiment = generalData?.av_news_sentiment;
+      if (avSentiment?.topic_sentiment?.['Technology'] !== null && avSentiment?.topic_sentiment?.['Technology'] !== undefined) {
+        return { value: avSentiment.topic_sentiment['Technology'], target: formatTarget(factor.threshold, factor.direction) };
       }
       return { value: null, target: formatTarget(factor.threshold, factor.direction) };
     }

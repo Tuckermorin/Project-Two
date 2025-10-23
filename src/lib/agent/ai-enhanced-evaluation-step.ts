@@ -95,6 +95,7 @@ export async function evaluateTradesWithAI(state: any): Promise<Partial<any>> {
 
             // AI Rationale & Explainability
             rationale: evaluation.explainability.decision_breakdown,
+            structured_rationale: evaluation.structured_rationale, // Full structured rationale for enhanced UI
             ai_key_factors: evaluation.explainability.key_decision_factors,
             ai_risk_factors: evaluation.ai_evaluation.reasoning.risk_factors,
             ai_opportunities: evaluation.ai_evaluation.reasoning.opportunities,

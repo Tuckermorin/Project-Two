@@ -37,7 +37,7 @@ interface IPSConfiguration {
 interface FactorDefinition {
   id: string;
   name: string;
-  type: 'quantitative' | 'qualitative' | 'options';
+  type: 'quantitative' | 'options';
   category: string;
   data_type: string;
   unit: string;
@@ -68,7 +68,7 @@ interface TradeFormData {
   vega: number;
   ivAtEntry: number;
   
-  // IPS Factor Values (manual inputs for non-API factors)
+  // IPS Factor Values (will be auto-fetched from APIs upon trade creation)
   ipsFactors: Record<string, any>;
 }
 
@@ -161,7 +161,7 @@ export function TradeEntryForm({
       return value !== '' && value !== 0;
     }).length;
 
-    const manualFactors = getManualFactors();
+    const manualFactors = getAllAPIFactors();
     const completedFactors = manualFactors.filter(factor => 
       formData.ipsFactors[factor.name] !== undefined && formData.ipsFactors[factor.name] !== ''
     ).length;
@@ -183,12 +183,9 @@ export function TradeEntryForm({
     }));
   };
 
-  const getManualFactors = () => {
-    return availableFactors.filter(factor => !factor.source);
-  };
-
-  const getApiFactors = () => {
-    return availableFactors.filter(factor => factor.source === 'alpha_vantage');
+  // All factors are now API-based - they will be automatically collected when trade is saved
+  const getAllAPIFactors = () => {
+    return availableFactors;
   };
 
   const handleCalculateScore = async () => {
@@ -211,7 +208,7 @@ export function TradeEntryForm({
       return value !== '' && value !== 0;
     });
 
-    const manualFactors = getManualFactors();
+    const manualFactors = getAllAPIFactors();
     const factorsComplete = manualFactors.every(factor => 
       formData.ipsFactors[factor.name] !== undefined && formData.ipsFactors[factor.name] !== ''
     );
@@ -219,37 +216,13 @@ export function TradeEntryForm({
     return basicFieldsComplete && factorsComplete;
   };
 
+  // Note: This function is no longer used since all factors are auto-fetched via API
+  // Keeping for backwards compatibility but factors won't require manual input
   const renderFactorInput = (factor: FactorDefinition) => {
-    const value = formData.ipsFactors[factor.name] || '';
-
-    if (factor.type === 'qualitative') {
-      return (
-        <Select
-          value={value.toString()}
-          onValueChange={(val) => handleFactorChange(factor.name, parseInt(val))}
-        >
-          <SelectTrigger>
-            <SelectValue placeholder="Select rating" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="1">1 - Poor</SelectItem>
-            <SelectItem value="2">2 - Below Average</SelectItem>
-            <SelectItem value="3">3 - Average</SelectItem>
-            <SelectItem value="4">4 - Good</SelectItem>
-            <SelectItem value="5">5 - Excellent</SelectItem>
-          </SelectContent>
-        </Select>
-      );
-    }
-
     return (
-      <Input
-        type={factor.data_type === 'percentage' ? 'number' : 'text'}
-        value={value}
-        onChange={(e) => handleFactorChange(factor.name, e.target.value)}
-        placeholder={`Enter ${factor.name.toLowerCase()}`}
-        step={factor.data_type === 'percentage' ? '0.01' : undefined}
-      />
+      <div className="text-sm text-gray-500 italic">
+        Will be automatically collected from API
+      </div>
     );
   };
 
@@ -280,7 +253,7 @@ export function TradeEntryForm({
           </TabsTrigger>
           <TabsTrigger value="ips-factors" className="flex items-center gap-2">
             <BarChart3 className="h-4 w-4" />
-            IPS Factors ({getManualFactors().length})
+            IPS Factors ({getAllAPIFactors().length})
           </TabsTrigger>
           <TabsTrigger value="review" className="flex items-center gap-2">
             <Target className="h-4 w-4" />
@@ -591,13 +564,13 @@ export function TradeEntryForm({
                   <Users className="h-5 w-5 text-orange-600" />
                   Manual Input Required
                   <Badge variant="outline" className="bg-orange-50 text-orange-700">
-                    {getManualFactors().length} factors
+                    {getAllAPIFactors().length} factors
                   </Badge>
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
-                  {getManualFactors().map((factor) => (
+                  {getAllAPIFactors().map((factor) => (
                     <div key={factor.id} className="space-y-2">
                       <Label htmlFor={factor.id} className="text-sm font-medium">
                         {factor.name}
@@ -668,7 +641,7 @@ export function TradeEntryForm({
                     </div>
                     <div className="flex justify-between">
                       <span>Manual Factors:</span>
-                      <span className="font-medium">{getManualFactors().length} required</span>
+                      <span className="font-medium">{getAllAPIFactors().length} required</span>
                     </div>
                     <div className="flex justify-between">
                       <span>API Factors:</span>

@@ -48,12 +48,19 @@ export async function collectTradeFactors(
     return { factors: [], errors: ["No IPS configuration"] };
   }
 
+  // Query IPS factors with their definitions to get full metadata
   const { data: ipsFactors, error: ipsError } = await supabase
     .from("ips_factors")
     .select(`
       factor_name,
       factor_id,
-      enabled
+      enabled,
+      factor_definitions!inner(
+        name,
+        category,
+        collection_method,
+        source
+      )
     `)
     .eq("ips_id", trade.ips_id)
     .eq("enabled", true);
@@ -62,7 +69,23 @@ export async function collectTradeFactors(
     return { factors: [], errors: [`Failed to load IPS factors: ${ipsError?.message}`] };
   }
 
+  console.log(`[Factor Collection] Found ${ipsFactors.length} enabled factors for IPS`);
+
   const factorNames = ipsFactors.map(f => f.factor_name);
+
+  // Group factors by collection method for efficiency
+  const factorsByMethod: Record<string, any[]> = {
+    api: [],
+    manual: [],
+    calculated: []
+  };
+
+  ipsFactors.forEach(f => {
+    const method = (f.factor_definitions as any)?.collection_method || 'manual';
+    factorsByMethod[method].push(f);
+  });
+
+  console.log(`[Factor Collection] Breakdown: ${factorsByMethod.api.length} API, ${factorsByMethod.calculated.length} calculated, ${factorsByMethod.manual.length} manual`);
 
   // 1. OPTIONS CHAIN FACTORS (from passed optionsData)
   if (optionsData) {
@@ -123,13 +146,15 @@ export async function collectTradeFactors(
     }
   }
 
-  // 2. STOCK PRICE FACTORS
-  if (trade.current_price) {
-    // We'll fetch additional data from Alpha Vantage if needed
+  // 2. STOCK PRICE FACTORS (from Alpha Vantage API)
+  if (factorsByMethod.api.length > 0) {
+    console.log(`[Factor Collection] Fetching ${factorsByMethod.api.length} API-based factors from Alpha Vantage`);
     try {
       const alphaVantageFactors = await fetchAlphaVantageFactors(trade.symbol, factorNames);
       factors.push(...alphaVantageFactors);
+      console.log(`[Factor Collection] Successfully collected ${alphaVantageFactors.length} API factors`);
     } catch (error) {
+      console.error(`[Factor Collection] Alpha Vantage API error:`, error);
       errors.push(`Alpha Vantage API error: ${error}`);
     }
   }
@@ -168,16 +193,160 @@ async function fetchAlphaVantageFactors(
     return factors;
   }
 
-  // Check which AV factors are needed
-  const avFactorMap: Record<string, string> = {
-    "50 Day Moving Average": "SMA",
-    "200 Day Moving Average": "SMA",
-    "Momentum": "MOM",
-    "News Sentiment Score": "NEWS_SENTIMENT"
+  // Import Alpha Vantage client
+  const { getAlphaVantageClient } = await import('@/lib/api/alpha-vantage');
+  const avClient = getAlphaVantageClient();
+
+  // Fetch company overview once for all fundamental factors
+  let overview: any = null;
+  const fundamentalFactors = [
+    "Trailing P/E Ratio", "Forward P/E Ratio", "Price to Sales Ratio TTM",
+    "Price to Book Ratio", "EV to Revenue", "EV to EBITDA", "Shares Outstanding",
+    "Analyst Target Price", "Quarterly Earnings Growth YoY", "Diluted EPS TTM",
+    "Dividend Date", "Ex-Dividend Date", "50 Day Moving Average", "200 Day Moving Average"
+  ];
+
+  if (neededFactors.some(f => fundamentalFactors.includes(f))) {
+    try {
+      overview = await avClient.getCompanyOverview(symbol);
+    } catch (error) {
+      console.warn(`Failed to fetch company overview for ${symbol}:`, error);
+    }
+  }
+
+  // Fetch news sentiment once for all news sentiment factors
+  let newsSentiment: any = null;
+  const newsSentimentFactors = [
+    "News Sentiment Score", "News Sentiment Label", "Positive News Article Count",
+    "Negative News Article Count", "Neutral News Article Count", "Total News Article Count",
+    "News Relevance Average", "Earnings News Sentiment", "M&A News Sentiment",
+    "Technology News Sentiment"
+  ];
+
+  if (neededFactors.some(f => newsSentimentFactors.includes(f))) {
+    try {
+      newsSentiment = await avClient.getNewsSentiment(symbol);
+    } catch (error) {
+      console.warn(`Failed to fetch news sentiment for ${symbol}:`, error);
+    }
+  }
+
+  // Map factor names to their collection methods
+  const factorCollectors: Record<string, () => Promise<FactorValue | null>> = {
+    // Fundamental factors from overview
+    "Trailing P/E Ratio": async () => overview?.TrailingPE ? { factorName: "Trailing P/E Ratio", value: parseFloat(overview.TrailingPE), source: "alpha_vantage", confidence: 1.0 } : null,
+    "Forward P/E Ratio": async () => overview?.ForwardPE ? { factorName: "Forward P/E Ratio", value: parseFloat(overview.ForwardPE), source: "alpha_vantage", confidence: 1.0 } : null,
+    "Price to Sales Ratio TTM": async () => overview?.PriceToSalesRatioTTM ? { factorName: "Price to Sales Ratio TTM", value: parseFloat(overview.PriceToSalesRatioTTM), source: "alpha_vantage", confidence: 1.0 } : null,
+    "Price to Book Ratio": async () => overview?.PriceToBookRatio ? { factorName: "Price to Book Ratio", value: parseFloat(overview.PriceToBookRatio), source: "alpha_vantage", confidence: 1.0 } : null,
+    "EV to Revenue": async () => overview?.EVToRevenue ? { factorName: "EV to Revenue", value: parseFloat(overview.EVToRevenue), source: "alpha_vantage", confidence: 1.0 } : null,
+    "EV to EBITDA": async () => overview?.EVToEBITDA ? { factorName: "EV to EBITDA", value: parseFloat(overview.EVToEBITDA), source: "alpha_vantage", confidence: 1.0 } : null,
+    "Shares Outstanding": async () => overview?.SharesOutstanding ? { factorName: "Shares Outstanding", value: parseFloat(overview.SharesOutstanding), source: "alpha_vantage", confidence: 1.0 } : null,
+    "Analyst Target Price": async () => overview?.AnalystTargetPrice ? { factorName: "Analyst Target Price", value: parseFloat(overview.AnalystTargetPrice), source: "alpha_vantage", confidence: 1.0 } : null,
+    "Quarterly Earnings Growth YoY": async () => overview?.QuarterlyEarningsGrowthYOY ? { factorName: "Quarterly Earnings Growth YoY", value: parseFloat(overview.QuarterlyEarningsGrowthYOY) * 100, source: "alpha_vantage", confidence: 1.0 } : null,
+    "Diluted EPS TTM": async () => overview?.DilutedEPSTTM ? { factorName: "Diluted EPS TTM", value: parseFloat(overview.DilutedEPSTTM), source: "alpha_vantage", confidence: 1.0 } : null,
+    "50 Day Moving Average": async () => overview?.['50DayMovingAverage'] ? { factorName: "50 Day Moving Average", value: parseFloat(overview['50DayMovingAverage']), source: "alpha_vantage", confidence: 1.0 } : null,
+    "200 Day Moving Average": async () => overview?.['200DayMovingAverage'] ? { factorName: "200 Day Moving Average", value: parseFloat(overview['200DayMovingAverage']), source: "alpha_vantage", confidence: 1.0 } : null,
+
+    // Technical indicators
+    "EMA 20": async () => {
+      const result = await avClient.getEMA(symbol, 20);
+      return result.value !== null ? { factorName: "EMA 20", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "EMA 50": async () => {
+      const result = await avClient.getEMA(symbol, 50);
+      return result.value !== null ? { factorName: "EMA 50", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "EMA 200": async () => {
+      const result = await avClient.getEMA(symbol, 200);
+      return result.value !== null ? { factorName: "EMA 200", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "RSI": async () => {
+      const result = await avClient.getRSI(symbol);
+      return result.value !== null ? { factorName: "RSI", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "ADX (Average Directional Index)": async () => {
+      const result = await avClient.getADX(symbol);
+      return result.value !== null ? { factorName: "ADX (Average Directional Index)", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "ATR (Average True Range)": async () => {
+      const result = await avClient.getATR(symbol);
+      return result.value !== null ? { factorName: "ATR (Average True Range)", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "CCI (Commodity Channel Index)": async () => {
+      const result = await avClient.getCCI(symbol);
+      return result.value !== null ? { factorName: "CCI (Commodity Channel Index)", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "MFI (Money Flow Index)": async () => {
+      const result = await avClient.getMFI(symbol);
+      return result.value !== null ? { factorName: "MFI (Money Flow Index)", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "ROC (Rate of Change)": async () => {
+      const result = await avClient.getROC(symbol);
+      return result.value !== null ? { factorName: "ROC (Rate of Change)", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "Williams %R": async () => {
+      const result = await avClient.getWILLR(symbol);
+      return result.value !== null ? { factorName: "Williams %R", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "TRIX": async () => {
+      const result = await avClient.getTRIX(symbol);
+      return result.value !== null ? { factorName: "TRIX", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "Ultimate Oscillator": async () => {
+      const result = await avClient.getULTOSC(symbol);
+      return result.value !== null ? { factorName: "Ultimate Oscillator", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "OBV (On Balance Volume)": async () => {
+      const result = await avClient.getOBV(symbol);
+      return result.value !== null ? { factorName: "OBV (On Balance Volume)", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+
+    // Economic indicators (macro)
+    "Treasury Yield 10 Year": async () => {
+      const result = await avClient.getTreasuryYield('10year');
+      return result.value !== null ? { factorName: "Treasury Yield 10 Year", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "CPI": async () => {
+      const result = await avClient.getCPI();
+      return result.value !== null ? { factorName: "CPI", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "Inflation Rate": async () => {
+      const result = await avClient.getInflation();
+      return result.value !== null ? { factorName: "Inflation Rate", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+    "Consumer Sentiment": async () => {
+      const result = await avClient.getConsumerSentiment();
+      return result.value !== null ? { factorName: "Consumer Sentiment", value: result.value, source: "alpha_vantage", confidence: 1.0 } : null;
+    },
+
+    // News Sentiment factors
+    "News Sentiment Score": async () => newsSentiment?.average_score !== null && newsSentiment?.average_score !== undefined ? { factorName: "News Sentiment Score", value: newsSentiment.average_score, source: "alpha_vantage", confidence: 1.0 } : null,
+    "News Sentiment Label": async () => newsSentiment?.sentiment_label ? { factorName: "News Sentiment Label", value: newsSentiment.sentiment_label === 'bullish' ? 1.0 : newsSentiment.sentiment_label === 'somewhat-bullish' ? 0.5 : newsSentiment.sentiment_label === 'bearish' ? -1.0 : newsSentiment.sentiment_label === 'somewhat-bearish' ? -0.5 : 0, source: "alpha_vantage", confidence: 1.0 } : null,
+    "Positive News Article Count": async () => newsSentiment?.positive !== null && newsSentiment?.positive !== undefined ? { factorName: "Positive News Article Count", value: newsSentiment.positive, source: "alpha_vantage", confidence: 1.0 } : null,
+    "Negative News Article Count": async () => newsSentiment?.negative !== null && newsSentiment?.negative !== undefined ? { factorName: "Negative News Article Count", value: newsSentiment.negative, source: "alpha_vantage", confidence: 1.0 } : null,
+    "Neutral News Article Count": async () => newsSentiment?.neutral !== null && newsSentiment?.neutral !== undefined ? { factorName: "Neutral News Article Count", value: newsSentiment.neutral, source: "alpha_vantage", confidence: 1.0 } : null,
+    "Total News Article Count": async () => newsSentiment?.count !== null && newsSentiment?.count !== undefined ? { factorName: "Total News Article Count", value: newsSentiment.count, source: "alpha_vantage", confidence: 1.0 } : null,
+    "News Relevance Average": async () => newsSentiment?.avg_relevance !== null && newsSentiment?.avg_relevance !== undefined ? { factorName: "News Relevance Average", value: newsSentiment.avg_relevance, source: "alpha_vantage", confidence: 1.0 } : null,
+    "Earnings News Sentiment": async () => newsSentiment?.topic_sentiment?.['Earnings'] !== null && newsSentiment?.topic_sentiment?.['Earnings'] !== undefined ? { factorName: "Earnings News Sentiment", value: newsSentiment.topic_sentiment['Earnings'], source: "alpha_vantage", confidence: 1.0 } : null,
+    "M&A News Sentiment": async () => newsSentiment?.topic_sentiment?.['Mergers & Acquisitions'] !== null && newsSentiment?.topic_sentiment?.['Mergers & Acquisitions'] !== undefined ? { factorName: "M&A News Sentiment", value: newsSentiment.topic_sentiment['Mergers & Acquisitions'], source: "alpha_vantage", confidence: 1.0 } : null,
+    "Technology News Sentiment": async () => newsSentiment?.topic_sentiment?.['Technology'] !== null && newsSentiment?.topic_sentiment?.['Technology'] !== undefined ? { factorName: "Technology News Sentiment", value: newsSentiment.topic_sentiment['Technology'], source: "alpha_vantage", confidence: 1.0 } : null
   };
 
-  // For now, return empty - we'll implement specific API calls as needed
-  // This is a placeholder for the full implementation
+  // Collect all requested factors
+  for (const factorName of neededFactors) {
+    const collector = factorCollectors[factorName];
+    if (collector) {
+      try {
+        const factor = await collector();
+        if (factor) {
+          factors.push(factor);
+        }
+      } catch (error) {
+        console.warn(`Failed to collect factor ${factorName}:`, error);
+      }
+    }
+  }
+
   return factors;
 }
 

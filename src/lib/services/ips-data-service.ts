@@ -7,7 +7,7 @@ interface TradingStrategy {
   id: string;
   name: string;
   description: string;
-  requiredFactorTypes: ('quantitative' | 'qualitative' | 'options')[];
+  requiredFactorTypes: ('quantitative' | 'options')[];
   recommendedFactors: string[];
 }
 
@@ -46,7 +46,7 @@ interface IPSConfiguration {
 interface FactorDefinition {
   id: string;
   name: string;
-  type: 'quantitative' | 'qualitative' | 'options';
+  type: 'quantitative' | 'options';
   category: string;
   data_type: string;
   unit: string;
@@ -59,7 +59,7 @@ const TRADING_STRATEGIES: TradingStrategy[] = [
     id: 'buy-hold-stocks',
     name: 'Buy & Hold Stocks',
     description: 'Long-term equity investment strategy',
-    requiredFactorTypes: ['quantitative', 'qualitative'],
+    requiredFactorTypes: ['quantitative'],
     recommendedFactors: [
       'Market Capitalization',
       'P/E Ratio',
@@ -75,7 +75,7 @@ const TRADING_STRATEGIES: TradingStrategy[] = [
     id: 'put-credit-spreads',
     name: 'Put Credit Spreads',
     description: 'Bullish options strategy with defined risk',
-    requiredFactorTypes: ['quantitative', 'qualitative', 'options'],
+    requiredFactorTypes: ['quantitative', 'options'],
     recommendedFactors: [
       'Implied Volatility',
       'Delta',
@@ -91,7 +91,7 @@ const TRADING_STRATEGIES: TradingStrategy[] = [
     id: 'call-credit-spreads',
     name: 'Call Credit Spreads',
     description: 'Bearish options strategy with defined risk',
-    requiredFactorTypes: ['quantitative', 'qualitative', 'options'],
+    requiredFactorTypes: ['quantitative', 'options'],
     recommendedFactors: [
       'Implied Volatility',
       'Delta',
@@ -107,7 +107,7 @@ const TRADING_STRATEGIES: TradingStrategy[] = [
     id: 'iron-condors',
     name: 'Iron Condors',
     description: 'Range-bound strategies for low volatility periods',
-    requiredFactorTypes: ['quantitative', 'qualitative', 'options'],
+    requiredFactorTypes: ['quantitative', 'options'],
     recommendedFactors: [
       'Implied Volatility',
       'Delta',
@@ -123,7 +123,7 @@ const TRADING_STRATEGIES: TradingStrategy[] = [
     id: 'covered-calls',
     name: 'Covered Calls',
     description: 'Income generation on existing equity positions',
-    requiredFactorTypes: ['quantitative', 'qualitative', 'options'],
+    requiredFactorTypes: ['quantitative', 'options'],
     recommendedFactors: [
       'Dividend Yield',
       'Delta',
@@ -193,20 +193,7 @@ const ALPHA_VANTAGE_FACTORS: FactorDefinition[] = [
   // Add more as needed...
 ];
 
-// Qualitative factors (manual input required)
-const QUALITATIVE_FACTORS: FactorDefinition[] = [
-  { id: 'qual-market-leadership', name: 'Market Leadership', type: 'qualitative', category: 'Management & Governance', data_type: 'rating', unit: '1-5' },
-  { id: 'qual-management-quality', name: 'Management Quality', type: 'qualitative', category: 'Management & Governance', data_type: 'rating', unit: '1-5' },
-  { id: 'qual-economic-moat', name: 'Economic Moat', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-  { id: 'qual-competitive-position', name: 'Competitive Position', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-  { id: 'qual-brand-strength', name: 'Brand Strength', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-  { id: 'qual-innovation-rd', name: 'Innovation & R&D', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-  { id: 'qual-regulatory-environment', name: 'Regulatory Environment', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-  { id: 'qual-esg-factors', name: 'ESG Factors', type: 'qualitative', category: 'Business Model & Industry', data_type: 'rating', unit: '1-5' },
-  // Add more as needed...
-];
-
-// Options factors (manual input or from options API)
+// Options factors (all from options API)
 const OPTIONS_FACTORS: FactorDefinition[] = [
   { id: 'opt-iv', name: 'Implied Volatility', type: 'options', category: 'Options Metrics', data_type: 'percentage', unit: '%' , source: 'alpha_vantage_options' },
   { id: 'opt-delta', name: 'Delta (Short Leg)', type: 'options', category: 'Options Metrics', data_type: 'numeric', unit: 'decimal' , source: 'alpha_vantage_options' },
@@ -227,10 +214,9 @@ const OPTIONS_FACTORS: FactorDefinition[] = [
   // Add more as needed...
 ];
 
-// Combined factors
+// Combined factors - All API-based (no manual/qualitative factors)
 const ALL_FACTORS = [
   ...ALPHA_VANTAGE_FACTORS,
-  ...QUALITATIVE_FACTORS,
   ...OPTIONS_FACTORS
 ];
 
@@ -270,7 +256,7 @@ class IPSDataService {
   }
 
   // Get factors by type from database
-  async getFactorsByType(type: 'quantitative' | 'qualitative' | 'options'): Promise<FactorDefinition[]> {
+  async getFactorsByType(type: 'quantitative' | 'options'): Promise<FactorDefinition[]> {
     const allFactors = await this.getAllFactors();
     return allFactors.filter(factor => factor.type === type);
   }

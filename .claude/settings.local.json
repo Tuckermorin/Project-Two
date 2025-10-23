@@ -149,7 +149,10 @@
       "Bash(else echo \"No .env file found\")",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"c:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251022_fix_ips_leaderboard_view.sql\")",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"c:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251022_create_ai_trade_evaluations.sql\")",
-      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT table_name FROM information_schema.tables WHERE table_name LIKE ''%evaluat%'' OR table_name LIKE ''%ai%'' ORDER BY table_name;\")"
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT table_name FROM information_schema.tables WHERE table_name LIKE ''%evaluat%'' OR table_name LIKE ''%ai%'' ORDER BY table_name;\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT id, name, category, collection_method FROM factor_definitions WHERE is_active = true ORDER BY category, name LIMIT 50;\")",
+      "Bash(PGPASSWORD='Cochabamba19342011!!' '/c/Program Files/PostgreSQL/17/bin/psql' -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT id, name, category, collection_method FROM factor_definitions WHERE is_active = true ORDER BY category, name LIMIT 50;\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql.exe\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT id, name, category, collection_method FROM factor_definitions WHERE is_active = true ORDER BY category, name LIMIT 50;\")"
     ],
     "deny": [],
     "ask": []

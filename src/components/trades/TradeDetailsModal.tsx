@@ -30,6 +30,7 @@ import {
 import { cn } from '@/lib/utils';
 import { FactorScorecard } from '@/components/trades/factor-scorecard';
 import { PriceRangeChart } from '@/components/trades/PriceRangeChart';
+import { EnhancedAIAnalysis } from '@/components/trades/EnhancedAIAnalysis';
 
 interface NewsSentiment {
   sentiment_label: string;
@@ -533,19 +534,9 @@ export function TradeDetailsModal({
               </Card>
             )}
 
-            {/* AI Rationale */}
+            {/* Enhanced AI Analysis */}
             {candidate.rationale && (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Info className="w-5 h-5" />
-                    AI Analysis
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm leading-relaxed">{candidate.rationale}</p>
-                </CardContent>
-              </Card>
+              <EnhancedAIAnalysis candidate={candidate} />
             )}
 
             {/* Trade Entry Details */}

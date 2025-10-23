@@ -4,6 +4,7 @@
 
 import OpenAI from 'openai';
 import type { EnrichedTradeContext, TradeCandidate } from './trade-context-enrichment-service';
+import { getEnhancedRationaleGenerator, type StructuredRationale } from './enhanced-rationale-generator';
 
 // ============================================================================
 // Types
@@ -70,6 +71,7 @@ export interface TradeEvaluationResult {
     confidence_explanation: string;
   };
   enriched_context: EnrichedTradeContext; // Full enriched context for debugging/storage
+  structured_rationale?: StructuredRationale; // Enhanced rationale with learning
   evaluated_at: string;
 }
 
@@ -125,6 +127,20 @@ export class AITradeEvaluator {
       finalRecommendation
     );
 
+    // Step 5: Generate enhanced structured rationale (optional, for learning)
+    let structuredRationale: StructuredRationale | undefined;
+    try {
+      const rationaleGenerator = getEnhancedRationaleGenerator();
+      structuredRationale = await rationaleGenerator.generateRationale(
+        enrichedContext,
+        aiEvaluation
+      );
+      console.log(`[AITradeEvaluator] Enhanced rationale generated with embedding`);
+    } catch (error) {
+      console.warn(`[AITradeEvaluator] Failed to generate enhanced rationale:`, error);
+      // Continue without rationale - not critical
+    }
+
     const result: TradeEvaluationResult = {
       candidate: enrichedContext.candidate,
       ips_evaluation: enrichedContext.ips_evaluation,
@@ -133,6 +149,7 @@ export class AITradeEvaluator {
       final_recommendation: finalRecommendation,
       explainability,
       enriched_context: enrichedContext,
+      structured_rationale: structuredRationale,
       evaluated_at: new Date().toISOString(),
     };
 
@@ -140,6 +157,9 @@ export class AITradeEvaluator {
     console.log(`  Final Recommendation: ${finalRecommendation}`);
     console.log(`  Composite Score: ${weightedScore.composite_score.toFixed(2)}`);
     console.log(`  Weighting: ${(weightedScore.ips_weight * 100).toFixed(0)}% IPS / ${(weightedScore.ai_weight * 100).toFixed(0)}% AI`);
+    if (structuredRationale) {
+      console.log(`  Enhanced Rationale: "${structuredRationale.summary.one_sentence_thesis}"`);
+    }
 
     return result;
   }

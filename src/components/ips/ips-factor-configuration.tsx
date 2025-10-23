@@ -25,7 +25,7 @@ interface FactorConfiguration {
   targetValueMax?: string;
   preferenceDirection: 'higher' | 'lower' | 'target';
   factorId: string;
-  type: 'quantitative' | 'qualitative' | 'options';
+  type: 'quantitative' | 'options';
   category: string;
 }
 
@@ -56,7 +56,7 @@ const getFactorInfo = (factorName: string) => {
   
   if (factor) {
     return {
-      type: factor.type as 'quantitative' | 'qualitative' | 'options',
+      type: factor.type as 'quantitative' | 'options',
       category: factor.category,
       id: factor.id  // This will be the correct ID like 'opt-delta', 'av-pe-ratio', etc.
     };
@@ -84,8 +84,8 @@ const getFactorInfo = (factorName: string) => {
         defaultConfigs[factorName] = {
           weight: 5,
           enabled: true,
-          targetType: factorInfo.type === 'qualitative' ? 'rating' : 'numeric',
-          targetValue: factorInfo.type === 'qualitative' ? 4 : '',
+          targetType: 'numeric',
+          targetValue: '',
           targetOperator: 'gte',
           targetValueMax: '',
           preferenceDirection: 'higher',
@@ -233,46 +233,8 @@ const getFactorInfo = (factorName: string) => {
                   Target Criteria
                 </Label>
                 
-                {config.type === 'qualitative' ? (
-                  // Qualitative factors use rating scale
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <Label className="text-xs">Minimum Rating</Label>
-                      <Select 
-                        value={config.targetValue.toString()} 
-                        onValueChange={(value) => updateConfiguration(factorName, 'targetValue', parseInt(value))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select rating" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="1">1 - Poor</SelectItem>
-                          <SelectItem value="2">2 - Below Average</SelectItem>
-                          <SelectItem value="3">3 - Average</SelectItem>
-                          <SelectItem value="4">4 - Good</SelectItem>
-                          <SelectItem value="5">5 - Excellent</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label className="text-xs">Preference</Label>
-                      <Select 
-                        value={config.preferenceDirection} 
-                        onValueChange={(value) => updateConfiguration(factorName, 'preferenceDirection', value)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="higher">Higher is Better</SelectItem>
-                          <SelectItem value="target">Target Value</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                ) : (
-                  // Quantitative factors use numeric inputs
-                  <div className="grid grid-cols-3 gap-3">
+                {/* All factors use numeric inputs (API-based) */}
+                <div className="grid grid-cols-3 gap-3">
                     <div>
                       <Label className="text-xs">Operator</Label>
                       <Select 
@@ -319,7 +281,6 @@ const getFactorInfo = (factorName: string) => {
                       </div>
                     )}
                   </div>
-                )}
               </div>
             </>
           )}
@@ -400,14 +361,10 @@ const getFactorInfo = (factorName: string) => {
       </div>
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-2">
           <TabsTrigger value="quantitative" className="flex items-center gap-2">
             <Calculator className="h-4 w-4" />
             Quantitative ({getFactorsByType('quantitative').filter(f => configurations[f]?.enabled).length})
-          </TabsTrigger>
-          <TabsTrigger value="qualitative" className="flex items-center gap-2">
-            <Users className="h-4 w-4" />
-            Qualitative ({getFactorsByType('qualitative').filter(f => configurations[f]?.enabled).length})
           </TabsTrigger>
           <TabsTrigger value="options" className="flex items-center gap-2">
             <TrendingUp className="h-4 w-4" />
@@ -416,15 +373,11 @@ const getFactorInfo = (factorName: string) => {
         </TabsList>
 
         <TabsContent value="quantitative" className="mt-6">
-          {renderTabContent('quantitative', <Calculator className="h-5 w-5 text-blue-600" />, "Quantitative Factors")}
-        </TabsContent>
-
-        <TabsContent value="qualitative" className="mt-6">
-          {renderTabContent('qualitative', <Users className="h-5 w-5 text-green-600" />, "Qualitative Factors")}
+          {renderTabContent('quantitative', <Calculator className="h-5 w-5 text-blue-600" />, "Quantitative Factors - All API-Based")}
         </TabsContent>
 
         <TabsContent value="options" className="mt-6">
-          {renderTabContent('options', <TrendingUp className="h-5 w-5 text-purple-600" />, "Options Factors")}
+          {renderTabContent('options', <TrendingUp className="h-5 w-5 text-purple-600" />, "Options Factors - All API-Based")}
         </TabsContent>
       </Tabs>
 
