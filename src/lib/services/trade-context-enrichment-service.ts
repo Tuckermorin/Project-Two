@@ -27,6 +27,16 @@ export interface TradeCandidate {
   dte?: number;
   estimated_pop?: number;
   current_stock_price?: number;
+  // IPS evaluation from agent (if already evaluated)
+  ips_evaluation?: IPSEvaluation;
+  // IPS factors from agent (for AI prompt context)
+  ips_factors?: Array<{
+    factor_name: string;
+    actual_value: any;
+    target_value?: any;
+    passed: boolean;
+    weight?: number;
+  }>;
 }
 
 export interface IPSEvaluation {
@@ -161,7 +171,10 @@ export class TradeContextEnrichmentService {
       marketConditions,
       similarTrades,
     ] = await Promise.all([
-      this.evaluateAgainstIPS(candidate, ipsId),
+      // Use provided IPS evaluation if available, otherwise evaluate
+      candidate.ips_evaluation
+        ? Promise.resolve(candidate.ips_evaluation)
+        : this.evaluateAgainstIPS(candidate, ipsId),
       this.gatherMultiSourceIntelligence(candidate, {
         includeExternalIntelligence,
         includeInternalRAG,

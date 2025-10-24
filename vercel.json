@@ -9,12 +9,17 @@
       "schedule": "30 14 * * 1-5"
     },
     {
-      "path": "/api/jobs/snapshot-sync", 
+      "path": "/api/jobs/snapshot-sync",
       "schedule": "0 18 * * 1-5"
     },
     {
       "path": "/api/jobs/snapshot-sync",
       "schedule": "0 21 * * 1-5"
+    },
+    {
+      "path": "/api/cron/postmortem",
+      "schedule": "30 20 * * 1-5",
+      "comment": "Run at 4:30 PM ET (20:30 UTC) on weekdays, 30 min after market close"
     }
   ]
 }

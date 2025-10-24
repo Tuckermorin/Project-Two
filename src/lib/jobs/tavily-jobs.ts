@@ -32,9 +32,10 @@ async function runDailyTradeMonitoring() {
     const result = await monitorAllActiveTrades('default-user', {
       daysBack: 7,
       useCache: true,
+      watchOnly: true, // Only monitor WATCH trades to save credits
     });
 
-    console.log(`[Daily Monitoring] Monitored ${result.monitored} trades`);
+    console.log(`[Daily Monitoring] Total trades: ${result.total_trades}, Monitored: ${result.monitored}, Skipped: ${result.skipped}`);
     console.log(`[Daily Monitoring] Risk summary:`, result.risk_summary);
     console.log(`[Daily Monitoring] Credits used: ${result.total_credits_used}`);
 
@@ -66,7 +67,7 @@ async function runDailyTradeMonitoring() {
 
 // ============================================================================
 // Job 2: Auto Post-Mortem on Trade Closure
-// Checks every hour for newly closed trades and generates post-mortems
+// Runs once daily at 4:30 PM EST (after market close) for trades closed that day
 // ============================================================================
 
 async function runAutoPostMortem() {
@@ -76,14 +77,16 @@ async function runAutoPostMortem() {
   try {
     const supabase = getSupabaseClient();
 
-    // Find trades closed in the last 2 hours without post-mortems
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    // Find trades closed today without post-mortems
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayStartISO = todayStart.toISOString();
 
     const { data: closedTrades, error } = await supabase
       .from('trades')
       .select('id, symbol, status, closed_at')
       .eq('status', 'closed')
-      .gte('closed_at', twoHoursAgo)
+      .gte('closed_at', todayStartISO)
       .not('realized_pnl', 'is', null);
 
     if (error) {
@@ -219,9 +222,10 @@ async function runMiddayTradeCheck() {
     const result = await monitorAllActiveTrades('default-user', {
       daysBack: 1, // Only check today's news
       useCache: true, // Use cached results from morning
+      watchOnly: true, // Only monitor WATCH trades
     });
 
-    console.log(`[Midday Check] Checked ${result.monitored} trades`);
+    console.log(`[Midday Check] Total trades: ${result.total_trades}, Monitored: ${result.monitored}, Skipped: ${result.skipped}`);
     console.log(`[Midday Check] Credits used: ${result.total_credits_used} (should be ~0 if cached)`);
 
     // Only log if there are new critical alerts
@@ -281,11 +285,11 @@ export function startTavilyJobs() {
   console.log('');
 
   // Job 2: Auto Post-Mortem Generator
-  // Every hour, check for newly closed trades
+  // Once daily at 4:30 PM EST (after market close)
   const autoPostMortem = new CronJob(
-    '0 * * * *', // Every hour
+    '30 16 * * 1-5', // 4:30 PM Mon-Fri
     async () => {
-      console.log('[Cron] Checking for newly closed trades');
+      console.log('[Cron] Running end-of-day post-mortem analysis');
       await runAutoPostMortem();
     },
     null,
@@ -294,10 +298,10 @@ export function startTavilyJobs() {
   );
 
   console.log('[Tavily Jobs] ✓ Auto post-mortem scheduled');
-  console.log('  - Time: Every hour');
-  console.log('  - Frequency: 24/7');
-  console.log('  - Purpose: Generate post-mortem for closed trades');
-  console.log('  - Est. cost: ~20-25 credits per trade closure');
+  console.log('  - Time: 4:30 PM EST (after market close)');
+  console.log('  - Frequency: Monday-Friday');
+  console.log('  - Purpose: Generate post-mortem for trades closed today');
+  console.log('  - Est. cost: ~20-25 credits per closed trade');
   console.log('');
 
   // Job 3: Weekly RAG Enrichment
@@ -343,11 +347,11 @@ export function startTavilyJobs() {
   console.log('[Tavily Jobs] All jobs started successfully!');
   console.log('');
   console.log('Estimated total cost per month:');
-  console.log('  - Daily monitoring: ~2,200 credits (22 days × 100)');
-  console.log('  - Post-mortems: ~400 credits (2 closures/day × 20 × 22 days)');
+  console.log('  - Daily monitoring: ~1,100 credits (22 days × 50 - WATCH trades only)');
+  console.log('  - Post-mortems: ~550 credits (1 batch/day × 25 × 22 days)');
   console.log('  - Weekly enrichment: ~280 credits (4 weeks × 70)');
   console.log('  - Midday checks: ~0 credits (cached)');
-  console.log('  - TOTAL: ~2,880 credits/month (well within 4,000 budget)');
+  console.log('  - TOTAL: ~1,930 credits/month (well within budget after optimizations)');
   console.log('');
 
   // Return jobs for cleanup

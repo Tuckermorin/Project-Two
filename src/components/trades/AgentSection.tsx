@@ -51,6 +51,8 @@ type Candidate = {
   ips_score?: number;
   composite_score?: number;
   diversity_score?: number;
+  ai_evaluation_id?: string;
+  structured_rationale?: any;
   metadata?: {
     reddit?: {
       sentiment_score: number;
@@ -374,6 +376,8 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
           vega: vegaValue,
           iv_at_entry: ivValue,
           sector: sectorValue,
+          ai_evaluation_id: candidate.ai_evaluation_id,
+          structured_rationale: candidate.structured_rationale,
         }),
       });
 

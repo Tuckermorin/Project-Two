@@ -89,6 +89,10 @@ export async function POST(req: NextRequest) {
     const total_factors = body.total_factors ?? null;
     const evaluation_notes = body.rationale ?? body.evaluation_notes ?? null;
 
+    // AI Evaluation tracking
+    const ai_evaluation_id = body.ai_evaluation_id ?? null;
+    const structured_rationale = body.structured_rationale ?? null;
+
     // 1. Insert to trade_candidates for agent tracking
     // Note: This may fail if user_id doesn't exist in auth.users table
     // We'll try, but won't fail the whole request if it doesn't work
@@ -158,6 +162,9 @@ export async function POST(req: NextRequest) {
       tier: body.tier ?? null,
       ips_factor_scores: body.ips_factor_details ?? null,
       diversity_score: body.diversity_score ?? null,
+      // AI Evaluation tracking
+      ai_evaluation_id,
+      structured_rationale,
       // leave exit fields null
     };
 

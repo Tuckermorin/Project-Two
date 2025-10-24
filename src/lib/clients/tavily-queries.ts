@@ -1,9 +1,18 @@
 /**
  * Factor-aware query patterns for IPS/PCS trade analysis
  * Per CODEX.md best practices
+ *
+ * UPDATED: Now uses unified-intelligence-service for most queries
+ * Tavily is ONLY used for SEC filings (AV doesn't have these)
  */
 
 import { tavilySearch, tavilyExtract, TavilySearchOptions } from "./tavily";
+import {
+  getCatalysts,
+  getAnalystActivity,
+  getOperationalRisks,
+  IntelligenceArticle
+} from "@/lib/services/unified-intelligence-service";
 
 // Trusted financial domains for domain filtering
 const TRUSTED_FINANCIAL_DOMAINS = [
@@ -27,132 +36,88 @@ const EXCLUDE_DOMAINS = [
 
 /**
  * Catalyst Query - Earnings, guidance, product launches
+ * OPTIMIZED: Uses unified intelligence service (External DB > AV > Tavily fallback)
+ * Expected cost: 0 credits (uses External Supabase or Alpha Vantage)
  */
 export async function queryCatalysts(symbol: string, daysBack: number = 7) {
-  const companyDomain = await getCompanyInvestorDomain(symbol);
+  const articles = await getCatalysts(symbol, daysBack);
 
-  const queries = [
-    `${symbol} earnings guidance`,
-    `${symbol} earnings date announcement`,
-    `${symbol} product launch event`,
-  ];
-
-  const options: TavilySearchOptions = {
-    topic: "news",
-    search_depth: "advanced",
-    chunks_per_source: 3,
-    max_results: 8,
-    days: daysBack,
-    include_domains: companyDomain
-      ? [...TRUSTED_FINANCIAL_DOMAINS, companyDomain]
-      : TRUSTED_FINANCIAL_DOMAINS,
-  };
-
-  const results = await Promise.all(
-    queries.map(q => tavilySearch(q, options))
-  );
-
-  // Flatten and deduplicate by URL
-  const allResults = results.flatMap(r => r.results);
-  const uniqueResults = Array.from(
-    new Map(allResults.map(r => [r.url, r])).values()
-  );
-
-  // Filter by score >= 0.6
-  return uniqueResults.filter(r => (r.score ?? 0) >= 0.6);
+  // Convert to Tavily-compatible format for backwards compatibility
+  return articles.map(article => ({
+    url: article.url,
+    title: article.title,
+    content: article.snippet,
+    snippet: article.snippet,
+    score: article.score,
+    publishedAt: article.publishedAt,
+    relevance: article.relevance
+  }));
 }
 
 /**
  * Downgrade/Price Target Query - Analyst activity
+ * OPTIMIZED: Uses unified intelligence service (External DB > AV > Tavily fallback)
+ * Expected cost: 0 credits (uses External Supabase or Alpha Vantage)
  */
 export async function queryAnalystActivity(symbol: string, daysBack: number = 7) {
-  const queries = [
-    `${symbol} downgrade OR upgrade analyst`,
-    `${symbol} price target change`,
-    `${symbol} analyst rating`,
-  ];
+  const articles = await getAnalystActivity(symbol, daysBack);
 
-  const options: TavilySearchOptions = {
-    topic: "news",
-    search_depth: "advanced",
-    chunks_per_source: 3,
-    max_results: 8,
-    days: daysBack,
-    include_domains: TRUSTED_FINANCIAL_DOMAINS,
-    exclude_domains: EXCLUDE_DOMAINS,
-  };
-
-  const results = await Promise.all(
-    queries.map(q => tavilySearch(q, options))
-  );
-
-  const allResults = results.flatMap(r => r.results);
-  const uniqueResults = Array.from(
-    new Map(allResults.map(r => [r.url, r])).values()
-  );
-
-  return uniqueResults.filter(r => (r.score ?? 0) >= 0.6);
+  // Convert to Tavily-compatible format for backwards compatibility
+  return articles.map(article => ({
+    url: article.url,
+    title: article.title,
+    content: article.snippet,
+    snippet: article.snippet,
+    score: article.score,
+    publishedAt: article.publishedAt,
+    relevance: article.relevance
+  }));
 }
 
 /**
  * SEC Regulatory Query - 8-K, 10-Q, 10-K filings
+ * OPTIMIZED: Consolidated into 1 query to reduce API calls from 3 to 1
+ * NOTE: TAVILY ONLY - Alpha Vantage doesn't index SEC filings
+ * Expected cost: ~2 credits per call
  */
 export async function querySECFilings(symbol: string, daysBack: number = 90) {
-  const queries = [
-    `${symbol} 8-K filing`,
-    `${symbol} 10-Q quarterly report`,
-    `${symbol} 10-K annual report`,
-  ];
+  console.log(`[Tavily] Querying SEC filings for ${symbol} (will cost ~2 credits)`);
+
+  // Consolidated query for all SEC filing types
+  const query = `${symbol} (8-K OR 10-Q OR 10-K) filing`;
 
   const options: TavilySearchOptions = {
     topic: "news",
     search_depth: "advanced",
     chunks_per_source: 3,
-    max_results: 10,
+    max_results: 12, // Increased to capture multiple filing types
     days: daysBack,
     include_domains: ["sec.gov"],
   };
 
-  const results = await Promise.all(
-    queries.map(q => tavilySearch(q, options))
-  );
+  const result = await tavilySearch(query, options);
 
-  const allResults = results.flatMap(r => r.results);
-  return Array.from(
-    new Map(allResults.map(r => [r.url, r])).values()
-  );
+  return result.results;
 }
 
 /**
  * Operational Risk Query - Supply chain, margin, competition
+ * OPTIMIZED: Uses unified intelligence service (AV News > Tavily fallback)
+ * Expected cost: 0 credits (uses Alpha Vantage News API)
  */
 export async function queryOperationalRisks(symbol: string, daysBack: number = 30) {
-  const queries = [
-    `${symbol} supply chain disruption`,
-    `${symbol} margin compression pressure`,
-    `${symbol} competition competitive threat`,
-    `${symbol} regulatory investigation`,
-  ];
+  const articles = await getOperationalRisks(symbol, daysBack);
 
-  const options: TavilySearchOptions = {
-    topic: "news",
-    search_depth: "advanced",
-    chunks_per_source: 3,
-    max_results: 8,
-    days: daysBack,
-    include_domains: TRUSTED_FINANCIAL_DOMAINS,
-  };
-
-  const results = await Promise.all(
-    queries.map(q => tavilySearch(q, options))
-  );
-
-  const allResults = results.flatMap(r => r.results);
-  const uniqueResults = Array.from(
-    new Map(allResults.map(r => [r.url, r])).values()
-  );
-
-  return uniqueResults.filter(r => (r.score ?? 0) >= 0.5);
+  // Convert to Tavily-compatible format for backwards compatibility
+  return articles.map(article => ({
+    url: article.url,
+    title: article.title,
+    content: article.snippet,
+    snippet: article.snippet,
+    score: article.score,
+    publishedAt: article.publishedAt,
+    relevance: article.relevance
+  }));
 }
 
 /**

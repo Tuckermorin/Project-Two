@@ -275,14 +275,37 @@ export async function PATCH(request: NextRequest) {
 
     if (error) throw new Error(error.message);
 
-    // If activating trades, trigger spread price calculation asynchronously
+    // Background tasks (don't await - fire and forget)
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+
+    // If activating trades, trigger spread price calculation + rationale embedding
     if (targetStatus === 'active' && ids.length > 0) {
-      // Don't await - let it run in background
-      fetch(`${process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000'}/api/trades/spread-prices`, {
+      // Trigger spread price calculation
+      fetch(`${baseUrl}/api/trades/spread-prices`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tradeIds: ids })
       }).catch(err => console.error('Failed to trigger spread price update:', err));
+
+      // Save rationale embeddings for each activated trade
+      ids.forEach(tradeId => {
+        fetch(`${baseUrl}/api/trades/rationale`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'save_embedding', tradeId })
+        }).catch(err => console.error(`Failed to save rationale embedding for ${tradeId}:`, err));
+      });
+    }
+
+    // If closing trades, record outcomes for AI learning
+    if (targetStatus === 'closed' && ids.length > 0) {
+      ids.forEach(tradeId => {
+        fetch(`${baseUrl}/api/trades/rationale`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'record_outcome', tradeId })
+        }).catch(err => console.error(`Failed to record outcome for ${tradeId}:`, err));
+      });
     }
 
     return NextResponse.json({ success: true });

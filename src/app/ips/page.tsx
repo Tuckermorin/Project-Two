@@ -232,6 +232,7 @@ export default function IPSPage() {
   const [availableStrategies, setAvailableStrategies] = useState<TradingStrategy[]>([]);
   const [factorDefinitions, setFactorDefinitions] = useState<any>(null);
   const [creating, setCreating] = useState(false);
+  const [tradeStats, setTradeStats] = useState({ totalTrades: 0, avgWinRate: 0 });
 
   // Delete confirmation dialog state
   const [deleteDialog, setDeleteDialog] = useState({
@@ -259,9 +260,45 @@ export default function IPSPage() {
       const data = await response.json();
       setIpsList(data || []);
       setAllIPSs(normalizeIpsRows(data || []));
+
+      // Fetch trade statistics
+      await fetchTradeStats();
     } catch (err) {
       console.error("Unexpected error fetching IPSs:", err);
       toast.error("Failed to fetch IPS list");
+    }
+  }
+
+  // Fetch trade statistics from database
+  async function fetchTradeStats() {
+    try {
+      const { data: trades, error } = await supabase
+        .from('trades')
+        .select('status, pl_dollar, pl_percent, ips_id');
+
+      if (error) {
+        console.error("Error fetching trades:", error);
+        return;
+      }
+
+      const totalTrades = trades?.length || 0;
+      const closedTrades = trades?.filter(t => t.status === 'closed') || [];
+
+      // Determine profitable trades based on pl_dollar or pl_percent
+      const profitableTrades = closedTrades.filter(t => {
+        // Check if trade was profitable (pl_dollar > 0 or pl_percent > 0)
+        const plDollar = t.pl_dollar || 0;
+        const plPercent = t.pl_percent || 0;
+        return plDollar > 0 || plPercent > 0;
+      });
+
+      const avgWinRate = closedTrades.length > 0
+        ? Math.round((profitableTrades.length / closedTrades.length) * 100)
+        : 0;
+
+      setTradeStats({ totalTrades, avgWinRate });
+    } catch (err) {
+      console.error("Unexpected error fetching trade stats:", err);
     }
   }
 
@@ -930,29 +967,29 @@ const handleSaveIPS = async (ipsData: any) => {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card>
-            <CardContent className="p-6 text-center">
-              <div className="text-2xl font-bold text-blue-600">{activeIPSs.length}</div>
-              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Active IPSs</div>
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
+          <Card className="border-none shadow-lg">
+            <CardContent className="p-8 text-center">
+              <div className="text-4xl font-bold text-blue-600 mb-2">{activeIPSs.length}</div>
+              <div className="text-sm font-medium tracking-wide" style={{ color: 'var(--text-secondary)' }}>Active IPSs</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-6 text-center">
-              <div className="text-2xl font-bold text-green-600">0</div>
-              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Total Trades</div>
+          <Card className="border-none shadow-lg">
+            <CardContent className="p-8 text-center">
+              <div className="text-4xl font-bold text-green-600 mb-2">{tradeStats.totalTrades}</div>
+              <div className="text-sm font-medium tracking-wide" style={{ color: 'var(--text-secondary)' }}>Total Trades</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-6 text-center">
-              <div className="text-2xl font-bold text-purple-600">0%</div>
-              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Avg Win Rate</div>
+          <Card className="border-none shadow-lg">
+            <CardContent className="p-8 text-center">
+              <div className="text-4xl font-bold text-purple-600 mb-2">{tradeStats.avgWinRate}%</div>
+              <div className="text-sm font-medium tracking-wide" style={{ color: 'var(--text-secondary)' }}>Avg Win Rate</div>
             </CardContent>
           </Card>
-          <Card>
-            <CardContent className="p-6 text-center">
-              <div className="text-2xl font-bold text-orange-600">{availableStrategies.length}</div>
-              <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>Available Strategies</div>
+          <Card className="border-none shadow-lg">
+            <CardContent className="p-8 text-center">
+              <div className="text-4xl font-bold text-orange-600 mb-2">{availableStrategies.length}</div>
+              <div className="text-sm font-medium tracking-wide" style={{ color: 'var(--text-secondary)' }}>Available Strategies</div>
             </CardContent>
           </Card>
         </div>
@@ -969,19 +1006,19 @@ const handleSaveIPS = async (ipsData: any) => {
       </div>
 
       {/* IPS Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {displayedIPSs.map((ips: any) => (
-          <Card key={ips.id} className={`relative ${!ips.is_active ? "opacity-60" : ""} hover:shadow-lg transition-shadow`}>
-            <CardHeader className="pb-3">
+          <Card key={ips.id} className={`relative ${!ips.is_active ? "opacity-60" : ""} hover:shadow-xl transition-all duration-200 border-none shadow-lg`}>
+            <CardHeader className="pb-4">
               <div className="flex items-start justify-between">
                 <div className="flex-1">
-                  <CardTitle className="text-lg font-semibold mb-1" style={{ color: 'var(--text-primary)' }}>{ips.name}</CardTitle>
-                  {ips.description && <p className="text-sm line-clamp-2" style={{ color: 'var(--text-secondary)' }}>{ips.description}</p>}
+                  <CardTitle className="text-xl font-bold mb-2" style={{ color: 'var(--text-primary)' }}>{ips.name}</CardTitle>
+                  {ips.description && <p className="text-sm line-clamp-2 leading-relaxed" style={{ color: 'var(--text-secondary)' }}>{ips.description}</p>}
                 </div>
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
-                    <Button variant="ghost" size="sm">
-                      <MoreVertical className="w-4 h-4" />
+                    <Button variant="ghost" size="sm" className="hover:bg-gray-100">
+                      <MoreVertical className="w-5 h-5" />
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end">
@@ -1008,51 +1045,52 @@ const handleSaveIPS = async (ipsData: any) => {
                 </DropdownMenu>
               </div>
 
-              <div className="flex items-center gap-2 mt-2">
-                <Badge variant={ips.is_active ? "default" : "secondary"}>{ips.is_active ? "Active" : "Inactive"}</Badge>
+              <div className="flex items-center gap-2 mt-3">
+                <Badge variant={ips.is_active ? "default" : "secondary"} className="text-xs px-3 py-1">{ips.is_active ? "Active" : "Inactive"}</Badge>
               </div>
             </CardHeader>
 
-            <CardContent className="pt-0">
+            <CardContent className="pt-0 pb-6">
               {/* Progress Indicator */}
               {ips.total_factors > 0 && (
-                <div className="mb-4">
-                  <div className="flex justify-between items-center mb-2">
-                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Configuration</span>
-                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>{Math.round((Number(ips.active_factors) / Math.max(1, Number(ips.total_factors))) * 100)}%</span>
+                <div className="mb-6">
+                  <div className="flex justify-between items-center mb-3">
+                    <span className="text-sm font-medium" style={{ color: 'var(--text-secondary)' }}>Configuration</span>
+                    <span className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{Math.round((Number(ips.active_factors) / Math.max(1, Number(ips.total_factors))) * 100)}%</span>
                   </div>
-                  <Progress value={(Number(ips.active_factors) / Math.max(1, Number(ips.total_factors))) * 100} className="h-2" />
+                  <Progress value={(Number(ips.active_factors) / Math.max(1, Number(ips.total_factors))) * 100} className="h-2.5" />
                 </div>
               )}
 
               {/* Stats Grid */}
-              <div className="grid grid-cols-2 gap-4 text-center py-3 border-t">
-                <div>
-                  <div className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{ips.total_factors ||  (ips.ips_factors?.length || 0)}</div>
-                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Total Factors</div>
+              <div className="grid grid-cols-2 gap-6 text-center py-4 border-t border-gray-100">
+                <div className="space-y-1">
+                  <div className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{ips.total_factors ||  (ips.ips_factors?.length || 0)}</div>
+                  <div className="text-xs font-medium tracking-wide" style={{ color: 'var(--text-secondary)' }}>Total Factors</div>
                 </div>
-                <div>
-                  <div className="text-lg font-semibold" style={{ color: 'var(--text-primary)' }}>{ips.total_trades || 0}</div>
-                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Trades</div>
-                </div>
-                <div>
-                  <div className="text-lg font-semibold text-green-600">{ips.win_rate ? `${Math.round(Number(ips.win_rate))}%` : "0%"}</div>
-                  <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Win Rate</div>
+                <div className="space-y-1">
+                  <div className="text-2xl font-bold" style={{ color: 'var(--text-primary)' }}>{ips.total_trades || 0}</div>
+                  <div className="text-xs font-medium tracking-wide" style={{ color: 'var(--text-secondary)' }}>Trades</div>
                 </div>
               </div>
 
+              <div className="text-center py-3 border-t border-gray-100">
+                <div className="text-2xl font-bold text-green-600">{ips.win_rate ? `${Math.round(Number(ips.win_rate))}%` : "0%"}</div>
+                <div className="text-xs font-medium tracking-wide" style={{ color: 'var(--text-secondary)' }}>Win Rate</div>
+              </div>
+
               {/* Action Buttons */}
-              <div className="flex gap-2 mt-4">
-                <Button variant="outline" size="sm" className="flex-1" onClick={() => handleIPSAction(ips.id, "view")}>
-                  <Eye className="w-4 h-4 mr-1" />
+              <div className="flex gap-3 mt-5">
+                <Button variant="outline" size="default" className="flex-1 font-medium" onClick={() => handleIPSAction(ips.id, "view")}>
+                  <Eye className="w-4 h-4 mr-2" />
                   View Details
                 </Button>
               </div>
             </CardContent>
 
             {ips.is_active && (
-              <div className="absolute top-3 right-3">
-                <div className="w-2 h-2 bg-green-500 rounded-full"></div>
+              <div className="absolute top-4 right-4">
+                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
               </div>
             )}
           </Card>

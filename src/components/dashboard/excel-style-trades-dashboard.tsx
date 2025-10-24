@@ -17,7 +17,7 @@ import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Cale
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { dispatchTradesUpdated } from '@/lib/events'
+import { dispatchTradesUpdated, TRADES_UPDATED_EVENT } from '@/lib/events'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -477,7 +477,21 @@ export default function ExcelStyleTradesDashboard() {
             console.error('Failed to move expired trades to action needed', e)
           }
         }
-        setTrades(normalized.filter(t => t.dte > 0))
+
+        // Filter out trades that are in Action Needed (even if DTE > 0)
+        // and trades with DTE <= 0
+        const actionNeededIds = new Set<string>()
+        try {
+          const raw = localStorage.getItem(LOCAL_CLOSURE_KEY)
+          const obj = raw ? JSON.parse(raw) : {}
+          Object.entries(obj).forEach(([tradeId, meta]: [string, any]) => {
+            if (meta?.needsAction) {
+              actionNeededIds.add(tradeId)
+            }
+          })
+        } catch {}
+
+        setTrades(normalized.filter(t => t.dte > 0 && !actionNeededIds.has(t.id)))
       } catch (e) {
         console.error('Failed to load dashboard trades', e)
         setTrades([])
@@ -486,6 +500,13 @@ export default function ExcelStyleTradesDashboard() {
       }
     }
     load()
+
+    // Listen for trades being moved back to active from Action Needed
+    const handleTradesUpdated = () => {
+      load()
+    }
+    window.addEventListener(TRADES_UPDATED_EVENT, handleTradesUpdated)
+    return () => window.removeEventListener(TRADES_UPDATED_EVENT, handleTradesUpdated)
   }, [])
 
   // Refresh handler - updates all active trades with current market data
@@ -621,7 +642,20 @@ export default function ExcelStyleTradesDashboard() {
             } as Trade
           })
 
-          setTrades(normalized.filter(t => t.dte > 0))
+          // Filter out trades that are in Action Needed (even if DTE > 0)
+          // and trades with DTE <= 0
+          const actionNeededIds = new Set<string>()
+          try {
+            const raw = localStorage.getItem(LOCAL_CLOSURE_KEY)
+            const obj = raw ? JSON.parse(raw) : {}
+            Object.entries(obj).forEach(([tradeId, meta]: [string, any]) => {
+              if (meta?.needsAction) {
+                actionNeededIds.add(tradeId)
+              }
+            })
+          } catch {}
+
+          setTrades(normalized.filter(t => t.dte > 0 && !actionNeededIds.has(t.id)))
           dispatchTradesUpdated({ type: 'full_refresh' })
         }
       }
@@ -936,13 +970,27 @@ export default function ExcelStyleTradesDashboard() {
         const tag = String(value).toUpperCase()
         const exitSignal = trade.exitSignal
 
-        // Determine badge class based on status and exit signal type
+        // Determine badge text and class based on status and exit signal type
         let badgeClass: string
-        if (exitSignal?.shouldExit && exitSignal.type === 'profit') {
-          // Exit at profit: green
-          badgeClass = 'status-badge good'
+        let displayText: string = tag
+
+        if (exitSignal?.shouldExit) {
+          // Set display text based on exit type
+          if (exitSignal.type === 'profit') {
+            displayText = 'EXIT (PROFIT)'
+            badgeClass = 'status-badge good'
+          } else if (exitSignal.type === 'loss') {
+            displayText = 'EXIT (LOSS)'
+            badgeClass = 'status-badge exit'
+          } else if (exitSignal.type === 'time') {
+            displayText = 'EXIT (TIME)'
+            badgeClass = 'status-badge watch'
+          } else {
+            displayText = 'EXIT'
+            badgeClass = 'status-badge exit'
+          }
         } else if (tag === 'EXIT') {
-          // Exit (loss or other): red
+          // Exit (not from strategy - e.g., stock breached strike)
           badgeClass = 'status-badge exit'
         } else if (tag === 'GOOD') {
           // Good status
@@ -962,7 +1010,7 @@ export default function ExcelStyleTradesDashboard() {
               <PopoverTrigger asChild>
                 <span className={`${badgeClass} cursor-pointer hover:opacity-80 inline-flex items-center gap-1`}>
                   {icon}
-                  {tag}
+                  {displayText}
                 </span>
               </PopoverTrigger>
               <PopoverContent className="w-64">
@@ -985,7 +1033,7 @@ export default function ExcelStyleTradesDashboard() {
           )
         }
 
-        return <span className={badgeClass}>{tag}</span>
+        return <span className={badgeClass}>{displayText}</span>
       }
       case 'deltaShortLeg':
       case 'theta':

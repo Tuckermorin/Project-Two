@@ -229,7 +229,10 @@ Passed: ${ips_evaluation.passed ? 'YES' : 'NO'}
 Score: ${ips_evaluation.score_percentage.toFixed(1)}% (${ips_evaluation.score}/${ips_evaluation.max_score})
 Passed Factors: ${ips_evaluation.passed_factors.length}
 Failed Factors: ${ips_evaluation.failed_factors.length}
-${ips_evaluation.failed_factors.length > 0 ? '\nFailed:\n' + ips_evaluation.failed_factors.map(f => `  - ${f.factor_name}: ${f.actual_value} (expected ${f.expected_value})`).join('\n') : ''}`);
+
+Passed Factors:
+${ips_evaluation.passed_factors.map(f => `  ✓ ${f.factor_name}: ${f.actual_value} (weight: ${f.weight || 1})`).join('\n')}
+${ips_evaluation.failed_factors.length > 0 ? '\nFailed Factors:\n' + ips_evaluation.failed_factors.map(f => `  ✗ ${f.factor_name}: ${f.actual_value} (expected ${f.expected_value}, weight: ${f.weight || 1})`).join('\n') : ''}`);
 
     // Historical Performance
     if (historical_performance.total_trades > 0) {

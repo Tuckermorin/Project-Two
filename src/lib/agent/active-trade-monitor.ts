@@ -551,13 +551,15 @@ async function storeMonitorData(tradeId: string, userId: string, result: TradeMo
 /**
  * Monitor all active trades for a user
  * Returns summary of all positions
+ * OPTIMIZED: By default only monitors WATCH trades to save credits
  */
 export async function monitorAllActiveTrades(
   userId: string,
-  options: { daysBack?: number; useCache?: boolean } = {}
+  options: { daysBack?: number; useCache?: boolean; watchOnly?: boolean } = {}
 ): Promise<{
   total_trades: number;
   monitored: number;
+  skipped: number;
   risk_summary: {
     critical: number;
     high: number;
@@ -567,7 +569,9 @@ export async function monitorAllActiveTrades(
   total_credits_used: number;
   results: TradeMonitorResult[];
 }> {
-  console.log(`[ActiveMonitor] Monitoring all active trades for user ${userId}`);
+  const { watchOnly = true } = options; // Default to WATCH trades only to save credits
+
+  console.log(`[ActiveMonitor] Monitoring active trades for user ${userId} (watchOnly: ${watchOnly})`);
 
   // Fetch all active trades
   const supabase = getSupabase();
@@ -586,6 +590,7 @@ export async function monitorAllActiveTrades(
     return {
       total_trades: 0,
       monitored: 0,
+      skipped: 0,
       risk_summary: { critical: 0, high: 0, medium: 0, low: 0 },
       total_credits_used: 0,
       results: [],
@@ -594,11 +599,40 @@ export async function monitorAllActiveTrades(
 
   console.log(`[ActiveMonitor] Found ${trades.length} active trades`);
 
+  // Filter trades if watchOnly is enabled
+  // A trade is on WATCH if:
+  // 1. IPS score < 75, OR
+  // 2. Current price is within 5% of short strike (high risk of ITM)
+  let tradesToMonitor = trades;
+  let skippedCount = 0;
+
+  if (watchOnly) {
+    tradesToMonitor = trades.filter((trade) => {
+      const ipsScore = trade.ips_score ?? 100;
+      const currentPrice = trade.current_price ?? 0;
+      const shortStrike = trade.short_strike ?? 0;
+
+      const percentToShort = shortStrike > 0
+        ? ((currentPrice - shortStrike) / shortStrike) * 100
+        : 100;
+
+      const isWatch = ipsScore < 75 || (shortStrike > 0 && percentToShort < 5);
+
+      if (!isWatch) {
+        skippedCount++;
+      }
+
+      return isWatch;
+    });
+
+    console.log(`[ActiveMonitor] Filtered to ${tradesToMonitor.length} WATCH trades (skipped ${skippedCount} GOOD trades)`);
+  }
+
   // Monitor each trade
   const results: TradeMonitorResult[] = [];
   let totalCredits = 0;
 
-  for (const trade of trades) {
+  for (const trade of tradesToMonitor) {
     try {
       const result = await monitorActiveTrade(trade.id, options);
       results.push(result);
@@ -622,6 +656,7 @@ export async function monitorAllActiveTrades(
   return {
     total_trades: trades.length,
     monitored: results.length,
+    skipped: skippedCount,
     risk_summary: riskSummary,
     total_credits_used: totalCredits,
     results,

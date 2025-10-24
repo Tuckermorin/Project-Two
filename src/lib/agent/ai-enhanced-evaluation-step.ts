@@ -16,9 +16,22 @@ function calculateDTE(expiryDate: string): number {
 }
 
 // Convert agent candidate format to TradeCandidate format
-export function convertToTradeCandidate(agentCandidate: any): TradeCandidate {
+export function convertToTradeCandidate(agentCandidate: any, ipsId?: string): TradeCandidate {
   const shortLeg = agentCandidate.contract_legs?.find((l: any) => l.type === 'SELL');
   const longLeg = agentCandidate.contract_legs?.find((l: any) => l.type === 'BUY');
+
+  // Convert agent's factor_scores to ips_factors format for AI context
+  const ipsFactors = agentCandidate.factor_scores?.map((fs: any) => ({
+    factor_name: fs.name || fs.factor,
+    actual_value: fs.actual_value || fs.value,
+    target_value: fs.target_value,
+    passed: fs.passed,
+    weight: fs.weight,
+  })) || [];
+
+  // Count passed and failed factors
+  const passedFactors = ipsFactors.filter((f: any) => f.passed);
+  const failedFactors = ipsFactors.filter((f: any) => !f.passed);
 
   return {
     symbol: agentCandidate.symbol,
@@ -35,6 +48,29 @@ export function convertToTradeCandidate(agentCandidate: any): TradeCandidate {
     composite_score: 0,
     yield_score: 0,
     ips_score: agentCandidate.ips_score || 0,
+    // Include agent's IPS evaluation data for AI context
+    ips_factors: ipsFactors,
+    ips_evaluation: agentCandidate.factor_scores && ipsId ? {
+      ips_id: ipsId, // Use the actual IPS ID from the state
+      ips_name: 'Agent IPS',
+      passed: failedFactors.length === 0,
+      score: agentCandidate.ips_score || 0,
+      max_score: 100,
+      score_percentage: agentCandidate.ips_score || 0,
+      passed_factors: passedFactors.map((f: any) => ({
+        factor_key: f.factor_name,
+        factor_name: f.factor_name,
+        actual_value: f.actual_value,
+        weight: f.weight || 1,
+      })),
+      failed_factors: failedFactors.map((f: any) => ({
+        factor_key: f.factor_name,
+        factor_name: f.factor_name,
+        actual_value: f.actual_value,
+        expected_value: f.target_value,
+        weight: f.weight || 1,
+      })),
+    } : undefined,
   };
 }
 
@@ -60,8 +96,8 @@ export async function evaluateTradesWithAI(state: any): Promise<Partial<any>> {
         try {
           console.log(`[AIEvaluation] Evaluating ${candidate.symbol}...`);
 
-          // Convert to TradeCandidate format
-          const tradeCandidate = convertToTradeCandidate(candidate);
+          // Convert to TradeCandidate format with IPS ID
+          const tradeCandidate = convertToTradeCandidate(candidate, state.ipsId);
 
           // Get AI-enhanced evaluation with live news and full context
           const evaluation = await recommendationService.getRecommendation({
@@ -109,6 +145,9 @@ export async function evaluateTradesWithAI(state: any): Promise<Partial<any>> {
             data_quality: evaluation.enriched_context.data_quality,
             has_live_news: evaluation.enriched_context.data_quality.has_live_news,
             overall_confidence: evaluation.enriched_context.data_quality.overall_confidence,
+
+            // Historical Performance Data
+            historical_performance: evaluation.enriched_context.historical_performance,
 
             // Full evaluation reference (for debugging/analysis)
             ai_evaluation_id: (evaluation as any).evaluation_id, // If saved

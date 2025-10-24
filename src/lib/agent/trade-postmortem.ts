@@ -864,8 +864,8 @@ async function analyzeTradeSnapshots(
       lowest_pnl_percent: lowestPnl,
       max_delta_reached: maxDelta,
       days_above_50pct_profit: daysAbove50Pct,
-      behavioral_flags,
-      critical_moments,
+      behavioral_flags: behavioralFlags,
+      critical_moments: criticalMoments,
     };
   } catch (error) {
     console.error(`[PostMortem] Error analyzing snapshots:`, error);

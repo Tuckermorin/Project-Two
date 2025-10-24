@@ -254,6 +254,7 @@ CREATE OR REPLACE VIEW v_rationales_with_outcomes AS
 SELECT
   tre.id,
   tre.trade_evaluation_id,
+  tre.user_id,
   ate.symbol,
   ate.strategy_type,
   ate.ai_recommendation,

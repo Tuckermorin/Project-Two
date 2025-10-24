@@ -8,6 +8,7 @@ import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import type { EnrichedTradeContext } from './trade-context-enrichment-service';
 import type { AIEvaluation } from './ai-trade-evaluator';
+import { generateEmbedding } from './ollama-embedding-service';
 
 // ============================================================================
 // Types
@@ -554,16 +555,10 @@ You never provide generic advice - every insight is specific to the trade at han
   }
 
   /**
-   * Create OpenAI embedding
+   * Create embedding using Ollama qwen3-embedding (4096 dimensions)
    */
   private async createEmbedding(text: string): Promise<number[]> {
-    const response = await this.openai.embeddings.create({
-      model: 'text-embedding-3-small',
-      input: text,
-      dimensions: 1536
-    });
-
-    return response.data[0].embedding;
+    return generateEmbedding(text);
   }
 
   /**

@@ -764,6 +764,92 @@ export class AlphaVantageClient {
     };
   }
 
+  // ---------- Earnings Call Transcripts ----------
+  async getEarningsCallTranscript(symbol: string, options?: {
+    year?: string;
+    quarter?: string;
+  }) {
+    const params: Record<string, string> = {
+      function: 'EARNINGS_CALL_TRANSCRIPT',
+      symbol: symbol.toUpperCase()
+    };
+
+    if (options?.year) params.year = options.year;
+    if (options?.quarter) params.quarter = options.quarter;
+
+    const data = await this.makeRequest<any>(params);
+
+    // Parse transcript sections
+    const transcript = data?.transcript || '';
+    const sections = this.parseTranscriptSections(transcript);
+
+    return {
+      symbol: symbol.toUpperCase(),
+      year: options?.year || null,
+      quarter: options?.quarter || null,
+      transcript: transcript,
+      sections: sections,
+      metadata: {
+        length: transcript.length,
+        word_count: transcript.split(/\s+/).length,
+        section_count: sections.length
+      }
+    };
+  }
+
+  private parseTranscriptSections(transcript: string) {
+    const sections: Array<{
+      speaker?: string;
+      title?: string;
+      content: string;
+      sentiment_hint?: string;
+    }> = [];
+
+    // Split by common section headers
+    const headerPatterns = [
+      /^([A-Z][a-zA-Z\s]+):\s*$/m,  // Speaker names
+      /^=+\s*([A-Z\s]+)\s*=+$/m,    // Section headers
+      /^-+\s*([A-Z\s]+)\s*-+$/m     // Alternative headers
+    ];
+
+    // Simple split by paragraphs for now
+    const paragraphs = transcript.split(/\n\n+/);
+
+    for (const para of paragraphs) {
+      if (para.trim().length > 50) {  // Skip very short sections
+        const speakerMatch = para.match(/^([A-Z][a-zA-Z\s,\.]+):/);
+        sections.push({
+          speaker: speakerMatch ? speakerMatch[1].trim() : undefined,
+          content: para.trim(),
+          sentiment_hint: this.detectSentimentKeywords(para)
+        });
+      }
+    }
+
+    return sections;
+  }
+
+  private detectSentimentKeywords(text: string): string {
+    const lowerText = text.toLowerCase();
+
+    const positive = ['growth', 'strong', 'exceed', 'success', 'improve', 'positive', 'increase', 'opportunity'];
+    const negative = ['decline', 'decrease', 'weak', 'concern', 'challenge', 'risk', 'lower', 'miss'];
+
+    let posCount = 0;
+    let negCount = 0;
+
+    for (const word of positive) {
+      if (lowerText.includes(word)) posCount++;
+    }
+    for (const word of negative) {
+      if (lowerText.includes(word)) negCount++;
+    }
+
+    if (posCount > negCount) return 'positive';
+    if (negCount > posCount) return 'negative';
+    return 'neutral';
+  }
+
   async getInsiderTransactions(symbol: string, limit = 100) {
     const data = await this.makeRequest<any>({
       function: 'INSIDER_TRANSACTIONS',

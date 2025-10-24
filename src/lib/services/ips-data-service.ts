@@ -54,23 +54,8 @@ interface FactorDefinition {
 }
 
 // Trading strategies definition (static configuration, not data)
+// Only showing active strategies (Put/Call Credit Spreads)
 const TRADING_STRATEGIES: TradingStrategy[] = [
-  {
-    id: 'buy-hold-stocks',
-    name: 'Buy & Hold Stocks',
-    description: 'Long-term equity investment strategy',
-    requiredFactorTypes: ['quantitative'],
-    recommendedFactors: [
-      'Market Capitalization',
-      'P/E Ratio',
-      'Revenue Growth',
-      'Dividend Yield',
-      'Return on Equity',
-      'Management Quality',
-      'Economic Moat',
-      'Beta'
-    ]
-  },
   {
     id: 'put-credit-spreads',
     name: 'Put Credit Spreads',
@@ -98,38 +83,6 @@ const TRADING_STRATEGIES: TradingStrategy[] = [
       'Theta',
       'Resistance Levels',
       'Regulatory Environment',
-      'Volume',
-      'Economic Moat',
-      'Theta'
-    ]
-  },
-  {
-    id: 'iron-condors',
-    name: 'Iron Condors',
-    description: 'Range-bound strategies for low volatility periods',
-    requiredFactorTypes: ['quantitative', 'options'],
-    recommendedFactors: [
-      'Implied Volatility',
-      'Delta',
-      'Theta',
-      'Gamma',
-      'Beta',
-      'Economic Moat',
-      'IV Rank',
-      'Volume'
-    ]
-  },
-  {
-    id: 'covered-calls',
-    name: 'Covered Calls',
-    description: 'Income generation on existing equity positions',
-    requiredFactorTypes: ['quantitative', 'options'],
-    recommendedFactors: [
-      'Dividend Yield',
-      'Delta',
-      'Time Value',
-      'Beta',
-      'Management Quality',
       'Volume',
       'Economic Moat',
       'Theta'

@@ -6,6 +6,13 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from '@/components/ui/dialog';
+import {
   Info,
   TrendingUp,
   TrendingDown,
@@ -19,7 +26,8 @@ import {
   Zap,
   ChevronDown,
   ChevronUp,
-  Brain
+  Brain,
+  ExternalLink
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -342,6 +350,91 @@ export function EnhancedAIAnalysis({ candidate }: EnhancedAIAnalysisProps) {
                               </li>
                             ))}
                           </ul>
+                        </div>
+                      )}
+
+                      {/* Historical Trades Summary */}
+                      {candidate.historical_performance?.recent_trades && candidate.historical_performance.recent_trades.length > 0 && (
+                        <div className="mt-4 pt-4 border-t border-border">
+                          <p className="text-xs font-semibold text-muted-foreground mb-2">
+                            Recent Trades ({candidate.historical_performance.total_trades} total, {candidate.historical_performance.win_rate.toFixed(0)}% win rate)
+                          </p>
+                          <div className="space-y-2">
+                            {candidate.historical_performance.recent_trades.slice(0, 5).map((trade: any) => {
+                              const isWin = trade.realized_pl_percent > 0;
+                              const tradeDate = new Date(trade.created_at).toLocaleDateString();
+
+                              return (
+                                <Dialog key={trade.id}>
+                                  <DialogTrigger asChild>
+                                    <div className="flex items-center justify-between p-2 rounded-lg hover:bg-muted/50 cursor-pointer transition-colors border border-border">
+                                      <div className="flex items-center gap-2">
+                                        {isWin ? (
+                                          <TrendingUp className="h-4 w-4 text-green-500" />
+                                        ) : (
+                                          <TrendingDown className="h-4 w-4 text-red-500" />
+                                        )}
+                                        <div>
+                                          <p className="text-sm font-medium">{trade.strategy_type.replace(/_/g, ' ')}</p>
+                                          <p className="text-xs text-muted-foreground">{tradeDate}</p>
+                                        </div>
+                                      </div>
+                                      <div className="flex items-center gap-2">
+                                        <Badge variant={isWin ? "default" : "destructive"} className="text-xs">
+                                          {isWin ? '+' : ''}{trade.realized_pl_percent.toFixed(2)}%
+                                        </Badge>
+                                        <ExternalLink className="h-3 w-3 text-muted-foreground" />
+                                      </div>
+                                    </div>
+                                  </DialogTrigger>
+                                  <DialogContent>
+                                    <DialogHeader>
+                                      <DialogTitle>Trade Details</DialogTitle>
+                                    </DialogHeader>
+                                    <div className="space-y-3">
+                                      <div>
+                                        <p className="text-xs font-semibold text-muted-foreground">Strategy</p>
+                                        <p className="text-sm">{trade.strategy_type.replace(/_/g, ' ')}</p>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                          <p className="text-xs font-semibold text-muted-foreground">Opened</p>
+                                          <p className="text-sm">{new Date(trade.created_at).toLocaleString()}</p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs font-semibold text-muted-foreground">Closed</p>
+                                          <p className="text-sm">{new Date(trade.closed_at).toLocaleString()}</p>
+                                        </div>
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-3">
+                                        <div>
+                                          <p className="text-xs font-semibold text-muted-foreground">P/L</p>
+                                          <p className={cn("text-sm font-semibold", isWin ? "text-green-600" : "text-red-600")}>
+                                            ${trade.realized_pl.toFixed(2)}
+                                          </p>
+                                        </div>
+                                        <div>
+                                          <p className="text-xs font-semibold text-muted-foreground">P/L %</p>
+                                          <p className={cn("text-sm font-semibold", isWin ? "text-green-600" : "text-red-600")}>
+                                            {isWin ? '+' : ''}{trade.realized_pl_percent.toFixed(2)}%
+                                          </p>
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <p className="text-xs font-semibold text-muted-foreground">Trade ID</p>
+                                        <p className="text-xs text-muted-foreground font-mono">{trade.id}</p>
+                                      </div>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                              );
+                            })}
+                          </div>
+                          {candidate.historical_performance.total_trades > 5 && (
+                            <p className="text-xs text-muted-foreground mt-2 text-center">
+                              Showing 5 of {candidate.historical_performance.total_trades} trades
+                            </p>
+                          )}
                         </div>
                       )}
                     </div>

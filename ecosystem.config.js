@@ -6,7 +6,7 @@ module.exports = {
     {
       name: 'tenxiv-scheduler',
       script: 'npx',
-      args: 'tsx scripts/start-all-schedulers.ts',
+      args: 'tsx scripts/schedulers/start-all-schedulers.ts',
       cwd: __dirname,
       instances: 1,
       autorestart: true,

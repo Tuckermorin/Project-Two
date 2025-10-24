@@ -39,6 +39,8 @@ interface ActionTrade {
   underlyingPrice?: number | null
   ipsName?: string | null
   closeMeta?: Record<string, any>
+  shortStrike?: number | null
+  longStrike?: number | null
   [key: string]: any
 }
 
@@ -68,10 +70,30 @@ const currencyFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 })
 
+function parseLocalDate(dateStr: string | null): Date | null {
+  if (!dateStr) return null
+  // Parse date as local time to avoid timezone shifts
+  // Format: YYYY-MM-DD
+  const parts = dateStr.split('-')
+  if (parts.length !== 3) return null
+  const year = parseInt(parts[0], 10)
+  const month = parseInt(parts[1], 10) - 1 // months are 0-indexed
+  const day = parseInt(parts[2], 10)
+  const date = new Date(year, month, day)
+  return Number.isNaN(date.getTime()) ? null : date
+}
+
+function formatLocalDate(dateStr: string | null): string {
+  if (!dateStr) return '—'
+  const date = parseLocalDate(dateStr)
+  if (!date) return '—'
+  return date.toLocaleDateString()
+}
+
 function daysToExpiry(exp: string | null): number | null {
   if (!exp) return null
-  const d = new Date(exp)
-  if (Number.isNaN(d.getTime())) return null
+  const d = parseLocalDate(exp)
+  if (!d) return null
   // Options expire at 4PM ET on expiration day, so set to 4PM (16:00) for accurate DTE
   const expiry = new Date(d)
   expiry.setHours(16, 0, 0, 0)
@@ -134,6 +156,8 @@ export function ActionNeededTradesPanel() {
             ipsScore: typeof row.ips_score === 'number' ? row.ips_score : null,
             underlyingPrice: typeof row.current_price === 'number' ? row.current_price : null,
             ipsName: stored.ipsName ?? row.ips_name ?? row.ips_configurations?.name ?? null,
+            shortStrike: typeof row.short_strike === 'number' ? row.short_strike : null,
+            longStrike: typeof row.long_strike === 'number' ? row.long_strike : null,
             closeMeta: stored,
             raw: row,
           }
@@ -360,6 +384,8 @@ export function ActionNeededTradesPanel() {
                     <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Symbol</th>
                     <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">IPS</th>
                     <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Contract</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Short Strike</th>
+                    <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Long Strike</th>
                     <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Exp Date</th>
                     <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">DTE</th>
                     <th className="border border-[var(--glass-border)] px-3 py-2 text-left text-foreground">Contracts</th>
@@ -383,12 +409,14 @@ export function ActionNeededTradesPanel() {
                         </td>
                         <td className="border border-[var(--glass-border)] px-3 py-2">
                           <div className="font-medium">{trade.name}</div>
-                          <div className="text-xs text-gray-500">{trade.createdAt ? new Date(trade.createdAt).toLocaleDateString() : ''}</div>
+                          <div className="text-xs text-gray-500">{trade.createdAt ? formatLocalDate(trade.createdAt.split('T')[0]) : ''}</div>
                         </td>
                         <td className="border border-[var(--glass-border)] px-3 py-2">{trade.symbol}</td>
                         <td className="border border-[var(--glass-border)] px-3 py-2">{trade.ipsName || '—'}</td>
                         <td className="border border-[var(--glass-border)] px-3 py-2">{trade.contractType}</td>
-                        <td className="border border-[var(--glass-border)] px-3 py-2">{trade.expirationDate ? new Date(trade.expirationDate).toLocaleDateString() : '—'}</td>
+                        <td className="border border-[var(--glass-border)] px-3 py-2">{trade.shortStrike != null ? trade.shortStrike.toFixed(2) : '—'}</td>
+                        <td className="border border-[var(--glass-border)] px-3 py-2">{trade.longStrike != null ? trade.longStrike.toFixed(2) : '—'}</td>
+                        <td className="border border-[var(--glass-border)] px-3 py-2">{formatLocalDate(trade.expirationDate)}</td>
                         <td className="border border-[var(--glass-border)] px-3 py-2">
                           {trade.dte === null ? '—' : (
                             <Badge variant={trade.dte <= 0 ? 'destructive' : 'outline'}>

@@ -51,3 +51,7 @@ out
 .tmp
 .vscode/.history
 *.log
+
+# temporary/marker files
+agent-run-marker.txt
+analysis-log.txt

@@ -202,15 +202,13 @@ export async function POST(req: NextRequest) {
     if (typeof min_dte !== 'number' || typeof max_dte !== 'number') {
       return new Response(JSON.stringify({ error: 'min_dte and max_dte are required and must be numbers' }), { status: 400 });
     }
-    if (min_dte < 1) {
-      return new Response(JSON.stringify({ error: 'min_dte must be at least 1 day' }), { status: 400 });
+    if (min_dte < 0) {
+      return new Response(JSON.stringify({ error: 'min_dte must be at least 0 days' }), { status: 400 });
     }
     if (max_dte < min_dte) {
       return new Response(JSON.stringify({ error: 'max_dte must be greater than or equal to min_dte' }), { status: 400 });
     }
-    if (max_dte > 365) {
-      return new Response(JSON.stringify({ error: 'max_dte cannot exceed 365 days' }), { status: 400 });
-    }
+    // Removed hardcoded max_dte limit - users can set any reasonable value
 
     const user_id = user.id;
 
@@ -223,8 +221,9 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      if (typeof f.weight !== 'number' || f.weight < 1 || f.weight > 10) {
-        return new Response(JSON.stringify({ error: `weight must be 1..10 for ${(f as any).factor_name || (f as any).name || (f as any).factor_id}` }), { status: 400 });
+      // Remove hardcoded weight limits - allow any positive number
+      if (typeof f.weight !== 'number' || f.weight < 0) {
+        return new Response(JSON.stringify({ error: `weight must be a positive number for ${(f as any).factor_name || (f as any).name || (f as any).factor_id}` }), { status: 400 });
       }
     }
 
@@ -391,15 +390,13 @@ export async function PUT(req: NextRequest) {
       if (typeof min_dte !== 'number' || typeof max_dte !== 'number') {
         return new Response(JSON.stringify({ error: 'min_dte and max_dte must be numbers' }), { status: 400 });
       }
-      if (min_dte < 1) {
-        return new Response(JSON.stringify({ error: 'min_dte must be at least 1 day' }), { status: 400 });
+      if (min_dte < 0) {
+        return new Response(JSON.stringify({ error: 'min_dte must be at least 0 days' }), { status: 400 });
       }
       if (max_dte < min_dte) {
         return new Response(JSON.stringify({ error: 'max_dte must be greater than or equal to min_dte' }), { status: 400 });
       }
-      if (max_dte > 365) {
-        return new Response(JSON.stringify({ error: 'max_dte cannot exceed 365 days' }), { status: 400 });
-      }
+      // Removed hardcoded max_dte limit - users can set any reasonable value
     }
 
     // Build update object

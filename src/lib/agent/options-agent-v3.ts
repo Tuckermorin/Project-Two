@@ -774,7 +774,9 @@ async function filterHighWeightFactors(state: AgentState): Promise<Partial<Agent
           name: factor.display_name || factor.factor_key,
           weight: factor.weight,
           score: factorScore,
-          passed: result.pass
+          passed: result.pass,
+          actual_value: result.value,
+          target_value: factor.target_value || factor.threshold
         });
       }
 
@@ -1093,7 +1095,7 @@ function evaluateChainFactor(
   factor: any,
   candidate: any,
   marketData: any
-): { pass: boolean; reason?: string } {
+): { pass: boolean; reason?: string; value?: any } {
   const shortLeg = candidate.contract_legs?.find((l: any) => l.type === "SELL");
 
   switch (factor.factor_key) {
@@ -1108,12 +1110,12 @@ function evaluateChainFactor(
       const tolerance = 0.03;
 
       if (factor.direction === 'lte' && delta > threshold + tolerance) {
-        return { pass: false, reason: `Delta ${delta.toFixed(4)} exceeds ${threshold} (with ${tolerance} tolerance)` };
+        return { pass: false, reason: `Delta ${delta.toFixed(4)} exceeds ${threshold} (with ${tolerance} tolerance)`, value: delta };
       }
       if (factor.direction === 'gte' && delta < threshold - tolerance) {
-        return { pass: false, reason: `Delta ${delta.toFixed(4)} below ${threshold} (with ${tolerance} tolerance)` };
+        return { pass: false, reason: `Delta ${delta.toFixed(4)} below ${threshold} (with ${tolerance} tolerance)`, value: delta };
       }
-      return { pass: true };
+      return { pass: true, value: delta };
 
     case 'opt-iv-rank':
       // IV Rank is pre-calculated in preFilterGeneral and stored in marketData
@@ -1123,24 +1125,24 @@ function evaluateChainFactor(
       if (ivRank === null) {
         // If no IV rank data, pass through (fail-open)
         console.log(`[FilterHighWeight] No IV Rank data available for ${candidate.symbol}, passing through`);
-        return { pass: true };
+        return { pass: true, value: null };
       }
 
       const ivThreshold = factor.threshold || 0;
       if (factor.direction === 'gte' && ivRank < ivThreshold) {
-        return { pass: false, reason: `IV Rank ${ivRank.toFixed(1)} below ${ivThreshold}` };
+        return { pass: false, reason: `IV Rank ${ivRank.toFixed(1)} below ${ivThreshold}`, value: ivRank };
       }
       if (factor.direction === 'lte' && ivRank > ivThreshold) {
-        return { pass: false, reason: `IV Rank ${ivRank.toFixed(1)} exceeds ${ivThreshold}` };
+        return { pass: false, reason: `IV Rank ${ivRank.toFixed(1)} exceeds ${ivThreshold}`, value: ivRank };
       }
-      return { pass: true };
+      return { pass: true, value: ivRank };
 
     case 'opt-open-interest':
       const oi = shortLeg?.oi || 0;
       if (factor.direction === 'gte' && oi < (factor.threshold || 0)) {
-        return { pass: false, reason: `OI ${oi} below ${factor.threshold}` };
+        return { pass: false, reason: `OI ${oi} below ${factor.threshold}`, value: oi };
       }
-      return { pass: true };
+      return { pass: true, value: oi };
 
     case 'opt-bid-ask-spread':
       const spread = shortLeg?.ask && shortLeg?.bid ? Math.abs(shortLeg.ask - shortLeg.bid) : 999;
@@ -1148,19 +1150,19 @@ function evaluateChainFactor(
       const spreadTolerance = 0.02; // Allow spreads up to $0.02 above threshold
 
       if (factor.direction === 'lte' && spread > spreadThreshold + spreadTolerance) {
-        return { pass: false, reason: `Spread $${spread.toFixed(2)} exceeds $${spreadThreshold.toFixed(2)}` };
+        return { pass: false, reason: `Spread $${spread.toFixed(2)} exceeds $${spreadThreshold.toFixed(2)}`, value: spread };
       }
-      return { pass: true };
+      return { pass: true, value: spread };
 
     case 'opt-iv':
       const iv = shortLeg?.iv || 0;
       if (factor.direction === 'gte' && iv < (factor.threshold || 0)) {
-        return { pass: false, reason: `IV ${iv.toFixed(2)} below ${factor.threshold}` };
+        return { pass: false, reason: `IV ${iv.toFixed(2)} below ${factor.threshold}`, value: iv };
       }
       if (factor.direction === 'lte' && iv > (factor.threshold || 999)) {
-        return { pass: false, reason: `IV ${iv.toFixed(2)} exceeds ${factor.threshold}` };
+        return { pass: false, reason: `IV ${iv.toFixed(2)} exceeds ${factor.threshold}`, value: iv };
       }
-      return { pass: true };
+      return { pass: true, value: iv };
 
     case 'calc-iv-percentile':
       // IV Percentile is pre-calculated in preFilterGeneral and stored in marketData
@@ -1170,20 +1172,20 @@ function evaluateChainFactor(
       if (ivPercentile === null) {
         // If no IV percentile data, pass through (fail-open)
         console.log(`[FilterHighWeight] No IV Percentile data available for ${candidate.symbol}, passing through`);
-        return { pass: true };
+        return { pass: true, value: null };
       }
 
       const ivpThreshold = factor.threshold || 0;
       if (factor.direction === 'gte' && ivPercentile < ivpThreshold) {
-        return { pass: false, reason: `IV Percentile ${ivPercentile.toFixed(1)} below ${ivpThreshold}` };
+        return { pass: false, reason: `IV Percentile ${ivPercentile.toFixed(1)} below ${ivpThreshold}`, value: ivPercentile };
       }
       if (factor.direction === 'lte' && ivPercentile > ivpThreshold) {
-        return { pass: false, reason: `IV Percentile ${ivPercentile.toFixed(1)} exceeds ${ivpThreshold}` };
+        return { pass: false, reason: `IV Percentile ${ivPercentile.toFixed(1)} exceeds ${ivpThreshold}`, value: ivPercentile };
       }
-      return { pass: true };
+      return { pass: true, value: ivPercentile };
 
     default:
-      return { pass: true };
+      return { pass: true, value: null };
   }
 }
 

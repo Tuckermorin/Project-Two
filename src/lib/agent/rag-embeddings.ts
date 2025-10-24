@@ -1,6 +1,7 @@
 // RAG Embedding Pipeline for Trade Historical Context
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
+import { generateEmbedding as generateOllamaEmbedding } from "@/lib/services/ollama-embedding-service";
 
 // Lazy initialization of Supabase client to ensure env vars are loaded
 let supabaseInstance: SupabaseClient | null = null;
@@ -21,72 +22,22 @@ function getSupabase(): SupabaseClient {
   return supabaseInstance;
 }
 
-// Determine which embedding provider to use
-// Prefer OpenAI if API key is available, otherwise fall back to Ollama
+// Keep OpenAI for chat completions (GPT-4 analysis)
 const openai = process.env.OPENAI_API_KEY
   ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
   : null;
 
-const USE_OLLAMA = !openai && !!process.env.OLLAMA_HOST;
-const OLLAMA_HOST = process.env.OLLAMA_HOST || "http://localhost:11434";
-const OLLAMA_MODEL = process.env.OLLAMA_MODEL || "llama3";
-
 // ============================================================================
-// Embedding Creation
+// Embedding Creation (Now using Ollama qwen3-embedding with 4096 dimensions)
 // ============================================================================
 
 /**
- * Generate embedding vector using Ollama
- */
-async function generateOllamaEmbedding(text: string): Promise<number[]> {
-  const response = await fetch(`${OLLAMA_HOST}/api/embeddings`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: OLLAMA_MODEL,
-      prompt: text,
-    }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`Ollama embedding failed: ${response.statusText}`);
-  }
-
-  const data = await response.json();
-  return data.embedding;
-}
-
-/**
- * Generate embedding vector using OpenAI
- */
-async function generateOpenAIEmbedding(text: string): Promise<number[]> {
-  if (!openai) {
-    throw new Error("OpenAI client not initialized - missing API key");
-  }
-
-  const embeddingResponse = await openai.embeddings.create({
-    model: "text-embedding-3-small",
-    input: text,
-  });
-
-  return embeddingResponse.data[0].embedding;
-}
-
-/**
- * Generate embedding using configured provider (Ollama or OpenAI)
+ * Generate embedding using Ollama qwen3-embedding (4096 dimensions)
+ * Uses the centralized ollama-embedding-service
  */
 async function generateEmbedding(text: string): Promise<number[]> {
-  if (USE_OLLAMA) {
-    console.log(`[RAG] Using Ollama for embeddings (${OLLAMA_HOST})`);
-    return generateOllamaEmbedding(text);
-  } else if (openai) {
-    console.log(`[RAG] Using OpenAI for embeddings`);
-    return generateOpenAIEmbedding(text);
-  } else {
-    throw new Error(
-      "No embedding provider available. Set OPENAI_API_KEY (with billing) or OLLAMA_HOST in .env"
-    );
-  }
+  console.log(`[RAG] Using Ollama qwen3-embedding for embeddings (4096 dimensions)`);
+  return generateOllamaEmbedding(text);
 }
 
 /**
@@ -420,13 +371,103 @@ export async function analyzeHistoricalPerformance(
   candidate: any,
   ipsId?: string
 ): Promise<HistoricalAnalysis> {
+  // Try semantic similarity search first (embedding-based RAG)
   const similarTrades = await findSimilarTrades(candidate, {
     matchThreshold: 0.75,
     matchCount: 20,
     ipsId,
   });
 
-  if (similarTrades.length === 0) {
+  if (similarTrades.length > 0) {
+    // Use RAG embeddings if available
+    const wins = similarTrades.filter((t) => t.metadata?.win === true).length;
+    const winRate = wins / similarTrades.length;
+
+    const rois = similarTrades
+      .map((t) => t.metadata?.realized_pnl_percent)
+      .filter((roi) => roi != null);
+    const avgRoi = rois.length > 0 ? rois.reduce((a, b) => a + b, 0) / rois.length : 0;
+
+    // Determine confidence based on sample size and similarity
+    const avgSimilarity =
+      similarTrades.reduce((sum, t) => sum + t.similarity, 0) / similarTrades.length;
+    const confidence =
+      similarTrades.length >= 10 && avgSimilarity >= 0.85
+        ? "high"
+        : similarTrades.length >= 5 && avgSimilarity >= 0.75
+          ? "medium"
+          : "low";
+
+    console.log(`[RAG] Using embedding-based historical analysis: ${similarTrades.length} similar trades, ${(winRate * 100).toFixed(1)}% win rate`);
+
+    return {
+      has_data: true,
+      trade_count: similarTrades.length,
+      win_rate: winRate,
+      avg_roi: avgRoi,
+      avg_hold_days: 0,
+      similar_trades: similarTrades,
+      confidence,
+    };
+  }
+
+  // Fallback: Query direct symbol-based historical trades
+  console.log(`[RAG] No embeddings found, falling back to symbol-based historical data for ${candidate.symbol}`);
+
+  try {
+    const supabase = getSupabase();
+    const { data: trades, error } = await supabase
+      .from('trades')
+      .select('id, realized_pl_percent, created_at, closed_at, status')
+      .eq('symbol', candidate.symbol)
+      .eq('status', 'closed')
+      .not('realized_pl_percent', 'is', null)
+      .order('closed_at', { ascending: false })
+      .limit(50);
+
+    if (error || !trades || trades.length === 0) {
+      console.log(`[RAG] No closed trades found for ${candidate.symbol}`);
+      return {
+        has_data: false,
+        trade_count: 0,
+        win_rate: 0,
+        avg_roi: 0,
+        avg_hold_days: 0,
+        similar_trades: [],
+        confidence: "low",
+      };
+    }
+
+    // Calculate statistics from symbol-based trades
+    const wins = trades.filter((t) => t.realized_pl_percent > 0).length;
+    const winRate = wins / trades.length;
+    const avgRoi = trades.reduce((sum, t) => sum + t.realized_pl_percent, 0) / trades.length;
+
+    const confidence =
+      trades.length >= 10 ? "high"
+      : trades.length >= 5 ? "medium"
+      : "low";
+
+    console.log(`[RAG] Found ${trades.length} closed trades for ${candidate.symbol}: ${(winRate * 100).toFixed(1)}% win rate, ${avgRoi.toFixed(2)}% avg ROI`);
+
+    return {
+      has_data: true,
+      trade_count: trades.length,
+      win_rate: winRate,
+      avg_roi: avgRoi,
+      avg_hold_days: 0,
+      similar_trades: trades.map(t => ({
+        trade_id: t.id,
+        similarity: 1.0, // Direct symbol match = 100% similar
+        metadata: {
+          win: t.realized_pl_percent > 0,
+          realized_pnl_percent: t.realized_pl_percent,
+        }
+      })),
+      confidence,
+    };
+  } catch (error: any) {
+    console.error(`[RAG] Error fetching symbol-based historical data:`, error.message);
     return {
       has_data: false,
       trade_count: 0,
@@ -437,35 +478,6 @@ export async function analyzeHistoricalPerformance(
       confidence: "low",
     };
   }
-
-  // Calculate statistics
-  const wins = similarTrades.filter((t) => t.metadata?.win === true).length;
-  const winRate = wins / similarTrades.length;
-
-  const rois = similarTrades
-    .map((t) => t.metadata?.realized_pnl_percent)
-    .filter((roi) => roi != null);
-  const avgRoi = rois.length > 0 ? rois.reduce((a, b) => a + b, 0) / rois.length : 0;
-
-  // Determine confidence based on sample size and similarity
-  const avgSimilarity =
-    similarTrades.reduce((sum, t) => sum + t.similarity, 0) / similarTrades.length;
-  const confidence =
-    similarTrades.length >= 10 && avgSimilarity >= 0.85
-      ? "high"
-      : similarTrades.length >= 5 && avgSimilarity >= 0.75
-        ? "medium"
-        : "low";
-
-  return {
-    has_data: true,
-    trade_count: similarTrades.length,
-    win_rate: winRate,
-    avg_roi: avgRoi,
-    avg_hold_days: 0, // TODO: Calculate from entry/exit dates
-    similar_trades: similarTrades,
-    confidence,
-  };
 }
 
 // ============================================================================
