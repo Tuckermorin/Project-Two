@@ -29,7 +29,7 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from '@/components/ui/popover'
-import { evaluateExitStrategy, type ExitSignal } from '@/lib/utils/watch-criteria-evaluator'
+import { evaluateExitStrategy, evaluateWatchCriteria, type ExitSignal, type WatchAlert } from '@/lib/utils/watch-criteria-evaluator'
 import TradeStatsCards from './trade-stats-cards'
 
 // Column definition
@@ -141,6 +141,7 @@ interface Trade {
   plPercent?: number
   notes?: string
   exitSignal?: ExitSignal | null
+  watchAlerts?: WatchAlert[]
   [key: string]: any // For dynamic IPS factor columns
 }
 
@@ -373,18 +374,33 @@ export default function ExcelStyleTradesDashboard() {
           const short = Number(r.short_strike ?? r.strike_price_short ?? 0) || 0
           const percentToShort = short > 0 ? ((current - short) / short) * 100 : 0
           const exp = r.expiration_date || ''
-          // WATCH only if IPS score < 75 or % to short < 5%
           const ipsScore = typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined
-          const watch = (ipsScore != null && ipsScore < 75) || (short > 0 && percentToShort < 5)
-          console.log(`[Dashboard] Trade ${r.symbol}: current=${current}, short=${short}, percentToShort=${percentToShort.toFixed(2)}%, ipsScore=${ipsScore}, watch=${watch}`)
 
-          // Evaluate exit strategy if IPS exists
+          // Evaluate IPS if exists
           const ips = r.ips_id ? ipsMap[r.ips_id] : null
-          console.log(`[Dashboard] Trade ${r.symbol}: ips_id=${r.ips_id}, ips found=${!!ips}, exit_strategies=${!!ips?.exit_strategies}`)
 
           // For credit spreads, use the spread price (current_spread_price) for exit evaluation
           // This is the actual cost to close the spread, not the underlying stock price
           const spreadPrice = r.current_spread_price ? Number(r.current_spread_price) : undefined
+
+          // Evaluate watch criteria from IPS configuration
+          let watchAlerts: WatchAlert[] = []
+          if (ips?.watch_criteria?.enabled) {
+            const tradeForWatch = {
+              id: r.id,
+              symbol: r.symbol,
+              current_price: current,  // Use underlying stock price for watch criteria
+              entry_price: Number(r.entry_price ?? 0),
+              short_strike: short,
+              ips_id: r.ips_id,
+              ips_score: ipsScore,
+              trade_factors: r.trade_factors || []
+            }
+            watchAlerts = evaluateWatchCriteria(tradeForWatch, ips)
+          }
+          const hasTriggeredWatchAlerts = watchAlerts.some(a => a.triggered)
+
+          // Evaluate exit strategy
           const tradeForEval = {
             current_price: spreadPrice,  // Use spread price for exit evaluation
             entry_price: Number(r.entry_price ?? r.credit_received ?? 0),
@@ -393,19 +409,15 @@ export default function ExcelStyleTradesDashboard() {
             max_gain: Number(r.max_gain ?? 0),
             max_loss: Number(r.max_loss ?? 0),
           }
-          console.log(`[Dashboard] Trade ${r.symbol} eval data:`, tradeForEval)
-          console.log(`[Dashboard] IPS exit_strategies:`, ips?.exit_strategies)
-
           const exitSignal = ips?.exit_strategies ? evaluateExitStrategy(tradeForEval, ips.exit_strategies) : null
-          console.log(`[Dashboard] Trade ${r.symbol} exitSignal:`, exitSignal)
 
           let status: 'GOOD' | 'WATCH' | 'EXIT' = 'GOOD'
           if (exitSignal?.shouldExit) {
-            console.log(`[Dashboard] Trade ${r.symbol} marked as EXIT due to: ${exitSignal.reason}`)
             status = 'EXIT'
-          } else if (watch) {
+          } else if (hasTriggeredWatchAlerts) {
             status = 'WATCH'
           } else if (percentToShort < 0) {
+            // Stock breached short strike
             status = 'EXIT'
           }
 
@@ -452,6 +464,7 @@ export default function ExcelStyleTradesDashboard() {
             ipsName: r.ips_name ?? r.ips_configurations?.name ?? null,
             plPercent: typeof r.pl_percent === 'number' ? Number(r.pl_percent) : undefined,
             exitSignal,
+            watchAlerts,
           }
           return obj
         })
@@ -577,10 +590,27 @@ export default function ExcelStyleTradesDashboard() {
             const short = Number(r.short_strike ?? r.strike_price_short ?? 0) || 0
             const percentToShort = short > 0 ? ((current - short) / short) * 100 : 0
             const ipsScore = typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined
-            const watch = (ipsScore != null && ipsScore < 75) || (short > 0 && percentToShort < 5)
 
             const ips = r.ips_id ? ipsMap[r.ips_id] : null
             const spreadPrice = r.current_spread_price ? Number(r.current_spread_price) : undefined
+
+            // Evaluate watch criteria from IPS configuration
+            let watchAlerts: WatchAlert[] = []
+            if (ips?.watch_criteria?.enabled) {
+              const tradeForWatch = {
+                id: r.id,
+                symbol: r.symbol,
+                current_price: current,
+                entry_price: Number(r.entry_price ?? 0),
+                short_strike: short,
+                ips_id: r.ips_id,
+                ips_score: ipsScore,
+                trade_factors: r.trade_factors || []
+              }
+              watchAlerts = evaluateWatchCriteria(tradeForWatch, ips)
+            }
+            const hasTriggeredWatchAlerts = watchAlerts.some(a => a.triggered)
+
             const tradeForEval = {
               current_price: spreadPrice,
               entry_price: Number(r.entry_price ?? r.credit_received ?? 0),
@@ -594,7 +624,7 @@ export default function ExcelStyleTradesDashboard() {
             let status: 'GOOD' | 'WATCH' | 'EXIT' = 'GOOD'
             if (exitSignal?.shouldExit) {
               status = 'EXIT'
-            } else if (watch) {
+            } else if (hasTriggeredWatchAlerts) {
               status = 'WATCH'
             } else if (percentToShort < 0) {
               status = 'EXIT'
@@ -639,6 +669,7 @@ export default function ExcelStyleTradesDashboard() {
               ipsName: r.ips_name ?? r.ips_configurations?.name ?? null,
               plPercent: typeof r.pl_percent === 'number' ? Number(r.pl_percent) : undefined,
               exitSignal,
+              watchAlerts,
             } as Trade
           })
 

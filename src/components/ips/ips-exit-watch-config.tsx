@@ -1,7 +1,7 @@
 // src/components/ips/ips-exit-watch-config.tsx
 "use client"
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -49,11 +49,12 @@ export interface ExitStrategies {
 
 export interface WatchRule {
   id: string
-  type: 'price' | 'percentage' | 'factor'
+  type: 'price' | 'percentage' | 'factor' | 'ips_score' | 'short_strike_proximity'
   factorId?: string
   factorName?: string
   operator: 'gt' | 'lt' | 'gte' | 'lte'
   value: number
+  valueType?: 'percentage' | 'dollar' // For price/percentage types
   description: string
 }
 
@@ -107,22 +108,30 @@ export function IPSExitWatchConfig({
     initialWatchCriteria || defaultWatchCriteria
   )
 
+  // Track if this is the initial mount
+  const isInitialMount = useRef(true)
+
   // Update state when props change (for editing existing IPS)
   useEffect(() => {
-    if (initialExitStrategies) {
+    if (initialExitStrategies && !isInitialMount.current) {
       setExitStrategies(initialExitStrategies)
     }
   }, [initialExitStrategies])
 
   useEffect(() => {
-    if (initialWatchCriteria) {
+    if (initialWatchCriteria && !isInitialMount.current) {
       setWatchCriteria(initialWatchCriteria)
     }
   }, [initialWatchCriteria])
 
-  // Notify parent of changes
+  // Notify parent of changes (skip on initial mount to prevent infinite loop)
   useEffect(() => {
+    if (isInitialMount.current) {
+      isInitialMount.current = false
+      return
+    }
     onChange(exitStrategies, watchCriteria)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [exitStrategies, watchCriteria])
 
   const updateExitStrategy = (
@@ -130,22 +139,26 @@ export function IPSExitWatchConfig({
     field: string,
     value: any
   ) => {
-    setExitStrategies(prev => ({
-      ...prev,
-      [category]: {
-        ...prev[category],
-        [field]: value
+    setExitStrategies(prev => {
+      const updated = {
+        ...prev,
+        [category]: {
+          ...prev[category],
+          [field]: value
+        }
       }
-    }))
+      return updated
+    })
   }
 
   const addWatchRule = () => {
     const newRule: WatchRule = {
       id: `rule-${Date.now()}`,
-      type: 'percentage',
-      operator: 'gte',
-      value: 10,
-      description: 'New watch rule'
+      type: 'short_strike_proximity',
+      operator: 'lte',
+      value: 5,
+      valueType: 'percentage',
+      description: 'Alert when stock price is within % of short strike'
     }
     setWatchCriteria(prev => ({
       ...prev,
@@ -236,10 +249,11 @@ export function IPSExitWatchConfig({
                     </Label>
                     <Input
                       type="number"
-                      value={exitStrategies.profit.value}
-                      onChange={(e) =>
-                        updateExitStrategy('profit', 'value', parseFloat(e.target.value))
-                      }
+                      value={isNaN(exitStrategies.profit.value) ? '' : exitStrategies.profit.value}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value)
+                        updateExitStrategy('profit', 'value', isNaN(val) ? 0 : val)
+                      }}
                       className="mt-1"
                     />
                   </div>
@@ -300,10 +314,11 @@ export function IPSExitWatchConfig({
                     </Label>
                     <Input
                       type="number"
-                      value={exitStrategies.loss.value}
-                      onChange={(e) =>
-                        updateExitStrategy('loss', 'value', parseFloat(e.target.value))
-                      }
+                      value={isNaN(exitStrategies.loss.value) ? '' : exitStrategies.loss.value}
+                      onChange={(e) => {
+                        const val = parseFloat(e.target.value)
+                        updateExitStrategy('loss', 'value', isNaN(val) ? 0 : val)
+                      }}
                       className="mt-1"
                     />
                   </div>
@@ -344,10 +359,11 @@ export function IPSExitWatchConfig({
                   <Label>Days Before Expiration</Label>
                   <Input
                     type="number"
-                    value={exitStrategies.time.daysBeforeExpiration}
-                    onChange={(e) =>
-                      updateExitStrategy('time', 'daysBeforeExpiration', parseInt(e.target.value))
-                    }
+                    value={isNaN(exitStrategies.time.daysBeforeExpiration) ? '' : exitStrategies.time.daysBeforeExpiration}
+                    onChange={(e) => {
+                      const val = parseInt(e.target.value)
+                      updateExitStrategy('time', 'daysBeforeExpiration', isNaN(val) ? 0 : val)
+                    }}
                     className="mt-1"
                     min="0"
                   />
@@ -412,16 +428,22 @@ export function IPSExitWatchConfig({
                         <Label>Watch Type</Label>
                         <Select
                           value={rule.type}
-                          onValueChange={(value) =>
+                          onValueChange={(value) => {
                             updateWatchRule(rule.id, 'type', value)
-                          }
+                            // Set default valueType when type changes
+                            if (value === 'price' || value === 'percentage') {
+                              updateWatchRule(rule.id, 'valueType', rule.valueType || 'dollar')
+                            }
+                          }}
                         >
                           <SelectTrigger className="mt-1">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
+                            <SelectItem value="short_strike_proximity">Stock Price vs Short Strike</SelectItem>
                             <SelectItem value="percentage">Stock % Change</SelectItem>
                             <SelectItem value="price">Stock Price</SelectItem>
+                            <SelectItem value="ips_score">IPS Score</SelectItem>
                             <SelectItem value="factor">IPS Factor</SelectItem>
                           </SelectContent>
                         </Select>
@@ -454,6 +476,36 @@ export function IPSExitWatchConfig({
                         </div>
                       )}
 
+                      {(rule.type === 'price' || rule.type === 'percentage' || rule.type === 'short_strike_proximity') && (
+                        <div>
+                          <Label>Threshold Type</Label>
+                          <Select
+                            value={rule.valueType || 'percentage'}
+                            onValueChange={(value) =>
+                              updateWatchRule(rule.id, 'valueType', value)
+                            }
+                          >
+                            <SelectTrigger className="mt-1">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="percentage">
+                                <div className="flex items-center gap-2">
+                                  <Percent className="h-4 w-4" />
+                                  Percentage
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="dollar">
+                                <div className="flex items-center gap-2">
+                                  <DollarSign className="h-4 w-4" />
+                                  Dollar Amount
+                                </div>
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      )}
+
                       <div>
                         <Label>Condition</Label>
                         <Select
@@ -475,15 +527,28 @@ export function IPSExitWatchConfig({
                       </div>
 
                       <div>
-                        <Label>Threshold Value</Label>
+                        <Label>
+                          Threshold Value
+                          {rule.type === 'short_strike_proximity'
+                            ? ` (${rule.valueType === 'percentage' ? '% from strike' : '$ from strike'})`
+                            : rule.type === 'price' || rule.type === 'percentage'
+                            ? ` (${rule.valueType === 'percentage' ? '%' : '$'})`
+                            : rule.type === 'ips_score'
+                            ? ' (0-100)'
+                            : ''
+                          }
+                        </Label>
                         <Input
                           type="number"
-                          value={rule.value}
-                          onChange={(e) =>
-                            updateWatchRule(rule.id, 'value', parseFloat(e.target.value))
-                          }
+                          value={isNaN(rule.value) ? '' : rule.value}
+                          onChange={(e) => {
+                            const val = parseFloat(e.target.value)
+                            updateWatchRule(rule.id, 'value', isNaN(val) ? 0 : val)
+                          }}
                           className="mt-1"
-                          step={rule.type === 'percentage' ? '0.1' : '1'}
+                          step={rule.type === 'percentage' || rule.valueType === 'percentage' ? '0.1' : '1'}
+                          min={rule.type === 'ips_score' ? 0 : undefined}
+                          max={rule.type === 'ips_score' ? 100 : undefined}
                         />
                       </div>
                     </div>

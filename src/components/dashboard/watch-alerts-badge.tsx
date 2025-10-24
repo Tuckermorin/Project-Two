@@ -71,5 +71,12 @@ function formatValue(value: number, type: string): string {
   if (type === 'price') {
     return `$${value.toFixed(2)}`
   }
+  if (type === 'short_strike_proximity') {
+    // Value is already formatted as either % or $ in the evaluator
+    return `${value.toFixed(2)}`
+  }
+  if (type === 'ips_score') {
+    return value.toFixed(0)
+  }
   return value.toFixed(2)
 }

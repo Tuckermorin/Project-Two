@@ -2,11 +2,12 @@
 
 export interface WatchRule {
   id: string
-  type: 'price' | 'percentage' | 'factor'
+  type: 'price' | 'percentage' | 'factor' | 'ips_score' | 'short_strike_proximity'
   factorId?: string
   factorName?: string
   operator: 'gt' | 'lt' | 'gte' | 'lte'
   value: number
+  valueType?: 'percentage' | 'dollar' // For price/percentage types
   description: string
 }
 
@@ -29,7 +30,9 @@ export interface TradeWithIPS {
   symbol: string
   current_price?: number
   entry_price?: number
+  short_strike?: number // Short strike price for options spreads
   ips_id?: string
+  ips_score?: number // IPS score for the trade (0-100)
   trade_factors?: Array<{
     factor_name: string
     factor_value: number
@@ -65,6 +68,12 @@ export function evaluateWatchCriteria(
       case 'price':
         currentValue = trade.current_price ?? null
         if (currentValue !== null) {
+          // For price-based watch, value type determines comparison
+          // If valueType is 'percentage', compare % change; if 'dollar', compare absolute price
+          if (rule.valueType === 'percentage' && trade.entry_price) {
+            // Calculate percentage change from entry
+            currentValue = ((trade.current_price - trade.entry_price) / trade.entry_price) * 100
+          }
           triggered = evaluateOperator(currentValue, rule.operator, rule.value)
         }
         break
@@ -72,8 +81,39 @@ export function evaluateWatchCriteria(
       case 'percentage':
         // Calculate percentage change from entry
         if (trade.current_price && trade.entry_price) {
-          currentValue = ((trade.current_price - trade.entry_price) / trade.entry_price) * 100
+          if (rule.valueType === 'dollar') {
+            // Dollar change from entry
+            currentValue = trade.current_price - trade.entry_price
+          } else {
+            // Percentage change from entry (default)
+            currentValue = ((trade.current_price - trade.entry_price) / trade.entry_price) * 100
+          }
           triggered = evaluateOperator(currentValue, rule.operator, rule.value)
+        }
+        break
+
+      case 'ips_score':
+        // Check if IPS score meets threshold
+        currentValue = trade.ips_score ?? null
+        if (currentValue !== null) {
+          triggered = evaluateOperator(currentValue, rule.operator, rule.value)
+        }
+        break
+
+      case 'short_strike_proximity':
+        // Check if stock price is within X% or $X of short strike
+        if (trade.current_price && trade.short_strike) {
+          if (rule.valueType === 'percentage') {
+            // Calculate percentage distance from short strike
+            const percentDistance = Math.abs((trade.current_price - trade.short_strike) / trade.short_strike) * 100
+            currentValue = percentDistance
+            triggered = evaluateOperator(currentValue, rule.operator, rule.value)
+          } else {
+            // Calculate dollar distance from short strike
+            const dollarDistance = Math.abs(trade.current_price - trade.short_strike)
+            currentValue = dollarDistance
+            triggered = evaluateOperator(currentValue, rule.operator, rule.value)
+          }
         }
         break
 
