@@ -412,6 +412,7 @@ Risk Factors: ${market_conditions.risk_factors.length > 0 ? market_conditions.ri
   /**
    * Calculate weighted score using progressive weighting strategy
    * 60/40 (IPS/AI) → 50/50 → 30/70 based on data availability
+   * If IPS has ai_weight configured, that takes precedence
    */
   private calculateWeightedScore(
     context: EnrichedTradeContext,
@@ -423,17 +424,28 @@ Risk Factors: ${market_conditions.risk_factors.length > 0 ? market_conditions.ri
     let aiWeight: number;
     let rationale: string;
 
+    // Priority 1: Force weighting (manual override)
     if (forceWeighting) {
       ipsWeight = forceWeighting.ips;
       aiWeight = forceWeighting.ai;
       rationale = 'Manual weighting override';
-    } else if (useProgressiveWeighting) {
+    }
+    // Priority 2: IPS configuration ai_weight (user-configured weight)
+    else if (context.ips_evaluation.ai_weight !== undefined && context.ips_evaluation.ai_weight !== null) {
+      // Convert percentage (0-100) to decimal (0-1)
+      aiWeight = context.ips_evaluation.ai_weight / 100;
+      ipsWeight = 1 - aiWeight;
+      rationale = `User-configured AI weight: ${context.ips_evaluation.ai_weight}% AI, ${(100 - context.ips_evaluation.ai_weight)}% IPS`;
+    }
+    // Priority 3: Progressive weighting based on data availability
+    else if (useProgressiveWeighting) {
       const weights = this.determineProgressiveWeights(context, aiEvaluation);
       ipsWeight = weights.ips;
       aiWeight = weights.ai;
       rationale = weights.rationale;
-    } else {
-      // Default 50/50
+    }
+    // Priority 4: Default 50/50
+    else {
       ipsWeight = 0.5;
       aiWeight = 0.5;
       rationale = 'Default balanced weighting';

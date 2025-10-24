@@ -46,6 +46,7 @@ export interface IPSEvaluation {
   score: number;
   max_score: number;
   score_percentage: number;
+  ai_weight?: number; // AI weight percentage (0-100) from IPS configuration
   failed_factors: Array<{
     factor_key: string;
     factor_name: string;
@@ -264,6 +265,7 @@ export class TradeContextEnrichmentService {
         score: 0,
         max_score: 0,
         score_percentage: 100,
+        ai_weight: ipsConfig.ai_weight ?? 20,
         failed_factors: [],
         passed_factors: [],
       };
@@ -311,6 +313,7 @@ export class TradeContextEnrichmentService {
       score: totalScore,
       max_score: maxScore,
       score_percentage: scorePercentage,
+      ai_weight: ipsConfig.ai_weight ?? 20,
       failed_factors: failedFactors,
       passed_factors: passedFactors,
     };

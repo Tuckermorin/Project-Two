@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
 import { Progress } from "@/components/ui/progress";
+import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import {
   FileText,
@@ -24,6 +26,7 @@ import {
   Trash2,
   Layers,
   AlertTriangle,
+  Save,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -198,7 +201,7 @@ function normalizeIpsRows(rows: unknown): IPSConfiguration[] {
 // Page State
 // -------------------------------
 interface IPSFlowState {
-  step: "list" | "strategies" | "selection" | "exit_watch" | "summary" | "scoring";
+  step: "list" | "strategies" | "selection" | "exit_watch" | "summary";
   selectedStrategies: string[];
   selectedFactors: Set<string>;
   factorConfigurations: Record<string, any>;
@@ -206,6 +209,7 @@ interface IPSFlowState {
   watchCriteria?: any;
   minDTE?: number;
   maxDTE?: number;
+  aiWeight?: number;
   currentIPSId: string | null;
   isLoading: boolean;
 }
@@ -222,6 +226,7 @@ export default function IPSPage() {
     selectedStrategies: [],
     selectedFactors: new Set(),
     factorConfigurations: {},
+    aiWeight: 20, // Default AI weight of 20%
     currentIPSId: null,
     isLoading: true,
   });
@@ -729,6 +734,7 @@ const handleSaveIPS = async (ipsData: any) => {
       watch_criteria: state.watchCriteria,
       min_dte: state.minDTE,
       max_dte: state.maxDTE,
+      ai_weight: state.aiWeight || 20,
       created_at: new Date().toISOString(),
     };
 
@@ -755,6 +761,7 @@ const handleSaveIPS = async (ipsData: any) => {
       selectedStrategies: [],
       selectedFactors: new Set(),
       factorConfigurations: {},
+      aiWeight: 20,
       currentIPSId: null,
       isLoading: false,
     });
@@ -812,10 +819,9 @@ const handleSaveIPS = async (ipsData: any) => {
   if (state.step !== "list") {
     const steps = [
       { id: "strategies", name: "Strategies", icon: (Layers as any) },
-      { id: "selection", name: "Selection & Configuration", icon: (Target as any) },
-      { id: "exit_watch", name: "Exit & Watch", icon: (Eye as any) },
-      { id: "summary", name: "Summary", icon: (CheckCircle as any) },
-      { id: "scoring", name: "Scoring", icon: (BarChart3 as any) },
+      { id: "selection", name: "Factor Selection", icon: (Target as any) },
+      { id: "exit_watch", name: "Configuration & Risk Management", icon: (Shield as any) },
+      { id: "summary", name: "Review & Save", icon: (Save as any) },
     ];
 
     const currentStepIndex = steps.findIndex((s) => s.id === state.step);
@@ -902,6 +908,58 @@ const handleSaveIPS = async (ipsData: any) => {
               }}
             />
 
+            {/* AI Weight Configuration */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <BarChart3 className="h-5 w-5" />
+                  AI Analysis Weight
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label htmlFor="ai-weight" className="text-base">
+                    AI Weight in Composite Score ({state.aiWeight || 20}%)
+                  </Label>
+                  <p className="text-sm text-gray-600 mt-1 mb-3">
+                    Adjust how much weight AI analysis has in the overall IPS composite score.
+                    The remaining weight is distributed among your selected factors.
+                  </p>
+                  <div className="flex items-center gap-4">
+                    <Input
+                      id="ai-weight"
+                      type="range"
+                      min="0"
+                      max="100"
+                      step="5"
+                      value={state.aiWeight || 20}
+                      onChange={(e) => setState(prev => ({ ...prev, aiWeight: parseInt(e.target.value) }))}
+                      className="flex-1"
+                    />
+                    <Input
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={state.aiWeight || 20}
+                      onChange={(e) => {
+                        const val = parseInt(e.target.value)
+                        if (!isNaN(val) && val >= 0 && val <= 100) {
+                          setState(prev => ({ ...prev, aiWeight: val }))
+                        }
+                      }}
+                      className="w-20"
+                    />
+                  </div>
+                  <div className="mt-2 text-sm text-gray-500">
+                    {state.aiWeight === 0 && "AI analysis disabled - Using factor-based scoring only"}
+                    {state.aiWeight > 0 && state.aiWeight < 50 && "Low AI influence - Primarily factor-based"}
+                    {state.aiWeight >= 50 && state.aiWeight < 80 && "Balanced AI and factor scoring"}
+                    {state.aiWeight >= 80 && "High AI influence - AI-driven scoring"}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Exit & Watch Configuration */}
             <IPSExitWatchConfig
               exitStrategies={state.exitStrategies}
@@ -955,8 +1013,6 @@ const handleSaveIPS = async (ipsData: any) => {
             />
           );
         })()}
-
-        {state.step === "scoring" && <TradeScoreDisplay onBack={() => handleStepNavigation("summary")} />}
       </div>
     );
   }

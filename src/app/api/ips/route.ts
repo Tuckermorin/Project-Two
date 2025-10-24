@@ -192,6 +192,7 @@ export async function POST(req: NextRequest) {
       factors = [] as NewFactor[],
       min_dte,
       max_dte,
+      ai_weight = 20,
     } = body || {};
 
     if (!name || !Array.isArray(factors)) {
@@ -233,7 +234,7 @@ export async function POST(req: NextRequest) {
 
     const { data: ipsRows, error: ipsErr } = await supabase
       .from('ips_configurations')
-      .insert([{ user_id, name, description, is_active, strategies, exit_strategies, watch_criteria, min_dte, max_dte }])
+      .insert([{ user_id, name, description, is_active, strategies, exit_strategies, watch_criteria, min_dte, max_dte, ai_weight }])
       .select('id')
       .single();
 
@@ -379,6 +380,7 @@ export async function PUT(req: NextRequest) {
       watch_criteria = null,
       min_dte,
       max_dte,
+      ai_weight = 20,
     } = body || {};
 
     if (!id) {
@@ -403,6 +405,7 @@ export async function PUT(req: NextRequest) {
     const updateData: any = { name, description, is_active, strategies, exit_strategies, watch_criteria };
     if (min_dte !== undefined) updateData.min_dte = min_dte;
     if (max_dte !== undefined) updateData.max_dte = max_dte;
+    if (ai_weight !== undefined) updateData.ai_weight = ai_weight;
 
     // RLS automatically enforces user ownership - no need for .eq('user_id', user.id)
     const { error: ipsErr } = await supabase
