@@ -19,7 +19,12 @@
       "Bash(tree:*)",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT id, name, exit_strategies FROM ips_configurations LIMIT 1;\")",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"\\d ips_configurations\")",
-      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"c:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251024_add_ai_weight_to_ips.sql\")"
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"c:\\Users\\tucker.morin\\OneDrive - Squire\\Desktop\\Utah Tech\\tenxiv\\supabase\\migrations\\20251024_add_ai_weight_to_ips.sql\")",
+      "Bash(npm run dev:*)",
+      "Bash(timeout 10 bash:*)",
+      "Bash(npm install:*)",
+      "Bash(timeout 15 bash:*)",
+      "Bash(git checkout:*)"
     ],
     "deny": [],
     "ask": []

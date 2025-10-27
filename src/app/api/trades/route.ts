@@ -187,9 +187,11 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const status = searchParams.get('status') || 'prospective';
     const id = searchParams.get('id');
+    const limit = searchParams.get('limit') ? parseInt(searchParams.get('limit')!, 10) : 100;
+    const offset = searchParams.get('offset') ? parseInt(searchParams.get('offset')!, 10) : 0;
     const userId = user.id;
 
-    console.log('[Trades API GET] Fetching trades for userId:', userId, 'status:', status);
+    console.log('[Trades API GET] Fetching trades for userId:', userId, 'status:', status, 'limit:', limit, 'offset:', offset);
 
     // RLS automatically filters by user_id
     let query = supabase
@@ -219,6 +221,9 @@ export async function GET(request: NextRequest) {
     } else if (status) {
       query = query.eq('status', status);
     }
+
+    // Add pagination (default limit: 100, can be overridden)
+    query = query.range(offset, offset + limit - 1);
 
     const { data: trades, error } = await query;
 
@@ -278,34 +283,30 @@ export async function PATCH(request: NextRequest) {
     // Background tasks (don't await - fire and forget)
     const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
 
-    // If activating trades, trigger spread price calculation + rationale embedding
+    // OPTIMIZATION: Batch background updates instead of N separate requests
     if (targetStatus === 'active' && ids.length > 0) {
-      // Trigger spread price calculation
+      // Trigger spread price calculation (already batched)
       fetch(`${baseUrl}/api/trades/spread-prices`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tradeIds: ids })
       }).catch(err => console.error('Failed to trigger spread price update:', err));
 
-      // Save rationale embeddings for each activated trade
-      ids.forEach(tradeId => {
-        fetch(`${baseUrl}/api/trades/rationale`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'save_embedding', tradeId })
-        }).catch(err => console.error(`Failed to save rationale embedding for ${tradeId}:`, err));
-      });
+      // OPTIMIZATION: Batch save rationale embeddings for all activated trades in one request
+      fetch(`${baseUrl}/api/trades/rationale`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'save_embedding', tradeIds: ids })
+      }).catch(err => console.error(`Failed to save rationale embeddings:`, err));
     }
 
-    // If closing trades, record outcomes for AI learning
+    // OPTIMIZATION: Batch record outcomes for AI learning in one request
     if (targetStatus === 'closed' && ids.length > 0) {
-      ids.forEach(tradeId => {
-        fetch(`${baseUrl}/api/trades/rationale`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'record_outcome', tradeId })
-        }).catch(err => console.error(`Failed to record outcome for ${tradeId}:`, err));
-      });
+      fetch(`${baseUrl}/api/trades/rationale`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'record_outcome', tradeIds: ids })
+      }).catch(err => console.error(`Failed to record outcomes:`, err));
     }
 
     return NextResponse.json({ success: true });

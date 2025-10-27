@@ -17,6 +17,8 @@ import { TradeTileCompact } from "@/components/trades/TradeTileCompact";
 import { TradeBarCompact } from "@/components/trades/TradeBarCompact";
 import { TradeDetailsModal } from "@/components/trades/TradeDetailsModal";
 import { AgentProgressBar } from "@/components/trades/AgentProgressBar";
+import { AgentJobStatus } from "@/components/trades/AgentJobStatus";
+import { useAgentJob, useSubmitAgentJob, useAgentJobList } from "@/hooks/useAgentJob";
 import {
   ScatterChart,
   Scatter,
@@ -132,45 +134,62 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
   const [cacheLoaded, setCacheLoaded] = useState(false);
   const [agentProgress, setAgentProgress] = useState({ step: 0, label: '' });
   const [agentStartTime, setAgentStartTime] = useState<number | null>(null);
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+
+  // Job submission and status hooks
+  const { submitJob, submitting } = useSubmitAgentJob();
+  const { job } = useAgentJob(currentJobId, { pollInterval: 5000 });
+  const { jobs: recentJobs, loading: loadingJobs, refresh: refreshJobs } = useAgentJobList({ limit: 5 });
 
   // Load cached results on mount
   useEffect(() => {
     loadCachedResults();
   }, []);
 
-  // Progress simulation while agent is running
+  // Track job progress and handle completion
   useEffect(() => {
-    if (!loading || !agentStartTime) return;
+    if (!job) return;
 
-    const STEPS = [
-      { time: 0, step: 1, label: '📋 Loading IPS Configuration...' },
-      { time: 3, step: 2, label: '📊 Fetching Market Data...' },
-      { time: 8, step: 3, label: '🔍 Pre-filtering Stocks...' },
-      { time: 20, step: 4, label: '⛓️ Fetching Options Chains...' },
-      { time: 60, step: 5, label: '📈 Scoring Candidates...' },
-      { time: 90, step: 6, label: '✨ Applying IPS Filters...' },
-      { time: 110, step: 7, label: '🤖 Generating AI Analysis...' },
-      { time: 130, step: 8, label: '✅ Finalizing Results...' },
-    ];
+    // Update progress from job status
+    if (job.progress) {
+      setAgentProgress({
+        step: job.progress.completed_steps || 0,
+        label: job.progress.message || ''
+      });
+    }
 
-    const interval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - agentStartTime) / 1000);
+    // Handle job completion
+    if (job.status === 'completed') {
+      console.log(`[AgentSection] Job completed with ${job.result?.candidates?.length || 0} candidates`);
 
-      // Find the current step based on elapsed time
-      let currentStep = STEPS[0];
-      for (const step of STEPS) {
-        if (elapsed >= step.time) {
-          currentStep = step;
-        } else {
-          break;
-        }
+      // Set results
+      if (job.result?.candidates) {
+        setRunId(job.id);
+        setCands(job.result.candidates);
+        setShowAllTrades(false);
+        setCacheLoaded(false);
       }
 
-      setAgentProgress({ step: currentStep.step, label: currentStep.label });
-    }, 1000);
+      // Reset loading state
+      setLoading(false);
+      setAgentStartTime(null);
+      setAgentProgress({ step: 0, label: '' });
 
-    return () => clearInterval(interval);
-  }, [loading, agentStartTime]);
+    } else if (job.status === 'failed') {
+      console.error(`[AgentSection] Job failed:`, job.error_message);
+      setError(job.error_message || 'Job failed');
+      setLoading(false);
+      setAgentStartTime(null);
+      setAgentProgress({ step: 0, label: '' });
+
+    } else if (job.status === 'cancelled') {
+      console.log(`[AgentSection] Job was cancelled`);
+      setError('Job was cancelled');
+      setLoading(false);
+      setAgentStartTime(null);
+      setAgentProgress({ step: 0, label: '' });
+    }
+  }, [job]);
 
   async function loadCachedResults() {
     setLoadingCache(true);
@@ -282,58 +301,49 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
     setLoading(true);
     setError(null);
     setAgentStartTime(Date.now());
-    setAgentProgress({ step: 1, label: '📋 Loading IPS Configuration...' });
+    setAgentProgress({ step: 1, label: '📋 Submitting job...' });
+
     try {
-      const res = await fetch("/api/agent/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          symbols,
-          mode: "paper",
-          ipsId: selectedIpsId,
-          useV3: true  // Use Agent v3 with RAG and reasoning checkpoints
-        }),
+      // Submit background job
+      const jobId = await submitJob({
+        ipsId: selectedIpsId,
+        symbols,
+        mode: 'paper'
       });
 
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Run failed");
+      console.log(`[AgentSection] Submitted background job: ${jobId}`);
+      setCurrentJobId(jobId);
 
-      console.log(`[AgentSection] Agent ${json.version || 'v1'} returned ${json.selected?.length || 0} candidates`);
+      // Refresh job list to show the new job
+      refreshJobs();
 
-      // Log reasoning decisions from Agent v3
-      if (json.reasoning_decisions && json.reasoning_decisions.length > 0) {
-        console.log(`[AgentSection] Reasoning decisions:`, json.reasoning_decisions);
-      }
-
-      if (json.selected && json.selected.length > 0) {
-        const firstCand = json.selected[0];
-        console.log(`[AgentSection] First candidate check:`, {
-          symbol: firstCand.symbol,
-          composite_score: firstCand.composite_score,
-          ips_score: firstCand.ips_score,
-          tier: firstCand.tier,
-          has_ips_factor_details: !!firstCand.ips_factor_details,
-          ips_factor_details_keys: firstCand.ips_factor_details ? Object.keys(firstCand.ips_factor_details) : [],
-          has_historical_analysis: !!firstCand.historical_analysis,
-          has_detailed_analysis: !!firstCand.detailed_analysis,
-          has_ips_factors: !!firstCand.detailed_analysis?.ips_factors,
-          ips_factors_count: firstCand.detailed_analysis?.ips_factors?.length || 0,
-          ips_name: firstCand.detailed_analysis?.ips_name || 'N/A',
-        });
-      }
-
-      setRunId(json.runId || null);
-      setCands(json.selected || []);
-      setShowAllTrades(false); // Reset to showing top recommendations
-      setCacheLoaded(false); // Mark as fresh results, not from cache
     } catch (e: any) {
       setError(e.message);
-    } finally {
       setLoading(false);
       setAgentStartTime(null);
       setAgentProgress({ step: 0, label: '' });
     }
   }
+
+  const handleViewJob = (job: any) => {
+    console.log(`[AgentSection] Viewing job ${job.id}`, job);
+
+    // If job is completed, load its results
+    if (job.status === 'completed' && job.result?.candidates) {
+      setRunId(job.id);
+      setCands(job.result.candidates);
+      setShowAllTrades(false);
+      setCacheLoaded(false);
+      setError(null);
+    } else if (job.status === 'running') {
+      // If job is running, set it as current to show progress
+      setCurrentJobId(job.id);
+      setLoading(true);
+      setAgentStartTime(new Date(job.started_at).getTime());
+    } else if (job.status === 'failed') {
+      setError(job.error_message || 'Job failed');
+    }
+  };
 
   const handleAddToProspective = async (candidate: Candidate, numContracts?: number) => {
     if (!runId) return;
@@ -515,6 +525,14 @@ export function AgentSection({ onAddToProspective, availableIPSs = [] }: AgentSe
                 />
               </CardContent>
             </Card>
+          )}
+
+          {/* Recent Jobs */}
+          {recentJobs && recentJobs.length > 0 && (
+            <AgentJobStatus
+              jobs={recentJobs}
+              onViewJob={handleViewJob}
+            />
           )}
 
           {error && (

@@ -154,42 +154,45 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to finalize trade close' }, { status: 500 });
     }
 
-    // Capture final snapshot before closing
-    try {
-      console.log(`[Snapshot] Capturing final snapshot for closed trade ${tradeId}`);
-      const { getTradeSnapshotService } = await import('@/lib/services/trade-snapshot-service');
-      const snapshotService = getTradeSnapshotService();
-      await snapshotService.captureSnapshot(tradeId, 'manual');
-      console.log(`[Snapshot] ✓ Final snapshot captured for trade ${tradeId}`);
-    } catch (snapshotError) {
-      // Don't fail the request if snapshot fails
-      console.error('[Snapshot] Final snapshot failed (non-critical):', snapshotError);
-    }
+    // Return immediately - snapshot and RAG will run in background
+    const response = NextResponse.json({ success: true, data: { tradeId, realizedPL, realizedPLPercent } });
 
-    // Automatically create RAG embedding for the closed trade
-    try {
-      console.log(`[RAG] Creating embedding for closed trade ${tradeId}`);
-
-      // Fetch the complete trade data with closure info
-      const { data: closedTrade, error: fetchError } = await supabase
-        .from('trades')
-        .select('*, trade_closures(*)')
-        .eq('id', tradeId)
-        .single();
-
-      if (!fetchError && closedTrade) {
-        // Import and run embedding creation (don't await - run in background)
-        import('@/lib/agent/rag-embeddings')
-          .then(({ embedTradeOutcome }) => embedTradeOutcome(closedTrade))
-          .then(() => console.log(`[RAG] ✓ Embedding created for trade ${tradeId}`))
-          .catch((err) => console.error(`[RAG] Failed to embed trade ${tradeId}:`, err.message));
+    // Capture final snapshot in background (fire and forget)
+    Promise.resolve().then(async () => {
+      try {
+        console.log(`[Snapshot] Capturing final snapshot for closed trade ${tradeId}`);
+        const { getTradeSnapshotService } = await import('@/lib/services/trade-snapshot-service');
+        const snapshotService = getTradeSnapshotService();
+        await snapshotService.captureSnapshot(tradeId, 'manual');
+        console.log(`[Snapshot] ✓ Final snapshot captured for trade ${tradeId}`);
+      } catch (snapshotError) {
+        console.error('[Snapshot] Final snapshot failed (non-critical):', snapshotError);
       }
-    } catch (ragError) {
-      // Don't fail the request if RAG fails
-      console.error('[RAG] Embedding creation failed (non-critical):', ragError);
-    }
+    });
 
-    return NextResponse.json({ success: true, data: { tradeId, realizedPL, realizedPLPercent } });
+    // Automatically create RAG embedding in background (fire and forget)
+    Promise.resolve().then(async () => {
+      try {
+        console.log(`[RAG] Creating embedding for closed trade ${tradeId}`);
+
+        // Fetch the complete trade data with closure info
+        const { data: closedTrade, error: fetchError } = await supabase
+          .from('trades')
+          .select('*, trade_closures(*)')
+          .eq('id', tradeId)
+          .single();
+
+        if (!fetchError && closedTrade) {
+          const { embedTradeOutcome } = await import('@/lib/agent/rag-embeddings');
+          await embedTradeOutcome(closedTrade);
+          console.log(`[RAG] ✓ Embedding created for trade ${tradeId}`);
+        }
+      } catch (ragError) {
+        console.error('[RAG] Embedding creation failed (non-critical):', ragError);
+      }
+    });
+
+    return response;
   } catch (e) {
     console.error('POST /api/trades/close failed:', e);
     return NextResponse.json({ error: 'Unexpected error' }, { status: 500 });

@@ -14,7 +14,7 @@ import { tavilySearch } from "@/lib/clients/tavily";
 import { rationaleLLM } from "@/lib/clients/llm";
 import * as db from "@/lib/db/agent";
 import { getMacroData } from "@/lib/api/macro-data";
-import { createClient } from "@/lib/supabase/server-client";
+import { createPooledClient } from "@/lib/supabase/pooled-client";
 import { AGENT_CONFIG } from "./config";
 import { evaluateTradesWithAI } from "./ai-enhanced-evaluation-step";
 
@@ -117,8 +117,55 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
 
   console.log(`[PreFilterGeneral] Found ${highWeightGeneralFactors.length} high-weight general factors to check`);
 
-  for (const symbol of state.survivingSymbols) {
-    try {
+  // OPTIMIZATION: Batch fetch ALL IV data for ALL symbols in a single query
+  const cutoffDate = dayjs().subtract(252, 'day').format('YYYY-MM-DD');
+  const supabase = await createPooledClient(); // Use pooled connection for agent
+  const ivDataBySymbol: Record<string, { iv_rank: number | null; iv_percentile: number | null }> = {};
+
+  try {
+    console.log(`[PreFilterGeneral] Batch fetching IV data for ${state.survivingSymbols.length} symbols...`);
+    const { data: allIVData, error: ivError } = await supabase
+      .from('vol_regime_daily')
+      .select('symbol, as_of_date, iv_atm_30d')
+      .in('symbol', state.survivingSymbols)
+      .gte('as_of_date', cutoffDate)
+      .not('iv_atm_30d', 'is', null)
+      .order('symbol', { ascending: true })
+      .order('as_of_date', { ascending: false });
+
+    if (!ivError && allIVData) {
+      // Group by symbol
+      const grouped: Record<string, Array<{ as_of_date: string; iv_atm_30d: number }>> = {};
+      for (const row of allIVData) {
+        if (!grouped[row.symbol]) grouped[row.symbol] = [];
+        grouped[row.symbol].push(row);
+      }
+
+      // Calculate IV rank for each symbol
+      for (const [symbol, historicalData] of Object.entries(grouped)) {
+        if (historicalData.length >= 20) {
+          const currentIV = historicalData[0].iv_atm_30d;
+          const validIVs = historicalData.map(d => d.iv_atm_30d).filter(iv => iv !== null);
+          const countBelow = validIVs.filter(iv => iv <= currentIV).length;
+          const ivRank = (countBelow / validIVs.length) * 100;
+
+          ivDataBySymbol[symbol] = {
+            iv_rank: Math.round(ivRank * 10) / 10,
+            iv_percentile: Math.round(ivRank * 10) / 10
+          };
+        }
+      }
+      console.log(`[PreFilterGeneral] Calculated IV ranks for ${Object.keys(ivDataBySymbol).length} symbols`);
+    }
+  } catch (error) {
+    console.warn('[PreFilterGeneral] Failed to batch fetch IV data, will skip IV calculations:', error);
+  }
+
+  // OPTIMIZATION: Process all symbols in parallel using Promise.allSettled
+  console.log(`[PreFilterGeneral] Processing ${state.survivingSymbols.length} symbols in parallel...`);
+
+  const symbolResults = await Promise.allSettled(
+    state.survivingSymbols.map(async (symbol) => {
       const start = Date.now();
 
       // Fetch company overview (non-chain data)
@@ -135,46 +182,15 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
       ]);
 
       // Extract values from SMA/MOM responses
-      // getSMA returns {value: number | null, date: string | null}
-      // getMOM returns number | null
       const sma200 = sma200Data?.value || null;
       const sma50 = sma50Data?.value || null;
       const momentum = momentumData || null;
 
-      // Fetch and calculate IV Rank and IV Percentile from vol_regime_daily table
-      let ivData = { iv_rank: null, iv_percentile: null };
-      try {
-        const supabase = await createClient();
+      // Get pre-calculated IV data from batch fetch
+      const ivData = ivDataBySymbol[symbol] || { iv_rank: null, iv_percentile: null };
 
-        // Get current IV and last 252 days of historical IV data
-        const cutoffDate = dayjs().subtract(252, 'day').format('YYYY-MM-DD');
-        const { data: historicalData, error } = await supabase
-          .from('vol_regime_daily')
-          .select('as_of_date, iv_atm_30d')
-          .eq('symbol', symbol)
-          .gte('as_of_date', cutoffDate)
-          .not('iv_atm_30d', 'is', null)
-          .order('as_of_date', { ascending: false });
-
-        if (!error && historicalData && historicalData.length >= 20) {
-          // Get current IV (most recent)
-          const currentIV = historicalData[0].iv_atm_30d;
-
-          // Calculate IV rank and percentile
-          const validIVs = historicalData.map(d => d.iv_atm_30d).filter(iv => iv !== null);
-          const countBelow = validIVs.filter(iv => iv <= currentIV).length;
-          const ivRank = (countBelow / validIVs.length) * 100;
-
-          ivData = {
-            iv_rank: Math.round(ivRank * 10) / 10, // Round to 1 decimal
-            iv_percentile: Math.round(ivRank * 10) / 10 // Same as iv_rank
-          };
-        }
-      } catch (error) {
-        console.warn(`[PreFilterGeneral] Failed to calculate IV metrics for ${symbol}:`, error);
-      }
-
-      // Fetch news sentiment from both Tavily AND Alpha Vantage
+      // OPTIMIZATION: Fetch news and sentiment data in parallel where possible
+      // Tavily news search - primary news source
       const newsSearch = await tavilySearch(
         `${symbol} stock news earnings`,
         {
@@ -189,25 +205,11 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
         console.warn(`[PreFilterGeneral] ${symbol}: Tavily news search error:`, newsSearch.error);
       }
 
-      // Fetch social media sentiment separately (Reddit, Twitter, etc.)
-      const socialSearch = await tavilySearch(
-        `${symbol} stock reddit twitter sentiment`,
-        {
-          time_range: "week",
-          max_results: 5,
-          include_domains: ["reddit.com", "twitter.com", "stocktwits.com"]
-        }
-      );
-      console.log(`[PreFilterGeneral] ${symbol}: Found ${socialSearch.results?.length || 0} social posts from Tavily`);
-      if (socialSearch.error) {
-        console.warn(`[PreFilterGeneral] ${symbol}: Tavily social search error:`, socialSearch.error);
-      }
-      if (socialSearch.results && socialSearch.results.length > 0) {
-        console.log(`[PreFilterGeneral] ${symbol}: Sample social result:`, JSON.stringify(socialSearch.results[0], null, 2));
-      }
-
-      // Fetch Reddit sentiment data
+      // OPTIMIZATION: Skip redundant sentiment calls - Use Tavily for news, skip Alpha Vantage news sentiment
+      // Only fetch Reddit sentiment and insider activity (unique data sources)
       let redditData = null;
+      let insiderActivity = null;
+
       try {
         const { getRedditClient } = await import('../clients/reddit');
         const redditClient = getRedditClient();
@@ -217,11 +219,11 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
           console.log(`[PreFilterGeneral] ${symbol}: Reddit sentiment=${redditData.sentiment_score.toFixed(2)}, mentions=${redditData.mention_count}, velocity=${redditData.mention_velocity}%`);
 
           // Store in Supabase for historical tracking
-          const supabase = await createClient();
-          const { data: { user } } = await supabase.auth.getUser();
+          const supabaseClient = await createPooledClient();
+          const { data: { user } } = await supabaseClient.auth.getUser();
 
           if (user) {
-            await supabase.from('reddit_sentiment').insert({
+            await supabaseClient.from('reddit_sentiment').insert({
               symbol,
               sentiment_score: redditData.sentiment_score,
               mention_count: redditData.mention_count,
@@ -238,30 +240,7 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
         console.warn(`[PreFilterGeneral] ${symbol}: Failed to fetch Reddit sentiment:`, error);
       }
 
-      // Fetch Alpha Vantage News Sentiment (provides actual sentiment scores)
-      let avNewsSentiment = null;
-      try {
-        const avClient = getAlphaVantageClient();
-        // Fetch without topic filtering to get all relevant news
-        avNewsSentiment = await avClient.getNewsSentiment(symbol, 50);
-        console.log(`[PreFilterGeneral] ${symbol}: Alpha Vantage sentiment=${avNewsSentiment.sentiment_label} (${avNewsSentiment.average_score?.toFixed(2)}), articles=${avNewsSentiment.count} (${avNewsSentiment.positive}+/${avNewsSentiment.negative}-), relevance=${avNewsSentiment.avg_relevance?.toFixed(2)}`);
-
-        // Log topic-specific sentiment if available
-        if (avNewsSentiment.topic_sentiment) {
-          const topicSents = Object.entries(avNewsSentiment.topic_sentiment)
-            .slice(0, 3)
-            .map(([topic, score]) => `${topic}:${(score as number).toFixed(2)}`)
-            .join(', ');
-          if (topicSents) {
-            console.log(`[PreFilterGeneral] ${symbol}: Topic sentiment: ${topicSents}`);
-          }
-        }
-      } catch (error) {
-        console.warn(`[PreFilterGeneral] ${symbol}: Failed to fetch Alpha Vantage news sentiment:`, error);
-      }
-
-      // Fetch Insider Transactions (insider buy/sell activity)
-      let insiderActivity = null;
+      // Fetch Insider Transactions (unique insider buy/sell activity data)
       try {
         const avClient = getAlphaVantageClient();
         insiderActivity = await avClient.getInsiderTransactions(symbol);
@@ -271,19 +250,16 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
       }
 
       // Spread overview at root level so all AlphaVantage fields are accessible
-      // Then add technical indicators and other data
-      generalData[symbol] = {
-        ...overview,  // Spreads 52WeekHigh, 52WeekLow, MarketCapitalization, PERatio, Beta, etc.
+      const symbolData = {
+        ...overview,
         sma200,
         sma50,
         momentum,
         iv_rank: ivData?.iv_rank || null,
         iv_percentile: ivData?.iv_percentile || null,
         news: newsSearch.results || [],
-        social: socialSearch.results || [],
-        av_news_sentiment: avNewsSentiment, // Alpha Vantage sentiment with actual scores
-        insider_activity: insiderActivity, // Insider buy/sell transactions
-        reddit: redditData, // Reddit sentiment, mentions, velocity, trending rank
+        insider_activity: insiderActivity,
+        reddit: redditData,
         timestamp: new Date().toISOString()
       };
 
@@ -300,7 +276,6 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
       }
 
       if (passes || highWeightGeneralFactors.length === 0) {
-        surviving.push(symbol);
         console.log(`[PreFilterGeneral] ✓ ${symbol} passed general filters`);
       } else {
         console.log(`[PreFilterGeneral] ✗ ${symbol} filtered out: ${violations.join(', ')}`);
@@ -309,11 +284,23 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
       const latency = Date.now() - start;
       await db.logTool(state.runId, "PreFilterGeneral", { symbol }, { passed: passes }, latency);
 
-    } catch (error: any) {
-      console.error(`[PreFilterGeneral] Error for ${symbol}:`, error);
-      errors.push(`${symbol}: ${error.message}`);
-      // On error, allow symbol to continue (fail-open)
-      surviving.push(symbol);
+      return { symbol, symbolData, passes, violations };
+    })
+  );
+
+  // Process results from parallel execution
+  for (const result of symbolResults) {
+    if (result.status === 'fulfilled') {
+      const { symbol, symbolData, passes } = result.value;
+      generalData[symbol] = symbolData;
+      if (passes) {
+        surviving.push(symbol);
+      }
+    } else {
+      // Handle rejected promises (errors)
+      const error = result.reason;
+      console.error(`[PreFilterGeneral] Error processing symbol:`, error);
+      errors.push(`Symbol processing error: ${error.message || 'Unknown error'}`);
     }
   }
 

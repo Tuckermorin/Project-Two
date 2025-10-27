@@ -13,7 +13,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox'
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group'
 import { Separator } from '@/components/ui/separator'
-import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2, Columns3, TrendingUp, TrendingDown, Clock, X, Search, Pin, GripVertical, RefreshCw } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, ChevronDown, Filter, Eye, EyeOff, Calendar, Settings2, AlertCircle, MoreVertical, Trash2, Columns3, TrendingUp, TrendingDown, Clock, X, Search, Pin, GripVertical, RefreshCw, Loader2 } from 'lucide-react'
+import { useSubmitDashboardRefreshJob, useDashboardRefreshJob } from '@/hooks/useDashboardRefreshJob'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -251,7 +252,12 @@ export default function ExcelStyleTradesDashboard() {
   const [loading, setLoading] = useState<boolean>(false)
   const [refreshing, setRefreshing] = useState<boolean>(false)
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null)
+  const [refreshJobId, setRefreshJobId] = useState<string | null>(null)
   const LOCAL_CLOSURE_KEY = 'tenxiv:trade-closures'
+
+  // Dashboard refresh job hooks
+  const { submitJob: submitRefreshJob, submitting } = useSubmitDashboardRefreshJob()
+  const { job: refreshJob } = useDashboardRefreshJob(refreshJobId, { pollInterval: 3000 })
 
   // Close/action-needed dialog state (local UI helper)
   const [closing, setClosing] = useState<{
@@ -335,7 +341,7 @@ export default function ExcelStyleTradesDashboard() {
     const load = async () => {
       try {
         setLoading(true)
-        const res = await fetch(`/api/trades?status=active`, { cache: 'no-store' })
+        const res = await fetch(`/api/trades?status=active`)
         const json = await res.json()
         if (!res.ok) throw new Error(json?.error || 'Failed to load active trades')
         const rows = (json?.data || []) as any[]
@@ -357,7 +363,7 @@ export default function ExcelStyleTradesDashboard() {
         // Fetch IPS configurations with exit strategies
         let ipsMap: Record<string, any> = {}
         try {
-          const ipsRes = await fetch('/api/ips', { cache: 'no-store' })
+          const ipsRes = await fetch('/api/ips')
           const ipsJson = await ipsRes.json()
           console.log('[Dashboard] Loaded IPS configurations:', ipsJson)
           if (ipsRes.ok && Array.isArray(ipsJson)) {
@@ -522,7 +528,28 @@ export default function ExcelStyleTradesDashboard() {
     return () => window.removeEventListener(TRADES_UPDATED_EVENT, handleTradesUpdated)
   }, [])
 
-  // Refresh handler - updates all active trades with current market data
+  // Watch for refresh job completion
+  useEffect(() => {
+    if (!refreshJob) return
+
+    // Update refreshing state based on job status
+    if (refreshJob.status === 'running') {
+      setRefreshing(true)
+    }
+
+    // Handle job completion
+    if (refreshJob.status === 'completed') {
+      setLastRefresh(new Date())
+      setRefreshing(false)
+      // Reload trades to show updated data
+      window.location.reload()
+    } else if (refreshJob.status === 'failed') {
+      setRefreshing(false)
+      alert(`Dashboard refresh failed: ${refreshJob.error_message}`)
+    }
+  }, [refreshJob])
+
+  // Refresh handler - submits a background job for dashboard refresh
   const handleRefresh = async () => {
     try {
       setRefreshing(true)
@@ -544,155 +571,16 @@ export default function ExcelStyleTradesDashboard() {
         // Don't fail the whole refresh if backfill fails
       }
 
-      // Then refresh market data
-      const res = await fetch('/api/trades/refresh-active', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        cache: 'no-store'
-      })
+      // Submit background job for refresh
+      const jobId = await submitRefreshJob()
+      setRefreshJobId(jobId)
+      console.log(`[Refresh] Started background refresh job: ${jobId}`)
 
-      const data = await res.json()
+      // Job will be polled by the useEffect hook above
+      // User can now navigate away - job runs in background!
 
-      if (res.ok && data.success) {
-        setLastRefresh(new Date())
-        // Reload trades from database (they've been updated by the refresh endpoint)
-        const tradesRes = await fetch(`/api/trades?status=active`, { cache: 'no-store' })
-        const tradesJson = await tradesRes.json()
-        if (tradesRes.ok) {
-          // Re-run the same normalization logic from the load function
-          const rows = (tradesJson?.data || []) as any[]
-          let quoteMap: Record<string, number> = {}
-          let sectorMap: Record<string, string> = {}
-          if (rows.length) {
-            const symbols = Array.from(new Set(rows.map((r:any)=>r.symbol))).join(',')
-            try {
-              const qRes = await fetch(`/api/market-data/quotes?symbols=${encodeURIComponent(symbols)}`)
-              const qJson = await qRes.json()
-              ;(qJson?.data || []).forEach((q:any)=>{
-                const price = Number(q.currentPrice ?? q.last ?? q.close ?? q.price)
-                if (!isNaN(price)) quoteMap[q.symbol] = price
-                if (q.sector) sectorMap[q.symbol] = q.sector
-              })
-            } catch {}
-          }
-
-          let ipsMap: Record<string, any> = {}
-          try {
-            const ipsRes = await fetch('/api/ips', { cache: 'no-store' })
-            const ipsJson = await ipsRes.json()
-            if (ipsRes.ok && Array.isArray(ipsJson)) {
-              ipsJson.forEach((ips: any) => { ipsMap[ips.id] = ips })
-            }
-          } catch {}
-
-          const normalized: Trade[] = rows.map((r:any) => {
-            const current = (quoteMap[r.symbol] ?? Number(r.current_price ?? 0)) || 0
-            const short = Number(r.short_strike ?? r.strike_price_short ?? 0) || 0
-            const percentToShort = short > 0 ? ((current - short) / short) * 100 : 0
-            const ipsScore = typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined
-
-            const ips = r.ips_id ? ipsMap[r.ips_id] : null
-            const spreadPrice = r.current_spread_price ? Number(r.current_spread_price) : undefined
-
-            // Evaluate watch criteria from IPS configuration
-            let watchAlerts: WatchAlert[] = []
-            if (ips?.watch_criteria?.enabled) {
-              const tradeForWatch = {
-                id: r.id,
-                symbol: r.symbol,
-                current_price: current,
-                entry_price: Number(r.entry_price ?? 0),
-                short_strike: short,
-                ips_id: r.ips_id,
-                ips_score: ipsScore,
-                trade_factors: r.trade_factors || []
-              }
-              watchAlerts = evaluateWatchCriteria(tradeForWatch, ips)
-            }
-            const hasTriggeredWatchAlerts = watchAlerts.some(a => a.triggered)
-
-            const tradeForEval = {
-              current_price: spreadPrice,
-              entry_price: Number(r.entry_price ?? r.credit_received ?? 0),
-              credit_received: Number(r.credit_received ?? 0),
-              expiration_date: r.expiration_date,
-              max_gain: Number(r.max_gain ?? 0),
-              max_loss: Number(r.max_loss ?? 0),
-            }
-            const exitSignal = ips?.exit_strategies ? evaluateExitStrategy(tradeForEval, ips.exit_strategies) : null
-
-            let status: 'GOOD' | 'WATCH' | 'EXIT' = 'GOOD'
-            if (exitSignal?.shouldExit) {
-              status = 'EXIT'
-            } else if (hasTriggeredWatchAlerts) {
-              status = 'WATCH'
-            } else if (percentToShort < 0) {
-              status = 'EXIT'
-            }
-
-            const creditReceived = Number(r.credit_received ?? 0) || 0
-            const contracts = Number(r.number_of_contracts ?? r.contracts ?? 1) || 0
-            let currentPL: number | undefined
-            let currentPLPercent: number | undefined
-            if (spreadPrice !== undefined && creditReceived > 0) {
-              const plPerContract = creditReceived - spreadPrice
-              currentPL = plPerContract * contracts * 100
-              currentPLPercent = (plPerContract / creditReceived) * 100
-            }
-
-            return {
-              id: r.id,
-              name: r.name || r.symbol,
-              placed: r.entry_date || r.created_at || '',
-              currentPrice: current,
-              currentSpreadPrice: spreadPrice,
-              currentPL,
-              currentPLPercent,
-              expDate: r.expiration_date || '',
-              dte: r.expiration_date ? daysToExpiry(r.expiration_date) : 0,
-              contractType: toTitle(String(r.contract_type || '')),
-              contracts,
-              shortStrike: short,
-              longStrike: Number(r.long_strike ?? 0) || 0,
-              creditReceived,
-              spreadWidth: Number(r.spread_width ?? 0) || 0,
-              maxGain: Number(r.max_gain ?? 0) || 0,
-              maxLoss: Number(r.max_loss ?? 0) || 0,
-              percentCurrentToShort: percentToShort,
-              deltaShortLeg: Number(r.delta_short_leg ?? 0) || 0,
-              theta: Number(r.theta ?? 0) || 0,
-              vega: Number(r.vega ?? 0) || 0,
-              ivAtEntry: Number(r.iv_at_entry ?? 0) || 0,
-              sector: r.sector || sectorMap[r.symbol] || '-',
-              status,
-              ipsScore,
-              ipsName: r.ips_name ?? r.ips_configurations?.name ?? null,
-              plPercent: typeof r.pl_percent === 'number' ? Number(r.pl_percent) : undefined,
-              exitSignal,
-              watchAlerts,
-            } as Trade
-          })
-
-          // Filter out trades that are in Action Needed (even if DTE > 0)
-          // and trades with DTE <= 0
-          const actionNeededIds = new Set<string>()
-          try {
-            const raw = localStorage.getItem(LOCAL_CLOSURE_KEY)
-            const obj = raw ? JSON.parse(raw) : {}
-            Object.entries(obj).forEach(([tradeId, meta]: [string, any]) => {
-              if (meta?.needsAction) {
-                actionNeededIds.add(tradeId)
-              }
-            })
-          } catch {}
-
-          setTrades(normalized.filter(t => t.dte > 0 && !actionNeededIds.has(t.id)))
-          dispatchTradesUpdated({ type: 'full_refresh' })
-        }
-      }
     } catch (error) {
-      console.error('Failed to refresh trades:', error)
-    } finally {
+      console.error('Failed to start dashboard refresh job:', error)
       setRefreshing(false)
     }
   }
@@ -1169,11 +1057,23 @@ export default function ExcelStyleTradesDashboard() {
             variant="outline"
             size="sm"
             onClick={handleRefresh}
-            disabled={refreshing || loading}
-            title={lastRefresh ? `Last refreshed: ${lastRefresh.toLocaleTimeString()}` : 'Refresh all trades'}
+            disabled={refreshing || loading || submitting}
+            title={
+              refreshJob?.progress?.message ||
+              (lastRefresh ? `Last refreshed: ${lastRefresh.toLocaleTimeString()}` : 'Refresh all trades')
+            }
           >
-            <RefreshCw className={`h-4 w-4 mr-2 ${refreshing ? 'animate-spin' : ''}`} />
-            {refreshing ? 'Refreshing...' : 'Refresh'}
+            {refreshing || submitting ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                {refreshJob?.progress?.message || 'Starting refresh...'}
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4 mr-2" />
+                Refresh
+              </>
+            )}
           </Button>
 
           {/* IPS toggle */}

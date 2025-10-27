@@ -23,6 +23,8 @@ type IpsStats = {
   best: number
   worst: number
   totalPL: number
+  firstTradeDate: string | null
+  daysInDeployment: number
 }
 
 const currencyFormatter = new Intl.NumberFormat('en-US', {
@@ -36,6 +38,12 @@ function formatPL(value: number | null | undefined): string {
   if (value === null || value === undefined || Number.isNaN(value)) return '--'
   const prefix = value > 0 ? '+' : value < 0 ? '-' : ''
   return `${prefix}${currencyFormatter.format(Math.abs(value))}`
+}
+
+function formatDate(dateString: string | null): string {
+  if (!dateString) return '--'
+  const date = new Date(dateString)
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
 }
 
 export function IPSPerformanceTracker() {
@@ -116,6 +124,8 @@ export function IPSPerformanceTracker() {
           best: Number.NEGATIVE_INFINITY,
           worst: Number.POSITIVE_INFINITY,
           totalPL: 0,
+          firstTradeDate: null as string | null,
+          daysInDeployment: 0,
         }
 
         store.totalTrades += 1
@@ -125,18 +135,38 @@ export function IPSPerformanceTracker() {
         // Only track losses (negative values) for worst
         if (realized < 0 && realized < store.worst) store.worst = realized
 
+        // Track first trade date (using entry_date which is when trade became active)
+        const entryDate = trade.entry_date
+        if (entryDate) {
+          if (!store.firstTradeDate || entryDate < store.firstTradeDate) {
+            store.firstTradeDate = entryDate
+          }
+        }
+
         acc.set(ipsId, store)
         return acc
       }, new Map<string, IpsStats>())
 
       const normalized: Record<string, IpsStats> = {}
+      const now = new Date()
+
       aggregated.forEach((value, key) => {
+        // Calculate days in deployment
+        let daysInDeployment = 0
+        if (value.firstTradeDate) {
+          const firstDate = new Date(value.firstTradeDate)
+          const diffTime = Math.abs(now.getTime() - firstDate.getTime())
+          daysInDeployment = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+        }
+
         normalized[key] = {
           totalTrades: value.totalTrades,
           wins: value.wins,
           best: value.best === Number.NEGATIVE_INFINITY ? 0 : value.best,
           worst: value.worst === Number.POSITIVE_INFINITY ? 0 : value.worst,
           totalPL: value.totalPL,
+          firstTradeDate: value.firstTradeDate,
+          daysInDeployment,
         }
       })
 
@@ -234,7 +264,7 @@ export function IPSPerformanceTracker() {
 
   const selectedIps = ipsOptions.find((ips) => ips.id === selectedIpsId) || ipsOptions[0]
   const activeBadge = selectedIps?.isActive ? 'Active' : 'Inactive'
-  const stats = selectedStats ?? { totalTrades: 0, wins: 0, best: 0, worst: 0, totalPL: 0 }
+  const stats = selectedStats ?? { totalTrades: 0, wins: 0, best: 0, worst: 0, totalPL: 0, firstTradeDate: null, daysInDeployment: 0 }
 
   const showEmptyState = stats.totalTrades === 0
 
@@ -299,6 +329,14 @@ export function IPSPerformanceTracker() {
               <div className={`text-lg font-semibold ${stats.totalPL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                 {formatPL(stats.totalPL)}
               </div>
+            </div>
+            <div className="bg-muted/40 rounded-lg p-3">
+              <div className="text-xs text-muted-foreground">First Trade</div>
+              <div className="text-sm font-medium text-foreground">{formatDate(stats.firstTradeDate)}</div>
+            </div>
+            <div className="bg-muted/40 rounded-lg p-3">
+              <div className="text-xs text-muted-foreground">Days in Deployment</div>
+              <div className="text-sm font-medium text-foreground">{stats.daysInDeployment > 0 ? stats.daysInDeployment : '--'}</div>
             </div>
           </div>
         )}

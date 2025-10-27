@@ -30,8 +30,8 @@ export default function ActiveTradesSummary() {
         setLoading(true)
 
         const [activeRes, ipsRes] = await Promise.all([
-          fetch('/api/trades?status=active', { cache: 'no-store' }),
-          fetch('/api/ips', { cache: 'no-store' })
+          fetch('/api/trades?status=active'),
+          fetch('/api/ips')
         ])
 
         const activeData = await activeRes.json()
