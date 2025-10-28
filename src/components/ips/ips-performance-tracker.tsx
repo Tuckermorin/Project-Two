@@ -24,6 +24,7 @@ type IpsStats = {
   worst: number
   totalPL: number
   firstTradeDate: string | null
+  lastTradeDate: string | null
   daysInDeployment: number
 }
 
@@ -125,6 +126,7 @@ export function IPSPerformanceTracker() {
           worst: Number.POSITIVE_INFINITY,
           totalPL: 0,
           firstTradeDate: null as string | null,
+          lastTradeDate: null as string | null,
           daysInDeployment: 0,
         }
 
@@ -135,11 +137,14 @@ export function IPSPerformanceTracker() {
         // Only track losses (negative values) for worst
         if (realized < 0 && realized < store.worst) store.worst = realized
 
-        // Track first trade date (using entry_date which is when trade became active)
+        // Track first and last trade dates (using entry_date which is when trade became active)
         const entryDate = trade.entry_date
         if (entryDate) {
           if (!store.firstTradeDate || entryDate < store.firstTradeDate) {
             store.firstTradeDate = entryDate
+          }
+          if (!store.lastTradeDate || entryDate > store.lastTradeDate) {
+            store.lastTradeDate = entryDate
           }
         }
 
@@ -166,6 +171,7 @@ export function IPSPerformanceTracker() {
           worst: value.worst === Number.POSITIVE_INFINITY ? 0 : value.worst,
           totalPL: value.totalPL,
           firstTradeDate: value.firstTradeDate,
+          lastTradeDate: value.lastTradeDate,
           daysInDeployment,
         }
       })
@@ -264,7 +270,7 @@ export function IPSPerformanceTracker() {
 
   const selectedIps = ipsOptions.find((ips) => ips.id === selectedIpsId) || ipsOptions[0]
   const activeBadge = selectedIps?.isActive ? 'Active' : 'Inactive'
-  const stats = selectedStats ?? { totalTrades: 0, wins: 0, best: 0, worst: 0, totalPL: 0, firstTradeDate: null, daysInDeployment: 0 }
+  const stats = selectedStats ?? { totalTrades: 0, wins: 0, best: 0, worst: 0, totalPL: 0, firstTradeDate: null, lastTradeDate: null, daysInDeployment: 0 }
 
   const showEmptyState = stats.totalTrades === 0
 
@@ -324,19 +330,23 @@ export function IPSPerformanceTracker() {
               </div>
               <div className="text-lg font-semibold text-red-600 dark:text-red-400">{formatPL(stats.worst)}</div>
             </div>
-            <div className="bg-muted/40 rounded-lg p-3 col-span-2">
+            <div className="bg-muted/40 rounded-lg p-3">
               <div className="text-xs text-muted-foreground">Total Realized P/L</div>
               <div className={`text-lg font-semibold ${stats.totalPL >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
                 {formatPL(stats.totalPL)}
               </div>
             </div>
             <div className="bg-muted/40 rounded-lg p-3">
+              <div className="text-xs text-muted-foreground">Days in Deployment</div>
+              <div className="text-sm font-medium text-foreground">{stats.daysInDeployment > 0 ? stats.daysInDeployment : '--'}</div>
+            </div>
+            <div className="bg-muted/40 rounded-lg p-3">
               <div className="text-xs text-muted-foreground">First Trade</div>
               <div className="text-sm font-medium text-foreground">{formatDate(stats.firstTradeDate)}</div>
             </div>
             <div className="bg-muted/40 rounded-lg p-3">
-              <div className="text-xs text-muted-foreground">Days in Deployment</div>
-              <div className="text-sm font-medium text-foreground">{stats.daysInDeployment > 0 ? stats.daysInDeployment : '--'}</div>
+              <div className="text-xs text-muted-foreground">Last Trade</div>
+              <div className="text-sm font-medium text-foreground">{formatDate(stats.lastTradeDate)}</div>
             </div>
           </div>
         )}

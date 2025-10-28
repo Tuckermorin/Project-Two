@@ -4,7 +4,7 @@
 
 import dotenv from 'dotenv';
 import { createClient } from '@supabase/supabase-js';
-import { getIVCacheService } from '../src/lib/services/iv-cache-service';
+import { getIVCacheService } from '../../src/lib/services/iv-cache-service';
 
 // Load environment variables
 dotenv.config();

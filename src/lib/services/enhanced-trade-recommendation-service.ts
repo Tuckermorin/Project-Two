@@ -135,7 +135,8 @@ export class EnhancedTradeRecommendationService {
           await rationaleGen.createRationaleEmbedding(
             evaluation.structured_rationale,
             enrichedContext,
-            evaluationId
+            evaluationId,
+            user_id
           );
         } catch (error) {
           console.warn(`[EnhancedTradeRecommendation] Failed to save rationale embedding:`, error);

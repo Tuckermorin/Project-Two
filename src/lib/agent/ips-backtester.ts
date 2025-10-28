@@ -557,7 +557,7 @@ export class IPSBacktester {
   ): Promise<void> {
     const records = evaluations.map((e) => ({
       run_id: runId,
-      trade_id: e.tradeId,
+      trade_id: null, // Backtest trades are simulated, not real trades
       ips_score: e.ipsScore,
       passed_ips: e.passedIps,
       factors_passed: e.factorsPassed,

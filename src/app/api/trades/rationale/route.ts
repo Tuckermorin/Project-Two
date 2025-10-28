@@ -92,7 +92,8 @@ export async function POST(request: NextRequest) {
             const embeddingId = await rationaleGenerator.createRationaleEmbedding(
               trade.structured_rationale,
               context,
-              trade.ai_evaluation_id
+              trade.ai_evaluation_id,
+              user.id
             );
 
             console.log(`[Rationale API] Created embedding ${embeddingId} for trade ${trade.id}`);

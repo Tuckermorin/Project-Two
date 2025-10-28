@@ -6,6 +6,7 @@ import cron from 'node-cron';
 import { monitorAllActiveTrades } from '@/lib/agent/active-trade-monitor';
 import { analyzeTradePostMortem } from '@/lib/agent/trade-postmortem';
 import { batchIntelligentResearch } from '@/lib/agent/rag-router';
+import { embedClosedTradeSnapshots } from '@/lib/agent/rag-embeddings';
 import { createClient } from '@supabase/supabase-js';
 
 // Supabase client
@@ -128,24 +129,25 @@ export function initializeScheduler() {
     scheduledJobs.push(middayCheck);
     console.log('✓ Midday Trade Check - 12:00 PM EST (Mon-Fri)');
 
-    // Job 3: Auto Post-Mortems - Every hour
+    // Job 3: Auto Post-Mortems - 5:00 PM EST (Mon-Fri) - End of trading day
     const autoPostMortem = cron.schedule(
-      '0 * * * *',
+      '0 17 * * 1-5',
       async () => {
         console.log('[Cron] Auto post-mortem check triggered');
         try {
-          const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+          const todayStart = new Date();
+          todayStart.setHours(0, 0, 0, 0);
 
-          // Find all closed trades from the last 2 hours
+          // Find all closed trades from today
           // Use updated_at as primary filter since closed_at is often set to midnight
           const { data: closedTrades } = await supabase
             .from('trades')
             .select('id, symbol, status, closed_at, updated_at, realized_pnl')
             .eq('status', 'closed')
-            .gte('updated_at', twoHoursAgo);
+            .gte('updated_at', todayStart.toISOString());
 
           if (closedTrades && closedTrades.length > 0) {
-            console.log(`[Cron] Found ${closedTrades.length} newly closed trades`);
+            console.log(`[Cron] Found ${closedTrades.length} closed trades today`);
 
             for (const trade of closedTrades) {
               // Check if post-mortem already exists
@@ -168,7 +170,7 @@ export function initializeScheduler() {
               }
             }
           } else {
-            console.log('[Cron] No newly closed trades in last 2 hours');
+            console.log('[Cron] No closed trades today');
           }
         } catch (error) {
           console.error('[Cron] Auto post-mortem failed:', error);
@@ -177,9 +179,40 @@ export function initializeScheduler() {
       { timezone: 'America/New_York' }
     );
     scheduledJobs.push(autoPostMortem);
-    console.log('✓ Auto Post-Mortems - Every hour');
+    console.log('✓ Auto Post-Mortems - 5:00 PM EST (Mon-Fri)');
 
-    // Job 4: Weekly RAG Enrichment - 2:00 AM Sunday
+    // Job 4: Snapshot Embeddings - 5:30 PM EST (Mon-Fri) - After post-mortems complete
+    const snapshotEmbeddings = cron.schedule(
+      '30 17 * * 1-5',
+      async () => {
+        console.log('[Cron] Snapshot embeddings triggered');
+        try {
+          const userIds = await getAllUserIds();
+
+          if (userIds.length === 0) {
+            console.log('[Cron] No users found for snapshot embeddings');
+            return;
+          }
+
+          for (const userId of userIds) {
+            console.log(`[Cron] Embedding snapshots for user ${userId}...`);
+            try {
+              const embeddedCount = await embedClosedTradeSnapshots(userId);
+              console.log(`[Cron] ✓ User ${userId}: Embedded ${embeddedCount} snapshots`);
+            } catch (error) {
+              console.error(`[Cron] Failed to embed snapshots for user ${userId}:`, error);
+            }
+          }
+        } catch (error) {
+          console.error('[Cron] Snapshot embeddings failed:', error);
+        }
+      },
+      { timezone: 'America/New_York' }
+    );
+    scheduledJobs.push(snapshotEmbeddings);
+    console.log('✓ Snapshot Embeddings - 5:30 PM EST (Mon-Fri)');
+
+    // Job 5: Weekly RAG Enrichment - 2:00 AM Sunday
     const weeklyEnrichment = cron.schedule(
       '0 2 * * 0',
       async () => {
@@ -236,7 +269,7 @@ export function initializeScheduler() {
     console.log('💰 Estimated API costs (Tavily search credits):');
     console.log('  - Daily monitoring: ~28 credits per WATCH trade (5 searches @ ~2 credits each)');
     console.log('  - Midday checks: ~0 credits (uses cache from morning run)');
-    console.log('  - Auto post-mortems: ~28 credits per closed trade');
+    console.log('  - Auto post-mortems: ~28 credits per closed trade (runs once daily at 5 PM)');
     console.log('  - Weekly enrichment: ~10-14 credits per symbol');
     console.log('  - Average monthly total: ~$146 (assumes 20 trades monitored, 10 closures/month)');
     console.log('');

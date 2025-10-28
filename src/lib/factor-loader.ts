@@ -4,13 +4,12 @@ import { ipsDataService } from "@/lib/services/ips-data-service";
 import { getFactorDataService } from "@/lib/services/factor-data-service";
 
 /**
- * Get the IPS's selected factors already split into API vs Manual.
+ * Get the IPS's selected factors (all API-driven or calculated).
  */
 export async function loadIPSFactors(ipsId: string): Promise<LoadedIPSFactors> {
   const selected: IPSFactor[] = await ipsDataService.getIPSFactors(ipsId);
   return {
-    api: selected.filter((f) => f.source === "api"),
-    manual: selected.filter((f) => f.source === "manual"),
+    all: selected,  // All factors are now auto-collected
   };
 }
 

@@ -96,7 +96,7 @@ export function NewTradeEntryForm({
     setFormData((p) => ({ ...p, ...initialData } as any));
   }, [initialData]);
 
-  const [factors, setFactors] = useState<LoadedIPSFactors>({ api: [], manual: [] });
+  const [factors, setFactors] = useState<LoadedIPSFactors>({ all: [] });
   const [manualValues, setManualValues] = useState<FactorValueMap>({});
   const [apiValues, setApiValues] = useState<FactorValueMap>({});
   const [apiBusy, setApiBusy] = useState(false);
@@ -122,8 +122,8 @@ export function NewTradeEntryForm({
   const [loadingExpirations, setLoadingExpirations] = useState(false);
 
   const hasOptionApiFactors = useMemo(() =>
-    factors.api.some((factor) => factor.key?.startsWith('opt-'))
-  , [factors.api]);
+    factors.all.some((factor) => factor.key?.startsWith('opt-'))
+  , [factors.all]);
   const lastApiRequestRef = useRef<{ symbol: string; contextSignature: string | null } | null>(null);
 
   useEffect(() => {
@@ -137,7 +137,7 @@ export function NewTradeEntryForm({
 
   async function refreshApiValues(sym: string, optionsContext?: OptionsRequestContext) {
     const normalizedSym = sym.trim().toUpperCase();
-    if (!normalizedSym || factors.api.length === 0) return;
+    if (!normalizedSym || factors.all.length === 0) return;
 
     if (hasOptionApiFactors) {
       const hasLegs = optionsContext && Array.isArray(optionsContext.legs) && optionsContext.legs.length > 0;
@@ -149,7 +149,7 @@ export function NewTradeEntryForm({
     try {
       setApiBusy(true);
       const ipsId = (selectedIPS as any).ips_id || (selectedIPS as any).id;
-      const values = await fetchApiFactorValues(normalizedSym, factors.api, ipsId, optionsContext);
+      const values = await fetchApiFactorValues(normalizedSym, factors.all, ipsId, optionsContext);
       setApiValues(values);
     } catch (e) {
       console.error("API factor fetch error", e);
@@ -212,7 +212,7 @@ export function NewTradeEntryForm({
 
   useEffect(() => {
     const sym = (formData.symbol || '').trim().toUpperCase();
-    if (!sym || factors.api.length === 0) {
+    if (!sym || factors.all.length === 0) {
       return;
     }
 
@@ -239,7 +239,7 @@ export function NewTradeEntryForm({
     formData.optionStrike,
     formData.callStrike,
     formData.contractType,
-    factors.api.length,
+    factors.all.length,
     hasOptionApiFactors,
   ]);
 
@@ -660,7 +660,7 @@ export function NewTradeEntryForm({
                       const currentPrice = marketSnap?.price || 0;
 
                       // Get API factors that can be displayed in the options chain
-                      const displayableApiFactors = factors.api.filter((f) => {
+                      const displayableApiFactors = factors.all.filter((f) => {
                         const key = f.key.toLowerCase();
                         return key.includes('delta') || key.includes('gamma') || key.includes('theta') ||
                                key.includes('vega') || key.includes('rho') || key.includes('iv') ||
@@ -831,19 +831,14 @@ export function NewTradeEntryForm({
         </Card>
       )}
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4">
         <ApiFactorsPanel
-          factors={factors.api}
+          factors={factors.all}
           values={apiValues}
           isConnected={!apiBusy}
           onRefresh={() => refreshApiValues((formData.symbol || '').trim().toUpperCase(), buildOptionsContext())}
           editable
           onChange={(key, value) => setApiValues((prev)=> ({ ...prev, [key]: value }))}
-        />
-        <ManualFactorsPanel
-          factors={factors.manual}
-          values={manualValues}
-          onChange={(key, value) => setManualValues((prev) => ({ ...prev, [key]: value }))}
         />
       </div>
 

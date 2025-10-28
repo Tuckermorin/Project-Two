@@ -51,6 +51,7 @@ import { IPSExitWatchConfig } from "@/components/ips/ips-exit-watch-config";
 import { IPSDTEConfig } from "@/components/ips/ips-dte-config";
 import { IPSSummary } from "@/components/ips/ips-summary";
 import { TradeScoreDisplay } from "@/components/ips/trade-score-display";
+import { BacktestButton } from "@/components/ips/BacktestButton";
 
 // Services & types
 import {
@@ -1147,11 +1148,15 @@ const handleSaveIPS = async (ipsData: any) => {
               </div>
 
               {/* Action Buttons */}
-              <div className="flex gap-3 mt-5">
-                <Button variant="outline" size="default" className="flex-1 font-medium" onClick={() => handleIPSAction(ips.id, "view")}>
-                  <Eye className="w-4 h-4 mr-2" />
-                  View Details
+              <div className="flex gap-2 mt-5">
+                <Button variant="outline" size="sm" className="flex-1 font-medium" onClick={() => handleIPSAction(ips.id, "view")}>
+                  <Eye className="w-4 h-4 mr-1" />
+                  View
                 </Button>
+                <BacktestButton
+                  ipsId={ips.id}
+                  ipsName={ips.name}
+                />
               </div>
             </CardContent>
 

@@ -307,6 +307,13 @@ export async function PATCH(request: NextRequest) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'record_outcome', tradeIds: ids })
       }).catch(err => console.error(`Failed to record outcomes:`, err));
+
+      // Embed snapshots for closed trades (for temporal pattern learning)
+      fetch(`${baseUrl}/api/trades/snapshots/embed`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tradeIds: ids })
+      }).catch(err => console.error(`Failed to embed snapshots:`, err));
     }
 
     return NextResponse.json({ success: true });

@@ -464,9 +464,13 @@ You never provide generic advice - every insight is specific to the trade at han
   async createRationaleEmbedding(
     rationale: StructuredRationale,
     context: EnrichedTradeContext,
-    evaluationId?: string
+    evaluationId?: string,
+    userId?: string
   ): Promise<string | null> {
-    if (!evaluationId) return null;
+    if (!evaluationId || !userId) {
+      console.warn('[RationaleGenerator] Skipping embedding save - missing evaluationId or userId');
+      return null;
+    }
 
     try {
       // Create condensed text representation for embedding
@@ -480,6 +484,7 @@ You never provide generic advice - every insight is specific to the trade at han
         .from('trade_rationale_embeddings')
         .insert({
           trade_evaluation_id: evaluationId,
+          user_id: userId,
           rationale_embedding: embedding,
           rationale_text: JSON.stringify(rationale),
           trade_details: {

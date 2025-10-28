@@ -156,6 +156,8 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
         }
       }
       console.log(`[PreFilterGeneral] Calculated IV ranks for ${Object.keys(ivDataBySymbol).length} symbols`);
+      // DEBUG: Log IV data for all symbols
+      console.log('[PreFilterGeneral] IV Data by Symbol:', JSON.stringify(ivDataBySymbol, null, 2));
     }
   } catch (error) {
     console.warn('[PreFilterGeneral] Failed to batch fetch IV data, will skip IV calculations:', error);
@@ -188,6 +190,7 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
 
       // Get pre-calculated IV data from batch fetch
       const ivData = ivDataBySymbol[symbol] || { iv_rank: null, iv_percentile: null };
+      console.log(`[PreFilterGeneral] ${symbol}: IV Data from batch =>`, JSON.stringify(ivData));
 
       // OPTIMIZATION: Fetch news and sentiment data in parallel where possible
       // Tavily news search - primary news source
@@ -205,8 +208,18 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
         console.warn(`[PreFilterGeneral] ${symbol}: Tavily news search error:`, newsSearch.error);
       }
 
-      // OPTIMIZATION: Skip redundant sentiment calls - Use Tavily for news, skip Alpha Vantage news sentiment
-      // Only fetch Reddit sentiment and insider activity (unique data sources)
+      // Fetch Alpha Vantage News Sentiment (provides article counts, topic sentiment)
+      // This is NOT redundant with Tavily - it provides structured sentiment data
+      let avNewsSentiment = null;
+      try {
+        const avClient = getAlphaVantageClient();
+        avNewsSentiment = await avClient.getNewsSentiment(symbol, 50);
+        console.log(`[PreFilterGeneral] ${symbol}: Alpha Vantage news sentiment: ${avNewsSentiment.count} articles, avg score=${avNewsSentiment.average_score?.toFixed(2)}, positive=${avNewsSentiment.positive}, negative=${avNewsSentiment.negative}`);
+      } catch (error) {
+        console.warn(`[PreFilterGeneral] ${symbol}: Failed to fetch Alpha Vantage news sentiment:`, error);
+      }
+
+      // Fetch Reddit sentiment and insider activity (unique data sources)
       let redditData = null;
       let insiderActivity = null;
 
@@ -258,10 +271,12 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
         iv_rank: ivData?.iv_rank || null,
         iv_percentile: ivData?.iv_percentile || null,
         news: newsSearch.results || [],
+        av_news_sentiment: avNewsSentiment, // Alpha Vantage news sentiment data
         insider_activity: insiderActivity,
         reddit: redditData,
         timestamp: new Date().toISOString()
       };
+      console.log(`[PreFilterGeneral] ${symbol}: symbolData.iv_rank=${symbolData.iv_rank}, symbolData.iv_percentile=${symbolData.iv_percentile}`);
 
       // Check if symbol passes high-weight general factors
       let passes = true;
@@ -540,6 +555,7 @@ async function fetchOptionsChains(state: AgentState): Promise<Partial<AgentState
         iv_rank: state.generalData[symbol]?.iv_rank || null,
         iv_percentile: state.generalData[symbol]?.iv_percentile || null,
       };
+      console.log(`[FetchOptionsChains] ${symbol}: marketData.iv_rank=${marketData[symbol].iv_rank}, marketData.iv_percentile=${marketData[symbol].iv_percentile}`);
 
       // Add current price to generalData for 52-week chart
       if (state.generalData[symbol] && currentPrice) {
@@ -1723,12 +1739,14 @@ function getFactorValue(factor: any, candidate: any, state: AgentState): { value
     case 'calc-iv-rank':
     case 'opt-iv-rank':
     case 'IV Rank': // Database factor name
+      console.log(`[getFactorValue] IV Rank for ${candidate.symbol}: marketData.iv_rank=${marketData?.iv_rank}, generalData.iv_rank=${generalData?.iv_rank}`);
       return { value: marketData?.iv_rank || null, target: formatTarget(factor.threshold, factor.direction) };
 
     // IV Percentile
     case 'calc-iv-percentile':
     case 'opt-iv-percentile':
     case 'IV Percentile': // Database factor name
+      console.log(`[getFactorValue] IV Percentile for ${candidate.symbol}: marketData.iv_percentile=${marketData?.iv_percentile}, generalData.iv_percentile=${generalData?.iv_percentile}`);
       return { value: marketData?.iv_percentile || null, target: formatTarget(factor.threshold, factor.direction) };
 
     // Put/Call Volume Ratio

@@ -325,6 +325,12 @@ const { data: facRows } = await supabase
   .from('ips_factors')
   .select('ips_id, enabled, collection_method');
 
+// Fetch trade statistics for each IPS
+const { data: tradeStats } = await supabase
+  .from('trades')
+  .select('ips_id, status, profit_loss')
+  .eq('user_id', user.id);
+
 type C = { total: number; active: number; api: number; manual: number };
 const counts = new Map<string, C>();
 
@@ -340,14 +346,43 @@ for (const r of facRows ?? []) {
   counts.set(id, c);
 }
 
+// Calculate trade statistics per IPS
+type TradeStats = { total: number; closed: number; wins: number; total_roi: number };
+const tradeStatsMap = new Map<string, TradeStats>();
+
+for (const trade of tradeStats ?? []) {
+  const ipsId = trade.ips_id;
+  if (!ipsId) continue;
+
+  const stats = tradeStatsMap.get(ipsId) ?? { total: 0, closed: 0, wins: 0, total_roi: 0 };
+  stats.total += 1;
+
+  if (trade.status === 'closed') {
+    stats.closed += 1;
+    const profitLoss = Number(trade.profit_loss) || 0;
+    stats.total_roi += profitLoss;
+    if (profitLoss > 0) {
+      stats.wins += 1;
+    }
+  }
+
+  tradeStatsMap.set(ipsId, stats);
+}
+
 const out = (ipsRows ?? []).map((row: any) => {
   const c = counts.get(row.id);
+  const stats = tradeStatsMap.get(row.id);
+
   return {
     ...row,
     total_factors:  c ? c.total  : (row.total_factors  ?? 0),
     active_factors: c ? c.active : (row.active_factors ?? 0),
     api_factors:    c ? c.api    : (row.api_factors    ?? 0),
     manual_factors: c ? c.manual : (row.manual_factors ?? 0),
+    // Calculate win rate and avg ROI from closed trades
+    total_trades: stats ? stats.total : 0,
+    win_rate: stats && stats.closed > 0 ? (stats.wins / stats.closed) * 100 : null,
+    avg_roi: stats && stats.closed > 0 ? stats.total_roi / stats.closed : null,
   };
 });
 

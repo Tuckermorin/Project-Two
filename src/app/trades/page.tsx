@@ -780,22 +780,7 @@ export default function TradesPage() {
               const totalFactors = ips.total_factors ?? 0;
               const activeFactors = ips.active_factors ?? 0;
 
-              // API/Manual counts (prefer server counts; otherwise derive from rules)
-              let apiCount = 0;
-              let manualCount = 0;
-
-              if (typeof (ips as any).api_factors === "number" || typeof (ips as any).manual_factors === "number") {
-                apiCount = (ips as any).api_factors ?? 0;
-                manualCount = (ips as any).manual_factors ?? 0;
-              } else {
-                const rules = normalizeIPSRules(ips);
-                if (rules.length > 0) {
-                  const isActive = (r: any) => (r.enabled ?? r.isActive ?? true) === true;
-                  const method = (r: any) => (r.collection_method ?? r.source);
-                  apiCount = rules.filter((r) => method(r) === "api" && isActive(r)).length;
-                  manualCount = rules.filter((r) => method(r) === "manual" && isActive(r)).length;
-                }
-              }
+              // All factors are now API-driven or calculated (no manual input needed)
 
               // Convert strategy ids into human-readable names
               const strategyLabel = (Array.isArray(ips.strategies)
@@ -828,11 +813,10 @@ export default function TradesPage() {
                       </div>
                     </div>
 
-                    {/* Show API/Manual breakdown if we have counts */}
+                    {/* Show active factors count */}
                     {totalFactors > 0 && (
-                      <div className="flex justify-between text-xs text-gray-500 pt-2 border-t">
-                        <span>📡 {apiCount} API</span>
-                        <span>✍️ {manualCount} Manual</span>
+                      <div className="flex justify-center text-xs text-gray-500 pt-2 border-t">
+                        <span>📡 {activeFactors} Active Factors</span>
                       </div>
                     )}
 

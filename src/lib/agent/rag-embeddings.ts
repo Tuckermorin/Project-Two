@@ -588,6 +588,12 @@ export async function embedTradeSnapshot(
   console.log(`[RAG] Embedding snapshot for trade ${trade.symbol} (${snapshot.snapshot_trigger})`);
 
   try {
+    // Validate that we have user_id
+    if (!trade.user_id) {
+      console.error(`[RAG] Cannot embed snapshot ${snapshot.id} - trade.user_id is missing`);
+      throw new Error('trade.user_id is required for embedding');
+    }
+
     // Build snapshot context
     const context = buildSnapshotContext(snapshot, trade, includeOutcome);
 
@@ -596,7 +602,7 @@ export async function embedTradeSnapshot(
 
     // Store in trade_snapshot_embeddings table (will create migration for this)
     const supabase = getSupabase();
-    await supabase.from("trade_snapshot_embeddings").insert({
+    const { error: insertError } = await supabase.from("trade_snapshot_embeddings").insert({
       snapshot_id: snapshot.id,
       trade_id: trade.id,
       embedding: embedding,
@@ -619,6 +625,11 @@ export async function embedTradeSnapshot(
       },
       user_id: trade.user_id,
     });
+
+    if (insertError) {
+      console.error(`[RAG] Failed to insert snapshot embedding:`, insertError);
+      throw insertError;
+    }
 
     console.log(`[RAG] ✓ Embedded snapshot ${snapshot.id}`);
   } catch (error: any) {
@@ -843,7 +854,18 @@ export async function embedClosedTradeSnapshots(userId: string): Promise<number>
   // Get all snapshots for these trades
   const { data: snapshots, error: snapshotsError } = await getSupabase()
     .from("trade_snapshots")
-    .select("*, trades!inner(*)")
+    .select(`
+      *,
+      trades!inner(
+        id,
+        user_id,
+        symbol,
+        strategy_type,
+        status,
+        realized_pnl,
+        realized_pl_percent
+      )
+    `)
     .in("trade_id", tradeIds);
 
   if (snapshotsError || !snapshots || snapshots.length === 0) {
@@ -867,7 +889,15 @@ export async function embedClosedTradeSnapshots(userId: string): Promise<number>
         continue;
       }
 
-      await embedTradeSnapshot(snapshot, snapshot.trades, { includeOutcome: true });
+      // Extract trade data from joined relationship
+      const trade = Array.isArray(snapshot.trades) ? snapshot.trades[0] : snapshot.trades;
+
+      if (!trade || !trade.user_id) {
+        console.error(`[RAG] Snapshot ${snapshot.id} missing trade data or user_id`);
+        continue;
+      }
+
+      await embedTradeSnapshot(snapshot, trade, { includeOutcome: true });
       embedded++;
 
       // Rate limit
