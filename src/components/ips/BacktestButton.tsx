@@ -48,6 +48,7 @@ export function BacktestButton({
   onComplete,
 }: BacktestButtonProps) {
   const [isOpen, setIsOpen] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false); // Prevent double-submit
   const [view, setView] = useState<"history" | "new" | "running">("history"); // Default to history view
   const [isLoading, setIsLoading] = useState(false);
   const [runId, setRunId] = useState<string | null>(null);
@@ -271,6 +272,13 @@ export function BacktestButton({
    * Start the backtest
    */
   const startBacktest = async () => {
+    // Prevent double-submission (React StrictMode in dev causes double renders)
+    if (isSubmitting) {
+      console.log("[Backtest] Already submitting, ignoring duplicate call");
+      return;
+    }
+
+    setIsSubmitting(true);
     setIsLoading(true);
     setResults(null);
     setStatus(null);
@@ -280,6 +288,7 @@ export function BacktestButton({
     if (!startDate || !endDate) {
       alert("Please select a valid date range");
       setIsLoading(false);
+      setIsSubmitting(false);
       return;
     }
 
@@ -291,6 +300,7 @@ export function BacktestButton({
     if (symbolInput.trim() && validSymbols.length === 0) {
       alert("No valid symbols entered. Please use symbols from the watchlist.");
       setIsLoading(false);
+      setIsSubmitting(false);
       return;
     }
 
@@ -323,6 +333,7 @@ export function BacktestButton({
       console.error("Error starting backtest:", error);
       alert(`Error: ${error.message}`);
       setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -344,8 +355,10 @@ export function BacktestButton({
         if (statusData.status === "completed") {
           await fetchResults(id);
           setIsLoading(false);
+          setIsSubmitting(false); // Reset submit flag
         } else if (statusData.status === "failed") {
           setIsLoading(false);
+          setIsSubmitting(false); // Reset submit flag
         } else {
           // Continue polling
           setTimeout(poll, 3000); // Poll every 3 seconds
@@ -353,6 +366,7 @@ export function BacktestButton({
       } catch (error) {
         console.error("Error polling status:", error);
         setIsLoading(false);
+        setIsSubmitting(false); // Reset submit flag on error
       }
     };
 

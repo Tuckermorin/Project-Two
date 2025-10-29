@@ -142,7 +142,7 @@ export interface EarningsTranscriptEmbedding {
   quarter: string;
   fiscal_year: number;
   transcript_text: string;
-  embedding: number[]; // Vector embedding (1536 dimensions)
+  embedding: number[]; // Vector embedding (2000 dimensions)
   created_at?: string;
 }
 

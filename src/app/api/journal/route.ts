@@ -1,27 +1,7 @@
 // API Routes for Journal Entries
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server-client'
-import OpenAI from 'openai'
-
-const openai = process.env.OPENAI_API_KEY
-  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
-  : null
-
-/**
- * Generate embedding using OpenAI text-embedding-3-small (1536 dimensions)
- */
-async function generateEmbedding(text: string): Promise<number[]> {
-  if (!openai) {
-    throw new Error('OpenAI API key not configured')
-  }
-
-  const response = await openai.embeddings.create({
-    model: 'text-embedding-3-small',
-    input: text,
-  })
-
-  return response.data[0].embedding
-}
+import { generateEmbedding } from '@/lib/services/embedding-service'
 
 // ============================================================================
 // GET - Fetch journal entries

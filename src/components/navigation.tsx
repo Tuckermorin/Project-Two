@@ -101,7 +101,7 @@ export function Navigation() {
             {/* Theme Toggle */}
             <button
               onClick={toggleTheme}
-              className="inline-flex items-center justify-center p-2 rounded-lg transition-all"
+              className="inline-flex items-center justify-center p-2 rounded-lg transition-all cursor-pointer"
               style={{
                 background: 'var(--glass-bg)',
                 border: '1px solid var(--glass-border)',

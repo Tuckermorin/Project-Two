@@ -1,7 +1,7 @@
 // RAG Embedding Pipeline for Trade Historical Context
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import OpenAI from "openai";
-import { generateEmbedding as generateOllamaEmbedding } from "@/lib/services/ollama-embedding-service";
+import { generateEmbedding as generateUnifiedEmbedding } from "@/lib/services/embedding-service";
 
 // Lazy initialization of Supabase client to ensure env vars are loaded
 let supabaseInstance: SupabaseClient | null = null;
@@ -28,16 +28,16 @@ const openai = process.env.OPENAI_API_KEY
   : null;
 
 // ============================================================================
-// Embedding Creation (Now using Ollama qwen3-embedding with 4096 dimensions)
+// Embedding Creation (Using unified embedding service with 2000 dimensions)
 // ============================================================================
 
 /**
- * Generate embedding using Ollama qwen3-embedding (4096 dimensions)
- * Uses the centralized ollama-embedding-service
+ * Generate embedding using configured provider (OpenAI or Ollama)
+ * Configured to match Supabase HNSW index limit (2000 dimensions)
  */
 async function generateEmbedding(text: string): Promise<number[]> {
-  console.log(`[RAG] Using Ollama qwen3-embedding for embeddings (4096 dimensions)`);
-  return generateOllamaEmbedding(text);
+  console.log(`[RAG] Generating embedding (2000 dimensions)`);
+  return generateUnifiedEmbedding(text);
 }
 
 /**

@@ -32,6 +32,8 @@ export async function POST(request: NextRequest) {
       endDate,
       symbols,
       includeSentiment = true,
+      useAIFiltering = false, // NEW: Enable AI filtering
+      aiRecommendationThreshold = 'buy', // NEW: Minimum recommendation threshold
       minTrades = 10,
     } = body;
 
@@ -90,6 +92,8 @@ export async function POST(request: NextRequest) {
       endDate: new Date(endDate),
       symbols: symbols || undefined,
       includeSentiment,
+      useAIFiltering, // NEW
+      aiRecommendationThreshold, // NEW
       minTrades,
       userId: user.id,
     };
@@ -106,6 +110,8 @@ export async function POST(request: NextRequest) {
         symbols: backtestConfig.symbols,
         min_trades: minTrades,
         include_sentiment: includeSentiment,
+        use_ai_filtering: useAIFiltering, // NEW
+        ai_recommendation_threshold: aiRecommendationThreshold, // NEW
         user_id: user.id,
         status: "pending",
       })
@@ -161,8 +167,8 @@ async function runBacktestInBackground(config: any, runId: string) {
       })
       .eq("id", runId);
 
-    // Create engine and run
-    const engine = new IPSBacktestingEngine(config);
+    // Create engine with runId and run
+    const engine = new IPSBacktestingEngine(config, undefined, runId);
     await engine.run();
 
     // Update status to "completed"

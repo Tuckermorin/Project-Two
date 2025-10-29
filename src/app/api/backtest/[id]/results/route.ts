@@ -61,8 +61,33 @@ export async function GET(
       .single();
 
     if (resultsError || !results) {
+      console.error("[Backtest Results API] Results not found for run", runId);
+      console.error("[Backtest Results API] Error:", resultsError);
+
+      // Check if run has trade matches at least
+      const { data: tradeMatches, error: matchesError } = await supabase
+        .from("ips_backtest_trade_matches")
+        .select("count")
+        .eq("run_id", runId);
+
+      if (matchesError || !tradeMatches) {
+        return NextResponse.json(
+          {
+            error: "Results not found",
+            details: "The backtest completed but did not generate results. This may indicate an error during processing.",
+            runStatus: run.status,
+            errorMessage: run.error_message
+          },
+          { status: 404 }
+        );
+      }
+
       return NextResponse.json(
-        { error: "Results not found" },
+        {
+          error: "Results calculation in progress",
+          details: `Found trade matches but results not yet calculated. Run status: ${run.status}`,
+          tradeMatchCount: tradeMatches.length
+        },
         { status: 404 }
       );
     }
@@ -175,6 +200,16 @@ export async function GET(
       benchmark: {
         outperformanceVsRandom: results.outperformance_vs_random,
         outperformanceVsMarket: results.outperformance_vs_market,
+      },
+
+      // Portfolio Metrics
+      portfolio: {
+        startingValue: results.starting_portfolio,
+        endingValue: results.ending_portfolio,
+        totalReturn: results.total_return,
+        cagr: results.cagr,
+        maxDrawdown: results.portfolio_max_drawdown,
+        equityCurve: results.equity_curve,
       },
 
       // Sample Trades

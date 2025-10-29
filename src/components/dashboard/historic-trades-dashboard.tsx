@@ -83,7 +83,7 @@ function SortableColumnItem({ column, isVisible, isPinned, onToggleVisible, onTo
       </Label>
       <button
         onClick={onTogglePin}
-        className={`p-1 rounded transition-colors ${
+        className={`p-1 rounded transition-colors cursor-pointer ${
           isPinned
             ? 'text-blue-600'
             : 'text-gray-400 opacity-0 group-hover:opacity-100'

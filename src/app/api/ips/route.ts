@@ -328,7 +328,7 @@ const { data: facRows } = await supabase
 // Fetch trade statistics for each IPS
 const { data: tradeStats } = await supabase
   .from('trades')
-  .select('ips_id, status, profit_loss')
+  .select('ips_id, status, realized_pl')
   .eq('user_id', user.id);
 
 type C = { total: number; active: number; api: number; manual: number };
@@ -359,7 +359,7 @@ for (const trade of tradeStats ?? []) {
 
   if (trade.status === 'closed') {
     stats.closed += 1;
-    const profitLoss = Number(trade.profit_loss) || 0;
+    const profitLoss = Number(trade.realized_pl) || 0;
     stats.total_roi += profitLoss;
     if (profitLoss > 0) {
       stats.wins += 1;

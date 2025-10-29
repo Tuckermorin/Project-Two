@@ -33,7 +33,7 @@ export function ApiFactorsPanel({ factors, values, isConnected = true, onRefresh
             <button
               type="button"
               onClick={onRefresh}
-              className="text-xs px-2 py-1 rounded border hover:bg-muted"
+              className="text-xs px-2 py-1 rounded border hover:bg-muted cursor-pointer"
             >
               Refresh
             </button>

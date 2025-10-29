@@ -5,7 +5,7 @@
  * Running on local Ollama server for privacy and cost savings
  *
  * Model: qwen3-embedding:latest
- * Dimensions: 4096
+ * Dimensions: 2000 (configured to match Supabase HNSW index limit)
  * Base URL: golem:11434 (or configured OLLAMA_BASE_URL)
  */
 
@@ -16,6 +16,10 @@ interface OllamaEmbeddingResponse {
 interface OllamaEmbeddingRequest {
   model: string;
   prompt: string;
+  options?: {
+    num_ctx?: number;
+    truncate?: boolean;
+  };
 }
 
 export class OllamaEmbeddingService {
@@ -28,7 +32,7 @@ export class OllamaEmbeddingService {
     const rawUrl = process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST || 'http://golem:11434';
     this.baseUrl = this.normalizeBaseUrl(rawUrl);
     this.model = process.env.OLLAMA_EMBEDDING_MODEL || 'qwen3-embedding:latest';
-    this.dimensions = 4096; // qwen3-embedding output size
+    this.dimensions = 2000; // Configured to match Supabase HNSW index limit (max 2000 dims)
 
     console.log(`[OllamaEmbedding] Initialized with model ${this.model} at ${this.baseUrl}`);
   }
@@ -62,7 +66,10 @@ export class OllamaEmbeddingService {
 
       const requestBody: OllamaEmbeddingRequest = {
         model: this.model,
-        prompt: text
+        prompt: text,
+        options: {
+          truncate: true // Enable truncation for dimension control
+        }
       };
 
       const response = await fetch(url, {
@@ -84,14 +91,22 @@ export class OllamaEmbeddingService {
         throw new Error('Invalid embedding response from Ollama');
       }
 
-      // Verify dimension count
-      if (data.embedding.length !== this.dimensions) {
-        console.warn(
-          `[OllamaEmbedding] Expected ${this.dimensions} dimensions, got ${data.embedding.length}`
+      // Truncate to desired dimensions if needed
+      let embedding = data.embedding;
+      if (embedding.length > this.dimensions) {
+        console.log(
+          `[OllamaEmbedding] Truncating embedding from ${embedding.length} to ${this.dimensions} dimensions`
         );
+        embedding = embedding.slice(0, this.dimensions);
+      } else if (embedding.length < this.dimensions) {
+        console.warn(
+          `[OllamaEmbedding] Expected ${this.dimensions} dimensions, got ${embedding.length}. Padding with zeros.`
+        );
+        // Pad with zeros if needed
+        embedding = [...embedding, ...new Array(this.dimensions - embedding.length).fill(0)];
       }
 
-      return data.embedding;
+      return embedding;
 
     } catch (error: any) {
       console.error('[OllamaEmbedding] Failed to generate embedding:', error.message);

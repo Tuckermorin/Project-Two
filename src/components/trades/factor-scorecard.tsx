@@ -64,7 +64,7 @@ export function FactorScorecard({ ipsFactorDetails, compact = false }: FactorSco
           </div>
           <button
             onClick={() => setExpanded(!expanded)}
-            className="text-gray-500 hover:text-gray-700"
+            className="text-gray-500 hover:text-gray-700 cursor-pointer"
           >
             {expanded ? <ChevronUp className="h-5 w-5" /> : <ChevronDown className="h-5 w-5" />}
           </button>

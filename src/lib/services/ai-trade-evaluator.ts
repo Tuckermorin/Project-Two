@@ -2,7 +2,7 @@
 // Provides AI-powered trade recommendations using enriched context
 // Implements progressive weighting: 60/40 → 50/50 → 30/70 (IPS/AI)
 
-import OpenAI from 'openai';
+import { ChatOllama } from "@langchain/ollama";
 import type { EnrichedTradeContext, TradeCandidate } from './trade-context-enrichment-service';
 import { getEnhancedRationaleGenerator, type StructuredRationale } from './enhanced-rationale-generator';
 
@@ -80,12 +80,38 @@ export interface TradeEvaluationResult {
 // ============================================================================
 
 export class AITradeEvaluator {
-  private openai: OpenAI;
+  private llm: ChatOllama;
 
   constructor() {
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY!,
+    const normalizeBaseUrl = (raw?: string | null): string => {
+      const fallback = "http://golem:11434";
+      if (!raw) return fallback;
+      const trimmed = raw.trim();
+      if (!trimmed) return fallback;
+      try {
+        const url = new URL(trimmed);
+        if (url.pathname && url.pathname !== "/") {
+          url.pathname = "/";
+        }
+        url.search = "";
+        url.hash = "";
+        const base = url.origin + (url.pathname === "/" ? "" : url.pathname);
+        return base.replace(/\/$/, "");
+      } catch (error) {
+        return trimmed.replace(/\/api\/chat$/i, "").replace(/\/$/, "") || fallback;
+      }
+    };
+
+    const ollamaBaseUrl = normalizeBaseUrl(process.env.OLLAMA_BASE_URL || process.env.OLLAMA_HOST);
+
+    this.llm = new ChatOllama({
+      model: "gpt-oss:20b",
+      temperature: 0.3,
+      baseUrl: ollamaBaseUrl,
+      numCtx: 32768,
     });
+
+    console.log(`[AITradeEvaluator] Initialized with Ollama model gpt-oss:20b at ${ollamaBaseUrl}`);
   }
 
   /**
@@ -165,38 +191,44 @@ export class AITradeEvaluator {
   }
 
   /**
-   * Get AI evaluation using GPT-4 with enriched context
+   * Get AI evaluation using Ollama gpt-oss:20b with enriched context
    */
   private async getAIEvaluation(context: EnrichedTradeContext): Promise<AIEvaluation> {
-    console.log(`[AITradeEvaluator] Requesting AI evaluation from GPT-4...`);
+    console.log(`[AITradeEvaluator] Requesting AI evaluation from Ollama (gpt-oss:20b)...`);
 
     const prompt = this.buildAIPrompt(context);
 
     try {
-      const completion = await this.openai.chat.completions.create({
-        model: 'gpt-4-turbo-preview',
-        messages: [
-          {
-            role: 'system',
-            content: `You are an expert options trading analyst specializing in credit spreads.
+      const messages = [
+        {
+          role: 'system' as const,
+          content: `You are an expert options trading analyst specializing in credit spreads.
 Analyze the provided trade context and provide a detailed evaluation in JSON format.
-Be objective, data-driven, and consider all available information.`,
-          },
-          {
-            role: 'user',
-            content: prompt,
-          },
-        ],
-        temperature: 0.3,
-        response_format: { type: 'json_object' },
-      });
+Be objective, data-driven, and consider all available information.
+Output ONLY valid JSON in the exact format requested - no markdown formatting, no code blocks, no preamble.`,
+        },
+        {
+          role: 'user' as const,
+          content: prompt,
+        },
+      ];
 
-      const response = completion.choices[0]?.message?.content;
-      if (!response) {
+      const response = await this.llm.invoke(messages);
+      const responseText = response.content?.toString().trim();
+
+      if (!responseText) {
         throw new Error('No response from AI');
       }
 
-      const parsed = JSON.parse(response);
+      // Clean up response (remove markdown code blocks if present)
+      let cleanedResponse = responseText;
+      if (cleanedResponse.startsWith('```json')) {
+        cleanedResponse = cleanedResponse.replace(/^```json\n?/, '').replace(/\n?```$/, '');
+      } else if (cleanedResponse.startsWith('```')) {
+        cleanedResponse = cleanedResponse.replace(/^```\n?/, '').replace(/\n?```$/, '');
+      }
+
+      const parsed = JSON.parse(cleanedResponse);
       return this.normalizeAIResponse(parsed);
     } catch (error: any) {
       console.error(`[AITradeEvaluator] AI evaluation failed: ${error.message}`);

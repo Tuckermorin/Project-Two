@@ -117,12 +117,37 @@ export async function getSentimentForDate(
 }
 
 /**
+ * Detect AlphaVantage delay based on environment
+ */
+function getAlphaVantageDelayMs(): number {
+  // Check if user has explicitly set the delay (preferred)
+  if (process.env.ALPHA_VANTAGE_MIN_DELAY_MS) {
+    return parseInt(process.env.ALPHA_VANTAGE_MIN_DELAY_MS, 10);
+  }
+
+  // Fallback to tier-based detection
+  const tier = process.env.ALPHA_VANTAGE_TIER || 'premium';
+
+  // Delay mapping (with safety buffer):
+  // - Free: 5 RPM → 12000ms (12s)
+  // - Premium: 75 RPM → 800ms
+  // - Enterprise: 600 RPM → 100ms
+  const delays = {
+    free: 12000,
+    premium: 800,
+    enterprise: 100,
+  };
+
+  return delays[tier as keyof typeof delays] || delays.enterprise;
+}
+
+/**
  * Batch fetch sentiment for multiple dates (with rate limiting)
  */
 export async function getBatchSentiment(
   symbol: string,
   dates: Date[],
-  delayMs = 13000 // AlphaVantage free tier: 5 calls/min, premium: 75 calls/min
+  delayMs = getAlphaVantageDelayMs() // Auto-detect based on tier
 ): Promise<Map<string, SentimentData>> {
   const results = new Map<string, SentimentData>();
 
@@ -382,7 +407,7 @@ export async function prefetchSentimentRange(
   symbol: string,
   startDate: Date,
   endDate: Date,
-  delayMs = 13000
+  delayMs = getAlphaVantageDelayMs()
 ): Promise<void> {
   console.log(`[Sentiment] Pre-fetching sentiment for ${symbol} from ${startDate.toISOString()} to ${endDate.toISOString()}`);
 

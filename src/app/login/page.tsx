@@ -180,7 +180,7 @@ export default function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2"
+                  className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer"
                   style={{ color: 'var(--text-tertiary)' }}
                   tabIndex={-1}
                 >

@@ -293,8 +293,6 @@ export default function IPSPage() {
       const allTrades = [...prospective, ...active, ...closed];
       const totalTrades = allTrades.length;
 
-      console.log('[IPS Stats] Total trades:', totalTrades, '(prospective:', prospective.length, 'active:', active.length, 'closed:', closed.length, ')');
-
       // Calculate win rate from closed trades
       const closedTrades = closed;
       const profitableTrades = closedTrades.filter((t: any) => {
@@ -303,15 +301,12 @@ export default function IPSPage() {
         const plDollar = Number(closureData?.realized_pl || t.realized_pl || t.pl_dollar || 0);
         const plPercent = Number(closureData?.realized_pl_percent || t.realized_pl_percent || t.pl_percent || 0);
 
-        console.log('[IPS Stats] Trade', t.symbol, '- PL:', plDollar, 'PL%:', plPercent);
         return plDollar > 0 || plPercent > 0;
       });
 
       const avgWinRate = closedTrades.length > 0
         ? Math.round((profitableTrades.length / closedTrades.length) * 100)
         : 0;
-
-      console.log('[IPS Stats] Win rate:', avgWinRate, '% (', profitableTrades.length, 'profitable /', closedTrades.length, 'closed)');
 
       setTradeStats({ totalTrades, avgWinRate });
     } catch (err) {

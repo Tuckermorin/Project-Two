@@ -8,7 +8,7 @@ import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 import type { EnrichedTradeContext } from './trade-context-enrichment-service';
 import type { AIEvaluation } from './ai-trade-evaluator';
-import { generateEmbedding } from './ollama-embedding-service';
+import { generateEmbedding } from './embedding-service';
 
 // ============================================================================
 // Types
@@ -120,7 +120,7 @@ export interface StructuredRationale {
 export interface RationaleEmbedding {
   id: string;
   trade_evaluation_id: string;
-  rationale_embedding: number[]; // 1536 dimensions (OpenAI)
+  rationale_embedding: number[]; // 2000 dimensions (Ollama qwen3-embedding)
   rationale_text: string;
   trade_details: {
     symbol: string;
@@ -560,7 +560,7 @@ You never provide generic advice - every insight is specific to the trade at han
   }
 
   /**
-   * Create embedding using Ollama qwen3-embedding (4096 dimensions)
+   * Create embedding using Ollama qwen3-embedding (2000 dimensions)
    */
   private async createEmbedding(text: string): Promise<number[]> {
     return generateEmbedding(text);

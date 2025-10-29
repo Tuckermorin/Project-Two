@@ -319,7 +319,7 @@ export default function ActiveTradesSummary() {
         <button
           onClick={handleManualRefresh}
           disabled={refreshing}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
         >
           <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
           {refreshing ? 'Updating...' : 'Update Now'}

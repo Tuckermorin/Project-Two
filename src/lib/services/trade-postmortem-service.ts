@@ -12,7 +12,7 @@
 
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
-import { generateEmbedding } from './ollama-embedding-service';
+import { generateEmbedding } from './embedding-service';
 
 // ============================================================================
 // Types
@@ -452,7 +452,7 @@ CRITICAL INSTRUCTIONS:
   }
 
   /**
-   * Create embedding of post-mortem for similarity search using Ollama qwen3-embedding (4096 dimensions)
+   * Create embedding of post-mortem for similarity search using Ollama qwen3-embedding (2000 dimensions)
    */
   private async createPostMortemEmbedding(analysis: PostMortemAnalysis): Promise<number[]> {
     // Build condensed text for embedding

@@ -148,6 +148,7 @@ export default function ProspectiveTradesPage() {
                             {r.ips_factor_scores && (
                               <button
                                 onClick={() => setExpandedRow(isExpanded ? null : r.id)}
+                                className="cursor-pointer"
                                 style={{ color: 'var(--text-tertiary)' }}
                               >
                                 {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}

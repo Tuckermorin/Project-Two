@@ -482,7 +482,7 @@ export default function WatchlistPage() {
                       <button
                         key={`${r.symbol}-${r.name}`}
                         type="button"
-                        className="w-full text-left px-3 py-2 hover:bg-gray-100 border-b last:border-b-0"
+                        className="w-full text-left px-3 py-2 hover:bg-gray-100 border-b last:border-b-0 cursor-pointer"
                         onMouseDown={(ev) => ev.preventDefault()}
                         onClick={() => {
                           setSymbol(r.symbol.toUpperCase())

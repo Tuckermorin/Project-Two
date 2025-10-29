@@ -7,6 +7,7 @@ import { monitorAllActiveTrades } from '@/lib/agent/active-trade-monitor';
 import { analyzeTradePostMortem } from '@/lib/agent/trade-postmortem';
 import { batchIntelligentResearch } from '@/lib/agent/rag-router';
 import { embedClosedTradeSnapshots } from '@/lib/agent/rag-embeddings';
+import { captureActiveTradesDailySnapshot } from '@/lib/services/daily-snapshot-with-news';
 import { createClient } from '@supabase/supabase-js';
 
 // Supabase client
@@ -129,7 +130,56 @@ export function initializeScheduler() {
     scheduledJobs.push(middayCheck);
     console.log('✓ Midday Trade Check - 12:00 PM EST (Mon-Fri)');
 
-    // Job 3: Auto Post-Mortems - 5:00 PM EST (Mon-Fri) - End of trading day
+    // Job 3: Daily Snapshots with News - 4:00 PM EST (Mon-Fri) - End of trading day
+    const dailySnapshots = cron.schedule(
+      '0 16 * * 1-5',
+      async () => {
+        console.log('[Cron] Daily snapshots with news triggered');
+        try {
+          const userIds = await getAllUserIds();
+
+          if (userIds.length === 0) {
+            console.log('[Cron] No users found for daily snapshots');
+            return;
+          }
+
+          let totalCredits = 0;
+          let totalSnapshots = 0;
+
+          for (const userId of userIds) {
+            console.log(`[Cron] Capturing daily snapshots for user ${userId}...`);
+            try {
+              const results = await captureActiveTradesDailySnapshot(userId);
+              totalSnapshots += results.success;
+              totalCredits += results.total_credits;
+
+              console.log(`[Cron] User ${userId}: ${results.success} snapshots, ${results.total_credits} credits`);
+
+              // Log sentiment summary
+              const sentimentCounts = results.trade_summaries.reduce((acc, t) => {
+                if (t.sentiment) acc[t.sentiment] = (acc[t.sentiment] || 0) + 1;
+                return acc;
+              }, {} as Record<string, number>);
+
+              if (Object.keys(sentimentCounts).length > 0) {
+                console.log(`[Cron] Sentiment: ${JSON.stringify(sentimentCounts)}`);
+              }
+            } catch (error) {
+              console.error(`[Cron] Failed to capture snapshots for user ${userId}:`, error);
+            }
+          }
+
+          console.log(`[Cron] Daily snapshots complete: ${totalSnapshots} total, ${totalCredits} Tavily credits used`);
+        } catch (error) {
+          console.error('[Cron] Daily snapshots failed:', error);
+        }
+      },
+      { timezone: 'America/New_York' }
+    );
+    scheduledJobs.push(dailySnapshots);
+    console.log('✓ Daily Snapshots with News - 4:00 PM EST (Mon-Fri)');
+
+    // Job 4: Auto Post-Mortems - 5:00 PM EST (Mon-Fri) - End of trading day
     const autoPostMortem = cron.schedule(
       '0 17 * * 1-5',
       async () => {
@@ -181,7 +231,7 @@ export function initializeScheduler() {
     scheduledJobs.push(autoPostMortem);
     console.log('✓ Auto Post-Mortems - 5:00 PM EST (Mon-Fri)');
 
-    // Job 4: Snapshot Embeddings - 5:30 PM EST (Mon-Fri) - After post-mortems complete
+    // Job 5: Snapshot Embeddings - 5:30 PM EST (Mon-Fri) - After post-mortems complete
     const snapshotEmbeddings = cron.schedule(
       '30 17 * * 1-5',
       async () => {
@@ -212,7 +262,7 @@ export function initializeScheduler() {
     scheduledJobs.push(snapshotEmbeddings);
     console.log('✓ Snapshot Embeddings - 5:30 PM EST (Mon-Fri)');
 
-    // Job 5: Weekly RAG Enrichment - 2:00 AM Sunday
+    // Job 6: Weekly RAG Enrichment - 2:00 AM Sunday
     const weeklyEnrichment = cron.schedule(
       '0 2 * * 0',
       async () => {
