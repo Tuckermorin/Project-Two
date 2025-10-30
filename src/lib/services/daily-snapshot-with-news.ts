@@ -12,7 +12,7 @@
 
 import { createClient } from '@supabase/supabase-js';
 import { getTradeSnapshotService } from './trade-snapshot-service';
-import { TavilySearchClient, TavilySearchResponse } from '@langchain/community/tools/tavily_search';
+import { TavilySearchResults } from '@langchain/community/tools/tavily_search';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -21,7 +21,7 @@ const supabase = createClient(
 
 // Initialize Tavily client
 const tavilyClient = process.env.TAVILY_API_KEY
-  ? new TavilySearchClient({ apiKey: process.env.TAVILY_API_KEY })
+  ? new TavilySearchResults({ apiKey: process.env.TAVILY_API_KEY })
   : null;
 
 // ============================================================================
@@ -63,7 +63,7 @@ async function fetchDailyNews(symbol: string): Promise<DailyNewsSummary | null> 
     console.log(`[DailySnapshot] Fetching news for ${symbol}...`);
 
     // Search for recent news
-    const searchResults = await tavilyClient.call(query, {
+    const searchResults = await tavilyClient.invoke(query, {
       maxResults: 5,
       searchDepth: 'basic',
       includeAnswer: true,

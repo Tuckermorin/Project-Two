@@ -560,6 +560,37 @@ export function TradeDetailsModal({
                       className="max-w-xs"
                     />
                   </div>
+
+                  {/* Collateral Calculation */}
+                  {(() => {
+                    const contracts = parseInt(numberOfContracts) || 1;
+                    const shortLeg = candidate.contract_legs?.find((l: any) => l.type === 'SELL');
+                    const longLeg = candidate.contract_legs?.find((l: any) => l.type === 'BUY');
+
+                    if (shortLeg && longLeg) {
+                      // For spreads: collateral = spread width * contracts * 100 (same as Robinhood)
+                      const spreadWidth = Math.abs(shortLeg.strike - longLeg.strike);
+                      const collateral = spreadWidth * contracts * 100;
+
+                      return (
+                        <div className="p-3 rounded-lg bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800">
+                          <div className="flex items-center justify-between">
+                            <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                              Collateral Required
+                            </span>
+                            <span className="text-lg font-bold text-blue-600 dark:text-blue-400">
+                              ${collateral.toFixed(2)}
+                            </span>
+                          </div>
+                          <p className="text-xs text-blue-700 dark:text-blue-300 mt-1">
+                            {contracts} contract{contracts !== 1 ? 's' : ''} × ${spreadWidth.toFixed(2)} spread = ${collateral.toFixed(2)}
+                          </p>
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
+
                   <p className="text-xs text-muted-foreground">
                     All other metrics are automatically extracted from the options chain
                   </p>

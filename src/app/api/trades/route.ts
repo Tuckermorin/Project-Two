@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server-client';
+import { getEnhancedRationaleGenerator } from '@/lib/services/enhanced-rationale-generator';
 
 export async function POST(request: NextRequest) {
   try {
@@ -292,21 +293,18 @@ export async function PATCH(request: NextRequest) {
         body: JSON.stringify({ tradeIds: ids })
       }).catch(err => console.error('Failed to trigger spread price update:', err));
 
-      // OPTIMIZATION: Batch save rationale embeddings for all activated trades in one request
-      fetch(`${baseUrl}/api/trades/rationale`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'save_embedding', tradeIds: ids })
-      }).catch(err => console.error(`Failed to save rationale embeddings:`, err));
+      // OPTIMIZATION: Save rationale embeddings directly (no HTTP call needed)
+      saveRationaleEmbeddings(ids, user.id, supabase).catch(err =>
+        console.error(`Failed to save rationale embeddings:`, err)
+      );
     }
 
     // OPTIMIZATION: Batch record outcomes for AI learning in one request
     if (targetStatus === 'closed' && ids.length > 0) {
-      fetch(`${baseUrl}/api/trades/rationale`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'record_outcome', tradeIds: ids })
-      }).catch(err => console.error(`Failed to record outcomes:`, err));
+      // Record outcomes directly (no HTTP call needed)
+      recordTradeOutcomes(ids, user.id, supabase).catch(err =>
+        console.error(`Failed to record outcomes:`, err)
+      );
 
       // Embed snapshots for closed trades (for temporal pattern learning)
       fetch(`${baseUrl}/api/trades/snapshots/embed`, {
@@ -352,4 +350,161 @@ export async function DELETE(request: NextRequest) {
     console.error('Error DELETE /api/trades:', err);
     return NextResponse.json({ error: 'Failed to delete trades' }, { status: 500 });
   }
+}
+
+// ============================================================================
+// Helper Functions for Rationale Embeddings
+// ============================================================================
+
+/**
+ * Save rationale embeddings for activated trades
+ */
+async function saveRationaleEmbeddings(
+  tradeIds: string[],
+  userId: string,
+  supabase: any
+): Promise<void> {
+  const rationaleGenerator = getEnhancedRationaleGenerator();
+
+  // Fetch all trades with their AI evaluation data
+  const { data: trades, error: tradeError } = await supabase
+    .from('trades')
+    .select('*')
+    .in('id', tradeIds)
+    .eq('user_id', userId);
+
+  if (tradeError || !trades) {
+    console.error('[Rationale Save] Error fetching trades:', tradeError);
+    return;
+  }
+
+  console.log(`[Rationale Save] Processing ${trades.length} trades for user ${userId}`);
+
+  // Process each trade
+  for (const trade of trades) {
+    try {
+      // Skip if no AI evaluation
+      if (!trade.ai_evaluation_id || !trade.structured_rationale) {
+        console.log(`[Rationale Save] Trade ${trade.id} has no AI evaluation to embed`);
+        continue;
+      }
+
+      // Check if embedding already exists
+      const { data: existingEmbedding } = await supabase
+        .from('trade_rationale_embeddings')
+        .select('id')
+        .eq('trade_evaluation_id', trade.ai_evaluation_id)
+        .maybeSingle();
+
+      if (existingEmbedding) {
+        console.log(`[Rationale Save] Embedding already exists for evaluation ${trade.ai_evaluation_id}`);
+        continue;
+      }
+
+      // Build minimal context for embedding
+      const context = {
+        candidate: {
+          symbol: trade.symbol,
+          strategy_type: trade.strategy_type,
+          dte: calculateDTE(trade.expiration_date),
+          delta: trade.delta_short_leg,
+          iv_rank: trade.iv_at_entry
+        }
+      };
+
+      // Create the embedding
+      const embeddingId = await rationaleGenerator.createRationaleEmbedding(
+        trade.structured_rationale,
+        context,
+        trade.ai_evaluation_id,
+        userId
+      );
+
+      console.log(`[Rationale Save] ✓ Created embedding ${embeddingId} for trade ${trade.id}`);
+    } catch (error: any) {
+      console.error(`[Rationale Save] Error processing trade ${trade.id}:`, error.message);
+    }
+  }
+}
+
+/**
+ * Record trade outcomes for closed trades
+ */
+async function recordTradeOutcomes(
+  tradeIds: string[],
+  userId: string,
+  supabase: any
+): Promise<void> {
+  const rationaleGenerator = getEnhancedRationaleGenerator();
+
+  // Fetch all trades
+  const { data: trades, error: tradeError } = await supabase
+    .from('trades')
+    .select('*')
+    .in('id', tradeIds)
+    .eq('user_id', userId);
+
+  if (tradeError || !trades) {
+    console.error('[Outcome Record] Error fetching trades:', tradeError);
+    return;
+  }
+
+  console.log(`[Outcome Record] Processing ${trades.length} trades for user ${userId}`);
+
+  // Process each trade
+  for (const trade of trades) {
+    try {
+      // Skip if no AI evaluation
+      if (!trade.ai_evaluation_id) {
+        console.log(`[Outcome Record] Trade ${trade.id} has no AI evaluation to record outcome for`);
+        continue;
+      }
+
+      if (trade.status !== 'closed') {
+        console.log(`[Outcome Record] Trade ${trade.id} is not closed, skipping`);
+        continue;
+      }
+
+      // Calculate outcome
+      const realized_pl_percent = trade.realized_pl_percent || 0;
+      const actual_outcome: 'win' | 'loss' | 'break_even' =
+        realized_pl_percent > 0.5 ? 'win' :
+        realized_pl_percent < -0.5 ? 'loss' :
+        'break_even';
+
+      const days_held = trade.closed_at && trade.entry_date
+        ? Math.floor(
+            (new Date(trade.closed_at).getTime() - new Date(trade.entry_date).getTime()) /
+            (1000 * 60 * 60 * 24)
+          )
+        : 0;
+
+      const exit_reason = trade.exit_notes || 'Normal exit';
+
+      // Record the outcome
+      await rationaleGenerator.recordTradeOutcome(trade.ai_evaluation_id, {
+        actual_outcome,
+        actual_roi: realized_pl_percent,
+        days_held,
+        exit_reason
+      });
+
+      console.log(`[Outcome Record] ✓ Recorded outcome for trade ${trade.id}: ${actual_outcome} (${realized_pl_percent.toFixed(2)}%)`);
+    } catch (error: any) {
+      console.error(`[Outcome Record] Error processing trade ${trade.id}:`, error.message);
+    }
+  }
+}
+
+/**
+ * Calculate days to expiration from expiration date string
+ */
+function calculateDTE(expirationDate: string | null): number {
+  if (!expirationDate) return 0;
+
+  const expiry = new Date(expirationDate);
+  const now = new Date();
+  const dte = Math.floor((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+
+  return Math.max(0, dte);
 }

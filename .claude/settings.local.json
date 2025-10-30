@@ -14,7 +14,13 @@
       "Bash(find:*)",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -f \"C:/Users/tucker.morin/OneDrive - Squire/Desktop/Utah Tech/tenxiv/supabase/migrations/20251029_recreate_journal_view.sql\")",
       "Bash(npm install:*)",
-      "Bash(npx tsx:*)"
+      "Bash(npx tsx:*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT proname, pronargs, pg_get_function_arguments(oid) as args FROM pg_proc WHERE proname = ''match_trade_rationales'' AND pronamespace = ''public''::regnamespace;\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT COUNT(*) as total_embeddings, COUNT(CASE WHEN rationale_embedding IS NOT NULL THEN 1 END) as with_embeddings FROM trade_rationale_embeddings;\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"\\d vol_regime_daily\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT COUNT(*) as total_rows, COUNT(DISTINCT symbol) as unique_symbols, COUNT(iv_atm_30d) as rows_with_iv, COUNT(iv_rank) as rows_with_rank, COUNT(CASE WHEN iv_atm_30d IS NOT NULL AND iv_rank IS NULL THEN 1 END) as has_iv_missing_rank FROM vol_regime_daily;\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"\\df calculate_iv_rank\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT calculate_iv_rank(''AMD'', 0.66364, 252) as calculated_rank;\")"
     ],
     "deny": [],
     "ask": []

@@ -1023,10 +1023,45 @@ export default function TradesPage() {
             <Card>
               <CardContent className="p-4">
                 <div className="flex items-center gap-2">
-                  <TrendingUp className="h-5 w-5 text-orange-600" />
+                  <DollarSign className="h-5 w-5 text-orange-600" />
                   <div>
-                    <div className="text-2xl font-bold">—</div>
-                    <div className="text-sm text-gray-600">Win Rate</div>
+                    <div className="text-2xl font-bold">
+                      $
+                      {prospectiveTrades
+                        .reduce((acc, t) => {
+                          const d = t.data;
+                          const qty = d.numberOfContracts ?? 1;
+
+                          // Calculate collateral based on contract type (Robinhood style)
+                          let collateral = 0;
+
+                          if (d.contractType === 'put-credit-spread' || d.contractType === 'call-credit-spread') {
+                            // For spreads: collateral = spread width * contracts * 100
+                            const shortStrike = d.shortPutStrike || d.shortCallStrike || 0;
+                            const longStrike = d.longPutStrike || d.longCallStrike || 0;
+                            const spreadWidth = Math.abs(shortStrike - longStrike);
+                            collateral = spreadWidth * qty * 100;
+                          } else if (d.contractType === 'iron-condor') {
+                            // Iron condor: wider spread width
+                            const putSpreadWidth = Math.abs((d.shortPutStrike || 0) - (d.longPutStrike || 0));
+                            const callSpreadWidth = Math.abs((d.shortCallStrike || 0) - (d.longCallStrike || 0));
+                            collateral = Math.max(putSpreadWidth, callSpreadWidth) * qty * 100;
+                          } else if (d.contractType === 'long-call' || d.contractType === 'long-put') {
+                            // Long options: debit paid is the collateral
+                            collateral = (d.debitPaid || 0) * qty * 100;
+                          } else if (d.contractType === 'covered-call') {
+                            // Covered call: collateral is the cost of shares
+                            collateral = (d.sharesOwned || 0) * (d.currentPrice || 0);
+                          } else if (d.contractType === 'buy-hold') {
+                            // Buy/hold: collateral is shares * entry price
+                            collateral = (d.shares || 0) * (d.entryPrice || 0);
+                          }
+
+                          return acc + collateral;
+                        }, 0)
+                        .toFixed(0)}
+                    </div>
+                    <div className="text-sm text-gray-600">Total Collateral</div>
                   </div>
                 </div>
               </CardContent>
@@ -1340,7 +1375,7 @@ export default function TradesPage() {
   // Active Trades view
   // -----------------------------
   if (currentView === "active") {
-    const fmtMoney = (v?: number | null) => (v == null ? '—' : `$${v.toFixed(2)}`);
+    const fmtMoney = (v?: number | null) => (v == null ? '—' : `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
     return (
       <div className="max-w-6xl mx-auto p-6">
         <div className="mb-6 flex items-center justify-between">
@@ -1354,6 +1389,100 @@ export default function TradesPage() {
             <Button variant="outline" onClick={() => setCurrentView('action_needed')}>View Action Needed</Button>
           </div>
         </div>
+
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <Target className="h-5 w-5 text-blue-600" />
+                  <div>
+                    <div className="text-2xl font-bold">{activeTrades.length}</div>
+                    <div className="text-sm text-gray-600">Active Positions</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <TrendingUp className="h-5 w-5 text-green-600" />
+                  <div>
+                    <div className="text-2xl font-bold">
+                      $
+                      {activeTrades
+                        .reduce((acc, t: any) => {
+                          const maxGain = t.max_gain || 0;
+                          return acc + maxGain;
+                        }, 0)
+                        .toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                    <div className="text-sm text-gray-600">Total Max Gain</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5 text-red-600" />
+                  <div>
+                    <div className="text-2xl font-bold">
+                      $
+                      {activeTrades
+                        .reduce((acc, t: any) => {
+                          const maxLoss = Math.abs(t.max_loss || 0);
+                          return acc + maxLoss;
+                        }, 0)
+                        .toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                    <div className="text-sm text-gray-600">Total Max Loss</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <div className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5 text-orange-600" />
+                  <div>
+                    <div className="text-2xl font-bold">
+                      $
+                      {activeTrades
+                        .reduce((acc, t: any) => {
+                          // Calculate collateral for each active trade (Robinhood style)
+                          // Using database field names: number_of_contracts, spread_width, contract_type
+                          let collateral = 0;
+                          const contractType = t.contract_type;
+                          const qty = t.number_of_contracts || 1;
+
+                          if (contractType === 'put-credit-spread' || contractType === 'call-credit-spread') {
+                            // Use spread_width from database, or calculate from strikes
+                            const spreadWidth = t.spread_width || Math.abs((t.short_strike || 0) - (t.long_strike || 0));
+                            collateral = spreadWidth * qty * 100;
+                          } else if (contractType === 'iron-condor') {
+                            // For iron condor, use the spread_width which should be the wider of the two
+                            const spreadWidth = t.spread_width || 0;
+                            collateral = spreadWidth * qty * 100;
+                          } else if (contractType === 'long-call' || contractType === 'long-put') {
+                            // For long options, collateral is the debit paid
+                            collateral = (t.debit_paid || t.credit_received || 0) * qty * 100;
+                          } else if (contractType === 'covered-call') {
+                            collateral = (t.shares_owned || 0) * (t.current_price || 0);
+                          } else if (contractType === 'buy-hold') {
+                            collateral = (t.shares || 0) * (t.entry_price || 0);
+                          }
+
+                          return acc + collateral;
+                        }, 0)
+                        .toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}
+                    </div>
+                    <div className="text-sm text-gray-600">Total Collateral</div>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
 
         <Card>
           <CardHeader>
@@ -1397,13 +1526,13 @@ export default function TradesPage() {
                       } else if (r.contract_type === 'call-credit-spread' && r.short_strike) {
                         cushion = ((r.short_strike - price) / r.short_strike) * 100;
                       }
-                      let statusTxt = 'GOOD'; let statusClass = 'bg-green-50 text-green-700';
+                      let statusTxt = 'GOOD'; let statusClass = 'bg-blue-600 text-white border-blue-600';
                       const ipsScoreVal = r.ips_score != null ? Number(r.ips_score) : null;
                       const watchFlag = (ipsScoreVal != null && ipsScoreVal < 75) || (cushion != null && cushion < 5);
                       if (cushion != null && cushion < 0) {
-                        statusTxt = 'EXIT (LOSS)'; statusClass = 'bg-red-50 text-red-700';
+                        statusTxt = 'EXIT (LOSS)'; statusClass = 'bg-red-600 text-white border-red-600';
                       } else if (watchFlag) {
-                        statusTxt = 'WATCH'; statusClass = 'bg-yellow-50 text-yellow-700';
+                        statusTxt = 'WATCH'; statusClass = 'bg-purple-600 text-white border-purple-600';
                       }
                       return (
                         <tr key={r.id} className="border-t">
@@ -1423,7 +1552,6 @@ export default function TradesPage() {
                           <td className="py-2 pr-4"><Badge className={statusClass}>{statusTxt}</Badge></td>
                           <td className="py-2 pr-4">
                             <div className="flex gap-2">
-                              <Button size="sm" variant="outline" onClick={() => (window.location.href = '/journal')}>AI</Button>
                               <Button size="sm" variant="outline" onClick={() => setCurrentView('active')}>View</Button>
                               <Button size="sm" variant="outline" onClick={() => (window.location.href = `/trades?edit=${r.id}`)}>Edit</Button>
                               <Button size="sm" variant="destructive" onClick={async ()=>{
@@ -1452,6 +1580,7 @@ export default function TradesPage() {
             )}
           </CardContent>
         </Card>
+        </div>
       </div>
     );
   }
