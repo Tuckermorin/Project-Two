@@ -106,24 +106,34 @@ export async function getCatalysts(
   }
 
   // Last resort: Tavily (costs credits)
-  console.warn(`[UnifiedIntel] ⚠️ Using Tavily for catalysts (will cost credits)`);
-  const query = `${symbol} (earnings OR guidance OR "product launch" OR announcement)`;
-  const result = await tavilySearch(query, {
-    topic: 'news',
-    search_depth: 'advanced',
-    max_results: 10,
-    days: daysBack
-  });
+  try {
+    console.warn(`[UnifiedIntel] ⚠️ Using Tavily for catalysts (will cost ~1 credit)`);
+    const query = `${symbol} (earnings OR guidance OR "product launch" OR announcement)`;
+    const result = await tavilySearch(query, {
+      topic: 'news',
+      search_depth: 'basic',
+      max_results: 5,
+      days: daysBack
+    });
 
-  return result.results.map(r => ({
-    title: r.title,
-    url: r.url,
-    snippet: r.content?.substring(0, 200) || '',
-    publishedAt: r.publishedAt || new Date().toISOString(),
-    score: r.score || 0,
-    source: new URL(r.url).hostname,
-    sourceType: 'tavily' as const
-  }));
+    if (!result.results || result.results.length === 0) {
+      console.warn(`[UnifiedIntel] Tavily returned no catalyst results for ${symbol}`);
+      return [];
+    }
+
+    return result.results.map(r => ({
+      title: r.title,
+      url: r.url,
+      snippet: r.snippet?.substring(0, 200) || '',
+      publishedAt: r.publishedAt || new Date().toISOString(),
+      score: r.score || 0,
+      source: new URL(r.url).hostname,
+      sourceType: 'tavily' as const
+    }));
+  } catch (error) {
+    console.error(`[UnifiedIntel] Tavily failed for catalysts:`, error);
+    return [];  // Fail gracefully
+  }
 }
 
 /**
@@ -207,24 +217,34 @@ export async function getAnalystActivity(
   }
 
   // Last resort: Tavily
-  console.warn(`[UnifiedIntel] ⚠️ Using Tavily for analyst activity (will cost credits)`);
-  const query = `${symbol} (analyst OR "price target" OR upgrade OR downgrade OR rating)`;
-  const result = await tavilySearch(query, {
-    topic: 'news',
-    search_depth: 'advanced',
-    max_results: 10,
-    days: daysBack
-  });
+  try {
+    console.warn(`[UnifiedIntel] ⚠️ Using Tavily for analyst activity (will cost ~1 credit)`);
+    const query = `${symbol} (analyst OR "price target" OR upgrade OR downgrade OR rating)`;
+    const result = await tavilySearch(query, {
+      topic: 'news',
+      search_depth: 'basic',
+      max_results: 5,
+      days: daysBack
+    });
 
-  return result.results.map(r => ({
-    title: r.title,
-    url: r.url,
-    snippet: r.content?.substring(0, 200) || '',
-    publishedAt: r.publishedAt || new Date().toISOString(),
-    score: r.score || 0,
-    source: new URL(r.url).hostname,
-    sourceType: 'tavily' as const
-  }));
+    if (!result.results || result.results.length === 0) {
+      console.warn(`[UnifiedIntel] Tavily returned no analyst results for ${symbol}`);
+      return [];
+    }
+
+    return result.results.map(r => ({
+      title: r.title,
+      url: r.url,
+      snippet: r.snippet?.substring(0, 200) || '',
+      publishedAt: r.publishedAt || new Date().toISOString(),
+      score: r.score || 0,
+      source: new URL(r.url).hostname,
+      sourceType: 'tavily' as const
+    }));
+  } catch (error) {
+    console.error(`[UnifiedIntel] Tavily failed for analyst activity:`, error);
+    return [];  // Fail gracefully
+  }
 }
 
 /**
@@ -278,25 +298,35 @@ export async function getOperationalRisks(
     console.log(`[UnifiedIntel] Alpha Vantage failed, falling back to Tavily...`, error);
   }
 
-  // Last resort: Tavily
-  console.warn(`[UnifiedIntel] ⚠️ Using Tavily for operational risks (will cost credits)`);
-  const query = `${symbol} ("supply chain" OR margin OR competition OR regulatory OR investigation OR threat)`;
-  const result = await tavilySearch(query, {
-    topic: 'news',
-    search_depth: 'advanced',
-    max_results: 10,
-    days: daysBack
-  });
+  // Last resort: Tavily (costs credits)
+  try {
+    console.warn(`[UnifiedIntel] ⚠️ Using Tavily for operational risks (will cost ~1 credit)`);
+    const query = `${symbol} ("supply chain" OR margin OR competition OR regulatory OR investigation OR threat)`;
+    const result = await tavilySearch(query, {
+      topic: 'news',
+      search_depth: 'basic',
+      max_results: 5,
+      days: daysBack
+    });
 
-  return result.results.map(r => ({
-    title: r.title,
-    url: r.url,
-    snippet: r.content?.substring(0, 200) || '',
-    publishedAt: r.publishedAt || new Date().toISOString(),
-    score: r.score || 0,
-    source: new URL(r.url).hostname,
-    sourceType: 'tavily' as const
-  }));
+    if (!result.results || result.results.length === 0) {
+      console.warn(`[UnifiedIntel] Tavily returned no operational risk results for ${symbol}`);
+      return [];
+    }
+
+    return result.results.map(r => ({
+      title: r.title,
+      url: r.url,
+      snippet: r.content?.substring(0, 200) || '',
+      publishedAt: r.publishedAt || new Date().toISOString(),
+      score: r.score || 0,
+      source: new URL(r.url).hostname,
+      sourceType: 'tavily' as const
+    }));
+  } catch (error) {
+    console.error(`[UnifiedIntel] Tavily failed for operational risks:`, error);
+    return [];  // Fail gracefully
+  }
 }
 
 /**

@@ -192,10 +192,10 @@ export class TradePostMortemService {
       // 7. Create embedding of post-mortem
       const embedding = await this.createPostMortemEmbedding(postmortemAnalysis);
 
-      // 8. Save to database
+      // 8. Save to database (upsert to handle re-running post-mortems)
       const { data: saved, error: saveError } = await this.supabase
         .from('trade_postmortem_analysis')
-        .insert({
+        .upsert({
           trade_id: tradeId,
           user_id: trade.user_id,
           original_evaluation_id: trade.ai_evaluation_id,
@@ -204,6 +204,8 @@ export class TradePostMortemService {
           postmortem_embedding: embedding,
           analysis_confidence: this.calculateAnalysisConfidence(trade, originalEvaluation),
           data_quality_score: this.calculateDataQuality(trade, snapshots || [])
+        }, {
+          onConflict: 'trade_id'  // Update if trade_id already exists
         })
         .select()
         .single();

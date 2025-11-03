@@ -11,19 +11,20 @@ import { z } from "zod";
 export const TavilySearchResultSchema = z.object({
   title: z.string(),
   url: z.string().url(),
-  content: z.string().optional(),
-  snippet: z.string().optional(),
+  content: z.string().optional().nullable(),
+  snippet: z.string().optional().nullable(),
   score: z.number().min(0).max(1),
-  published_date: z.string().optional(), // Only present with topic:"news"
-  raw_content: z.string().optional(),
+  published_date: z.string().optional().nullable(), // Only present with topic:"news"
+  raw_content: z.string().optional().nullable(), // Tavily sometimes returns null instead of omitting
 });
 
 export const TavilySearchResponseSchema = z.object({
   query: z.string(),
   results: z.array(TavilySearchResultSchema),
-  answer: z.string().optional(),
+  answer: z.string().optional().nullable(), // Tavily sometimes returns null
   response_time: z.number().optional(),
   images: z.array(z.string()).optional(),
+  follow_up_questions: z.array(z.string()).optional().nullable(), // Sometimes present
 });
 
 /**

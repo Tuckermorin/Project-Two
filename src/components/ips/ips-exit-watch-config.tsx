@@ -59,6 +59,7 @@ export interface WatchRule {
 }
 
 export interface WatchCriteria {
+  allow_ai_overrides?: boolean
   enabled: boolean
   rules: WatchRule[]
 }
@@ -92,6 +93,7 @@ const defaultExitStrategies: ExitStrategies = {
 
 const defaultWatchCriteria: WatchCriteria = {
   enabled: false,
+  allow_ai_overrides: false, // Default to user-controlled only
   rules: []
 }
 
@@ -408,6 +410,26 @@ export function IPSExitWatchConfig({
           </div>
 
           {watchCriteria.enabled && (
+            <>
+              {/* AI Override Toggle */}
+              <div className="border-l-4 border-blue-500 bg-blue-50 p-4 rounded-r space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="flex-1">
+                    <Label className="font-semibold">Allow AI Monitoring Overrides</Label>
+                    <p className="text-sm text-gray-600 mt-1">
+                      When enabled, AI monitoring can suggest WATCH status when trades approach profit targets (30%+),
+                      even if no watch rules are triggered. When disabled, only your defined rules below will trigger WATCH status.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={watchCriteria.allow_ai_overrides ?? false}
+                    onCheckedChange={(checked) =>
+                      setWatchCriteria(prev => ({ ...prev, allow_ai_overrides: checked }))
+                    }
+                    className="ml-4"
+                  />
+                </div>
+              </div>
             <>
               <div className="space-y-3">
                 {watchCriteria.rules.map((rule, index) => (

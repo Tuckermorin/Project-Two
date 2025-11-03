@@ -693,11 +693,13 @@ async function storePostMortem(
     throw new Error(`Cannot find trade ${tradeId} to get user_id`);
   }
 
-  const { error } = await supabase.from("trade_postmortems").insert({
+  const { error } = await supabase.from("trade_postmortems").upsert({
     trade_id: tradeId,
     user_id: trade.user_id,
     post_mortem_data: postMortem,
     created_at: postMortem.created_at,
+  }, {
+    onConflict: 'trade_id'  // Update if trade_id already exists
   });
 
   if (error) {
@@ -705,7 +707,7 @@ async function storePostMortem(
     throw error;
   }
 
-  console.log(`[PostMortem] Stored post-mortem for trade ${tradeId}`);
+  console.log(`[PostMortem] Stored/updated post-mortem for trade ${tradeId}`);
 }
 
 /**

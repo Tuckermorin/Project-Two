@@ -165,28 +165,29 @@ export async function tavilySearch(
             throw new Error(`Tavily API returned ${r} response`);
           }
 
-          // Validate response schema
+          // Validate response schema (non-blocking - log but don't throw)
           const validation = validateSearchResponse(r);
           if (!validation.success) {
-            console.error(`[Tavily Search] Schema validation failed for query: "${query}"`);
-            console.error(`[Tavily Search] Validation errors:`, JSON.stringify(validation.error, null, 2));
-            console.error(`[Tavily Search] Actual response type:`, typeof r);
-            console.error(`[Tavily Search] Actual response:`, JSON.stringify(r, null, 2));
-            throw new Error(`Invalid search response schema: ${JSON.stringify(validation.error)}`);
+            console.warn(`[Tavily Search] Schema validation failed for query: "${query}"`);
+            console.warn(`[Tavily Search] Validation errors:`, JSON.stringify(validation.error, null, 2));
+            console.warn(`[Tavily Search] Proceeding with best-effort parsing...`);
           }
 
           if ((r as any)?.error) {
             throw new Error((r as any).error);
           }
 
-          const results: TavilySearchResult[] = ((r as any)?.results ?? []).map((x: any) => ({
-            title: x.title,
-            url: x.url,
-            snippet: x.snippet,
-            publishedAt: x.published_date,
-            score: x.score,
-            raw_content: x.raw_content,
-          }));
+          // Best-effort parsing even if validation failed
+          const results: TavilySearchResult[] = ((r as any)?.results ?? [])
+            .filter((x: any) => x.title && x.url)  // Only include results with minimum required fields
+            .map((x: any) => ({
+              title: x.title || 'Untitled',
+              url: x.url,
+              snippet: x.snippet || x.content || '',  // Fallback to content if snippet missing
+              publishedAt: x.published_date || new Date().toISOString(),
+              score: x.score || 0.5,
+              raw_content: x.raw_content || null,
+            }));
 
           const response = { query, results };
 

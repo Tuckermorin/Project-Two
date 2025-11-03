@@ -1,16 +1,19 @@
 // Active Trade Monitoring System
-// Provides real-time context and risk alerts for open positions using deep Tavily research
+// Provides real-time context and risk alerts for open positions
+// Now using Unified Intelligence Service (AlphaVantage first, Tavily fallback)
 
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { tavilySearch } from "@/lib/clients/tavily";
 import {
-  queryCatalysts,
-  queryAnalystActivity,
-  querySECFilings,
-  queryOperationalRisks,
-} from "@/lib/clients/tavily-queries";
+  getCatalysts,
+  getAnalystActivity,
+  getOperationalRisks,
+  IntelligenceArticle
+} from "@/lib/services/unified-intelligence-service";
+import { querySECFilings } from "@/lib/clients/tavily-queries"; // SEC still needs Tavily
 import { embedTradeOutcome } from "./rag-embeddings";
 import { rationaleLLM } from "@/lib/clients/llm";
+import { calculateSpreadPrice, calculateSpreadPL, shouldExitSpread } from "@/lib/utils/spread-pricing";
 
 // Lazy initialization of Supabase client to ensure env vars are loaded
 let supabaseInstance: SupabaseClient | null = null;
@@ -40,6 +43,14 @@ export interface TradeMonitorResult {
   symbol: string;
   status: string;
   days_held: number;
+  current_pl?: {
+    pl_dollar: number;
+    pl_percent: number;
+    current_spread_price: number;
+    should_exit: boolean;
+    exit_reason?: string;
+    exit_type?: 'profit' | 'loss' | null;
+  };
   current_context: {
     catalysts: any[];
     analyst_activity: any[];
@@ -114,9 +125,9 @@ export async function monitorActiveTrade(
   // Check if we should skip (already monitored recently and no force refresh)
   if (useCache && !forceRefresh) {
     const recentMonitor = await getRecentMonitorData(tradeId);
-    if (recentMonitor && isMonitorFresh(recentMonitor, 12)) {
-      // Within 12 hours
-      console.log(`[ActiveMonitor] Using cached monitor data (${recentMonitor.hours_old}h old)`);
+    if (recentMonitor && isMonitorFresh(recentMonitor, 24)) {
+      // Within 24 hours (increased from 12h to reduce redundant API calls)
+      console.log(`[ActiveMonitor] Using cached monitor data (${recentMonitor.hours_old.toFixed(1)}h old)`);
       return recentMonitor.data;
     }
   }
@@ -129,38 +140,91 @@ export async function monitorActiveTrade(
   let creditsUsed = 0;
   let cachedResults = 0;
 
-  // Parallel deep research queries
+  // Parallel deep research queries using Unified Intelligence Service
+  // This automatically tries: External DB (free) → AlphaVantage (free) → Tavily (costs credits)
   console.log(`[ActiveMonitor] Fetching context for ${typedTrade.symbol} (${daysBack}d lookback)`);
 
   const [catalysts, analysts, sec, risks, generalNews] = await Promise.all([
-    queryCatalysts(typedTrade.symbol, daysBack).then((r) => {
-      creditsUsed += 6; // 3 queries × 2 credits (advanced)
+    getCatalysts(typedTrade.symbol, daysBack).then((r) => {
+      // Credits only counted if Tavily was used (shown in unified service logs)
+      const usedTavily = r.some(a => a.sourceType === 'tavily');
+      creditsUsed += usedTavily ? 2 : 0; // 2 credits if Tavily fallback was used
+      cachedResults += usedTavily ? 0 : 1;
       return r;
     }),
-    queryAnalystActivity(typedTrade.symbol, daysBack).then((r) => {
-      creditsUsed += 6; // 3 queries × 2 credits
+    getAnalystActivity(typedTrade.symbol, daysBack).then((r) => {
+      const usedTavily = r.some(a => a.sourceType === 'tavily');
+      creditsUsed += usedTavily ? 2 : 0;
+      cachedResults += usedTavily ? 0 : 1;
       return r;
     }),
     querySECFilings(typedTrade.symbol, 30).then((r) => {
-      creditsUsed += 6; // 3 queries × 2 credits
+      creditsUsed += 2; // SEC filings always use Tavily (AV doesn't have them)
       return r;
     }),
-    queryOperationalRisks(typedTrade.symbol, daysBack).then((r) => {
-      creditsUsed += 8; // 4 queries × 2 credits
+    getOperationalRisks(typedTrade.symbol, daysBack).then((r) => {
+      const usedTavily = r.some(a => a.sourceType === 'tavily');
+      creditsUsed += usedTavily ? 2 : 0;
+      cachedResults += usedTavily ? 0 : 1;
       return r;
     }),
     tavilySearch(`${typedTrade.symbol} stock news last ${daysBack} days`, {
       topic: "news",
-      search_depth: "advanced",
+      search_depth: "basic", // Changed from "advanced" to save credits (1 credit vs 2)
       days: daysBack,
-      max_results: 15,
+      max_results: 10, // Reduced from 15 to save credits
     }).then((r) => {
-      creditsUsed += 2;
+      creditsUsed += 1; // Basic depth = 1 credit
       return r.results || [];
     }),
   ]);
 
   console.log(`[ActiveMonitor] Research complete. Credits used: ${creditsUsed}`);
+
+  // Calculate current P/L for the trade
+  let currentPL: TradeMonitorResult['current_pl'] = undefined;
+
+  if (typedTrade.credit_received && typedTrade.short_strike && typedTrade.long_strike && typedTrade.expiration_date) {
+    try {
+      // Determine contract type based on strategy
+      const contractType = typedTrade.strategy_type?.toLowerCase().includes('call') ? 'call' : 'put';
+
+      const spreadPrice = await calculateSpreadPrice(
+        typedTrade.symbol,
+        typedTrade.short_strike,
+        typedTrade.long_strike,
+        contractType,
+        typedTrade.expiration_date
+      );
+
+      if (spreadPrice) {
+        const { plDollar, plPercent } = calculateSpreadPL(
+          typedTrade.credit_received,
+          spreadPrice.mid
+        );
+
+        const exitCheck = shouldExitSpread(
+          typedTrade.credit_received,
+          spreadPrice.mid,
+          50,  // 50% profit target
+          200  // 200% stop loss
+        );
+
+        currentPL = {
+          pl_dollar: plDollar,
+          pl_percent: plPercent,
+          current_spread_price: spreadPrice.mid,
+          should_exit: exitCheck.shouldExit,
+          exit_reason: exitCheck.reason,
+          exit_type: exitCheck.type,
+        };
+
+        console.log(`[ActiveMonitor] P/L for ${typedTrade.symbol}: ${plPercent.toFixed(1)}% (${exitCheck.shouldExit ? 'EXIT SIGNAL' : 'HOLD'})`);
+      }
+    } catch (error) {
+      console.error(`[ActiveMonitor] Failed to calculate P/L for ${typedTrade.symbol}:`, error);
+    }
+  }
 
   // Analyze results and generate risk alerts
   const riskAlerts = analyzeRiskSignals({
@@ -171,6 +235,7 @@ export async function monitorActiveTrade(
     generalNews,
     trade: typedTrade,
     daysHeld,
+    currentPL,
   });
 
   // Generate recommendations
@@ -180,6 +245,7 @@ export async function monitorActiveTrade(
     daysHeld,
     catalysts,
     analysts,
+    currentPL,
   });
 
   // Build news summary
@@ -193,6 +259,7 @@ export async function monitorActiveTrade(
     newsSummary,
     catalysts,
     analysts,
+    currentPL,
   });
 
   const result: TradeMonitorResult = {
@@ -200,6 +267,7 @@ export async function monitorActiveTrade(
     symbol: typedTrade.symbol,
     status: typedTrade.status,
     days_held: daysHeld,
+    current_pl: currentPL,
     current_context: {
       catalysts,
       analyst_activity: analysts,
@@ -232,6 +300,7 @@ function analyzeRiskSignals(context: {
   generalNews: any[];
   trade: ActiveTradeData;
   daysHeld: number;
+  currentPL?: TradeMonitorResult['current_pl'];
 }): {
   level: "low" | "medium" | "high" | "critical";
   alerts: Array<{
@@ -249,6 +318,33 @@ function analyzeRiskSignals(context: {
   }> = [];
 
   const now = new Date().toISOString();
+
+  // Check for P/L-based exit signals (HIGHEST PRIORITY)
+  if (context.currentPL?.should_exit) {
+    if (context.currentPL.exit_type === 'profit') {
+      alerts.push({
+        type: "PROFIT_TARGET_HIT",
+        severity: "critical",
+        message: `${context.currentPL.exit_reason} - Current P/L: ${context.currentPL.pl_percent.toFixed(1)}%`,
+        detected_at: now,
+      });
+    } else if (context.currentPL.exit_type === 'loss') {
+      alerts.push({
+        type: "STOP_LOSS_HIT",
+        severity: "critical",
+        message: `${context.currentPL.exit_reason}`,
+        detected_at: now,
+      });
+    }
+  } else if (context.currentPL && context.currentPL.pl_percent >= 30) {
+    // Warning when approaching profit target
+    alerts.push({
+      type: "APPROACHING_PROFIT_TARGET",
+      severity: "medium",
+      message: `Trade approaching profit target at ${context.currentPL.pl_percent.toFixed(1)}% P/L (target: 50%)`,
+      detected_at: now,
+    });
+  }
 
   // Check for upcoming earnings (critical risk)
   const earningsKeywords = ["earnings", "guidance", "report", "quarterly results"];
@@ -363,18 +459,43 @@ function generateRecommendations(context: {
   daysHeld: number;
   catalysts: any[];
   analysts: any[];
+  currentPL?: TradeMonitorResult['current_pl'];
 }): string[] {
   const recommendations: string[] = [];
 
+  // P/L-based recommendations (HIGHEST PRIORITY)
+  const profitTargetHit = context.riskAlerts.alerts.some((a) => a.type === "PROFIT_TARGET_HIT");
+  const stopLossHit = context.riskAlerts.alerts.some((a) => a.type === "STOP_LOSS_HIT");
+  const approachingProfit = context.riskAlerts.alerts.some((a) => a.type === "APPROACHING_PROFIT_TARGET");
+
+  if (profitTargetHit) {
+    recommendations.push(
+      `💰 EXIT (PROFIT): Close this position now - profit target achieved at ${context.currentPL?.pl_percent.toFixed(1)}% P/L ($${context.currentPL?.pl_dollar.toFixed(2)})`
+    );
+    recommendations.push("Set limit order to close at mid price or better");
+  } else if (stopLossHit) {
+    recommendations.push(
+      `🛑 EXIT (LOSS): Close this position now - stop loss triggered to limit further losses`
+    );
+    recommendations.push("Exit immediately at market to prevent larger loss");
+  } else if (approachingProfit) {
+    recommendations.push(
+      `📈 MONITOR: Trade at ${context.currentPL?.pl_percent.toFixed(1)}% P/L - approaching 50% profit target`
+    );
+    recommendations.push("Set alert for 50% P/L to capture profits");
+  }
+
   // Risk-based recommendations
-  if (context.riskAlerts.level === "critical") {
+  if (context.riskAlerts.level === "critical" && !profitTargetHit && !stopLossHit) {
     recommendations.push(
       "⚠️ CRITICAL: Consider closing position or rolling to different strikes"
     );
     recommendations.push("Monitor price action closely - set alerts on brokerage platform");
   } else if (context.riskAlerts.level === "high") {
     recommendations.push("⚠️ HIGH RISK: Review exit criteria and adjust stops if needed");
-    recommendations.push("Consider taking profits early if trade is profitable");
+    if (context.currentPL && context.currentPL.pl_percent > 0) {
+      recommendations.push("Consider taking profits early given elevated risk");
+    }
   }
 
   // Earnings-specific
@@ -390,13 +511,6 @@ function generateRecommendations(context: {
   if (nearStrike) {
     recommendations.push(
       "📍 Price approaching short strike - consider rolling or closing to avoid assignment"
-    );
-  }
-
-  // Time-based
-  if (context.daysHeld >= 21) {
-    recommendations.push(
-      "⏰ Trade held for 21+ days - consider taking profits if target achieved (50%+ of max profit)"
     );
   }
 
@@ -462,7 +576,14 @@ async function generateAISummary(context: {
   newsSummary: string;
   catalysts: any[];
   analysts: any[];
+  currentPL?: TradeMonitorResult['current_pl'];
 }): Promise<string> {
+  const plSection = context.currentPL
+    ? `- Current P/L: ${context.currentPL.pl_percent.toFixed(1)}% ($${context.currentPL.pl_dollar.toFixed(2)})
+- Spread Close Price: $${context.currentPL.current_spread_price.toFixed(2)}
+- Exit Signal: ${context.currentPL.should_exit ? `YES - ${context.currentPL.exit_type?.toUpperCase()}` : 'NO - HOLD'}`
+    : '- P/L: Not available (missing trade data)';
+
   const prompt = `You are a professional options trader analyzing an active trade. Provide a concise, data-driven summary.
 
 **Trade Details:**
@@ -470,6 +591,7 @@ async function generateAISummary(context: {
 - Strategy: ${context.trade.strategy_type}
 - Days Held: ${context.daysHeld}
 - Entry IPS Score: ${context.trade.ips_score || "N/A"}%
+${plSection}
 - Current Risk Level: ${context.riskAlerts.level.toUpperCase()}
 
 **Risk Alerts (${context.riskAlerts.alerts.length}):**
@@ -483,9 +605,9 @@ ${context.analysts.length} analyst-related articles found
 
 **Your Task:**
 Write a 2-3 sentence professional summary of this trade's current status. Include:
-1. Overall trade health (good standing, caution, or exit consideration)
-2. Key risk factor (if any)
-3. Suggested action (hold, monitor closely, or consider exit)
+1. Overall trade health and current P/L status
+2. Key risk factor or exit signal (if any)
+3. Suggested action (exit now for profit/loss, hold, or monitor closely)
 
 Be direct and actionable. Focus on what matters for trade management.`;
 
@@ -599,33 +721,61 @@ export async function monitorAllActiveTrades(
 
   console.log(`[ActiveMonitor] Found ${trades.length} active trades`);
 
-  // Filter trades if watchOnly is enabled
-  // A trade is on WATCH if:
-  // 1. IPS score < 75, OR
-  // 2. Current price is within 5% of short strike (high risk of ITM)
+  // ENHANCED SMART FILTERING - A trade is on WATCH if:
+  // 1. IPS score < 75 (original IPS was risky), OR
+  // 2. Current price is within 5% of short strike (high risk of ITM), OR
+  // 3. Days to expiration <= 14 (approaching expiration needs monitoring), OR
+  // 4. Trade was monitored recently and risk level was HIGH/CRITICAL
   let tradesToMonitor = trades;
   let skippedCount = 0;
 
   if (watchOnly) {
+    // Pre-fetch recent monitor data for risk-based filtering
+    const recentMonitors = await Promise.all(
+      trades.map(async (trade) => {
+        const recent = await getRecentMonitorData(trade.id);
+        return { tradeId: trade.id, monitor: recent };
+      })
+    );
+
+    const monitorMap = new Map(recentMonitors.map(rm => [rm.tradeId, rm.monitor]));
+
     tradesToMonitor = trades.filter((trade) => {
       const ipsScore = trade.ips_score ?? 100;
       const currentPrice = trade.current_price ?? 0;
       const shortStrike = trade.short_strike ?? 0;
 
+      // Calculate days to expiration
+      const daysToExpiry = trade.expiration_date
+        ? Math.floor((new Date(trade.expiration_date).getTime() - Date.now()) / (1000 * 60 * 60 * 24))
+        : 999;
+
+      // Calculate proximity to short strike
       const percentToShort = shortStrike > 0
-        ? ((currentPrice - shortStrike) / shortStrike) * 100
+        ? Math.abs((shortStrike - currentPrice) / currentPrice) * 100
         : 100;
 
-      const isWatch = ipsScore < 75 || (shortStrike > 0 && percentToShort < 5);
+      // Check if previous monitor showed high risk
+      const recentMonitor = monitorMap.get(trade.id);
+      const hadHighRisk = recentMonitor?.data?.risk_alerts?.level === 'high' ||
+                          recentMonitor?.data?.risk_alerts?.level === 'critical';
+
+      // Determine if trade needs monitoring
+      const isWatch =
+        ipsScore < 75 || // Low IPS
+        percentToShort < 5 || // Close to short strike
+        daysToExpiry <= 14 || // Approaching expiration
+        hadHighRisk; // Previously flagged as risky
 
       if (!isWatch) {
         skippedCount++;
+        console.log(`[ActiveMonitor] Skipping ${trade.symbol} (IPS: ${ipsScore}, DTE: ${daysToExpiry}d, Proximity: ${percentToShort.toFixed(1)}%)`);
       }
 
       return isWatch;
     });
 
-    console.log(`[ActiveMonitor] Filtered to ${tradesToMonitor.length} WATCH trades (skipped ${skippedCount} GOOD trades)`);
+    console.log(`[ActiveMonitor] SMART FILTER: ${tradesToMonitor.length} WATCH trades (skipped ${skippedCount} GOOD trades)`);
   }
 
   // Monitor each trade

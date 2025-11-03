@@ -417,16 +417,6 @@ export default function ExcelStyleTradesDashboard() {
           }
           const exitSignal = ips?.exit_strategies ? evaluateExitStrategy(tradeForEval, ips.exit_strategies) : null
 
-          let status: 'GOOD' | 'WATCH' | 'EXIT' = 'GOOD'
-          if (exitSignal?.shouldExit) {
-            status = 'EXIT'
-          } else if (hasTriggeredWatchAlerts) {
-            status = 'WATCH'
-          } else if (percentToShort < 0) {
-            // Stock breached short strike
-            status = 'EXIT'
-          }
-
           // Calculate current P/L from spread price (spreadPrice already declared above)
           const creditReceived = Number(r.credit_received ?? 0) || 0
           const contracts = Number(r.number_of_contracts ?? r.contracts ?? 1) || 0
@@ -439,6 +429,44 @@ export default function ExcelStyleTradesDashboard() {
             const plPerContract = creditReceived - spreadPrice
             currentPL = plPerContract * contracts * 100
             currentPLPercent = (plPerContract / creditReceived) * 100
+          }
+
+          // Determine status based on P/L, exit signals, and risk factors
+          let status: 'GOOD' | 'WATCH' | 'EXIT' = 'GOOD'
+          let finalExitSignal = exitSignal
+
+          if (currentPLPercent !== undefined && currentPLPercent >= 50) {
+            // Profit target hit (50% of max profit)
+            status = 'EXIT'
+            finalExitSignal = {
+              shouldExit: true,
+              type: 'profit' as const,
+              reason: `Profit target reached: ${currentPLPercent.toFixed(1)}% P/L (target: 50%)`,
+              triggeredBy: 'pl_percent_threshold'
+            }
+          } else if (currentPLPercent !== undefined && currentPLPercent <= -200) {
+            // Stop loss hit (loss >= 200% of credit)
+            status = 'EXIT'
+            finalExitSignal = {
+              shouldExit: true,
+              type: 'loss' as const,
+              reason: `Stop loss triggered: ${currentPLPercent.toFixed(1)}% loss (threshold: -200%)`,
+              triggeredBy: 'pl_percent_threshold'
+            }
+          } else if (exitSignal?.shouldExit) {
+            status = 'EXIT'
+          } else if (percentToShort < 0) {
+            // Stock breached short strike
+            status = 'EXIT'
+          } else if (hasTriggeredWatchAlerts) {
+            status = 'WATCH'
+          } else if (currentPLPercent !== undefined && currentPLPercent >= 30) {
+            // AI monitoring: Approaching profit target (30-49%)
+            // Only apply if user has allowed AI overrides
+            const allowAIOverrides = ips?.watch_criteria?.allow_ai_overrides ?? false
+            if (allowAIOverrides) {
+              status = 'WATCH'
+            }
           }
 
           const obj: Trade = {
@@ -469,7 +497,7 @@ export default function ExcelStyleTradesDashboard() {
             ipsScore: typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined,
             ipsName: r.ips_name ?? r.ips_configurations?.name ?? null,
             plPercent: typeof r.pl_percent === 'number' ? Number(r.pl_percent) : undefined,
-            exitSignal,
+            exitSignal: finalExitSignal,
             watchAlerts,
           }
           return obj
