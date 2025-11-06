@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Separator } from '@/components/ui/separator'
-import { ArrowUpDown, ArrowUp, ArrowDown, Filter, Eye, EyeOff, Settings2, AlertCircle, History, Trash2, RefreshCw, Loader2, MoreVertical, X, Search, Pin, GripVertical, TrendingUp, TrendingDown } from 'lucide-react'
+import { ArrowUpDown, ArrowUp, ArrowDown, Eye, EyeOff, Columns3, AlertCircle, History, Trash2, RefreshCw, Loader2, MoreVertical, X, Search, Pin, GripVertical, TrendingUp, TrendingDown } from 'lucide-react'
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
@@ -181,9 +181,6 @@ const defaultHistoricColumns = [
   'theta', 'thetaAtClose', 'closingReason', 'ipsScore', 'ipsName'
 ]
 
-// Simple view for historic trades
-const simpleHistoricColumns = ['name', 'closedDate', 'contractType', 'actualPL', 'actualPLPercent', 'closingReason', 'ipsScore']
-
 // Preset interface
 interface ColumnPreset {
   id: string
@@ -233,7 +230,6 @@ const closeMethods = [
 
 export default function HistoricTradesDashboard() {
   // State
-  const [viewMode, setViewMode] = useState<'simple' | 'detailed'>('simple')
   const [showIPS, setShowIPS] = useState(false)
   const [visibleColumns, setVisibleColumns] = useState(new Set(defaultHistoricColumns))
   const [showColumnSelector, setShowColumnSelector] = useState(false)
@@ -678,9 +674,12 @@ export default function HistoricTradesDashboard() {
   })
 
   const formatDate = (value: string) => {
-    const d = new Date(value)
+    // Parse dates in UTC to avoid timezone shifting (e.g., showing Thursday instead of Friday)
+    const [year, month, day] = value.split('-').map(Number)
+    if (!year || !month || !day) return value
+    const d = new Date(Date.UTC(year, month - 1, day))
     if (isNaN(d.getTime())) return value
-    return d.toLocaleDateString()
+    return d.toLocaleDateString('en-US', { timeZone: 'UTC' })
   }
 
   // Format value for display
@@ -803,54 +802,44 @@ export default function HistoricTradesDashboard() {
   return (
     <>
     <Card className="w-full">
-      <CardHeader>
-        <div className="flex flex-row items-center justify-between">
-          <div>
-            <CardTitle>Trade History</CardTitle>
-            <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-              {processedTrades.length} closed {processedTrades.length === 1 ? 'trade' : 'trades'}
-            </p>
-          </div>
-          
-          <div className="flex gap-2">
-            {/* View mode toggle */}
-            <Select value={viewMode} onValueChange={(value: 'simple' | 'detailed') => setViewMode(value)}>
-              <SelectTrigger className="w-32">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="simple">Simple</SelectItem>
-                <SelectItem value="detailed">Detailed</SelectItem>
-              </SelectContent>
-            </Select>
-            
-            {/* IPS toggle */}
-            <Button
-              variant={showIPS ? "default" : "outline"}
-              size="sm"
-              onClick={() => setShowIPS(!showIPS)}
-              disabled={!hasActiveIPS}
-            >
-              {showIPS ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
-              IPS View
-            </Button>
-            
-            {/* Column selector */}
-            {viewMode === 'detailed' && !showIPS && (
-              <Button variant="outline" size="sm" onClick={() => setShowColumnSelector(true)}>
-                <Settings2 className="h-4 w-4 mr-2" />
-                Columns
-              </Button>
-            )}
-
-            <Button variant="ghost" size="sm" onClick={loadTrades} disabled={loading}>
-              <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-            </Button>
-          </div>
+      <CardHeader className="flex flex-row items-center justify-between">
+        <div>
+          <CardTitle>Trade History</CardTitle>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
+            {processedTrades.length} closed {processedTrades.length === 1 ? 'trade' : 'trades'}
+          </p>
         </div>
 
+        <div className="flex gap-2">
+          {/* Refresh button */}
+          <Button variant="ghost" size="sm" onClick={loadTrades} disabled={loading}>
+            <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
+          </Button>
+
+          {/* IPS toggle */}
+          <Button
+            variant={showIPS ? "default" : "outline"}
+            size="sm"
+            onClick={() => setShowIPS(!showIPS)}
+            disabled={!hasActiveIPS}
+          >
+            {showIPS ? <EyeOff className="h-4 w-4 mr-2" /> : <Eye className="h-4 w-4 mr-2" />}
+            IPS View
+          </Button>
+
+          {/* Column selector */}
+          {!showIPS && (
+            <Button variant="outline" size="sm" onClick={() => setShowColumnSelector(true)}>
+              <Columns3 className="h-4 w-4 mr-2" />
+              Columns
+            </Button>
+          )}
+        </div>
+      </CardHeader>
+
+      <CardContent>
         {/* Summary Statistics */}
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mt-4">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
           <div className="p-3 rounded" style={{ background: 'var(--glass-bg)' }}>
             <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Total Trades</p>
             <p className="text-lg font-semibold">{stats.totalTrades}</p>
@@ -880,9 +869,7 @@ export default function HistoricTradesDashboard() {
             </p>
           </div>
         </div>
-      </CardHeader>
-      
-      <CardContent>
+
         {/* Filters */}
         <div className="flex gap-4 mb-4">
           <Input
@@ -1025,22 +1012,6 @@ export default function HistoricTradesDashboard() {
               ))}
             </tbody>
           </table>
-        </div>
-
-        {/* Action Buttons */}
-        <div className="flex justify-between items-center mt-6 pt-4 border-t">
-          <div className="flex gap-2">
-            <Button variant="outline" size="sm">
-              <Filter className="h-4 w-4 mr-2" />
-              Advanced Filters
-            </Button>
-            <Button variant="outline" size="sm">
-              Export Analysis
-            </Button>
-            <Button variant="outline" size="sm">
-              Generate Report
-            </Button>
-          </div>
         </div>
       </CardContent>
     </Card>

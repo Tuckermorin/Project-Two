@@ -241,18 +241,20 @@ export function evaluateExitStrategy(
 
   // Check stop loss
   if (exitStrategies.loss?.enabled && trade.credit_received && trade.current_price) {
-    // For credit spreads: cost to close (buy back)
-    // If current_price is the spread value, loss = current_price (what you pay to buy it back)
-    // Loss as % of credit = (current_price / credit_received) * 100
-    const costToClose = trade.current_price
-    const lossPercent = (costToClose / trade.credit_received) * 100
+    // For credit spreads: calculate actual loss percentage
+    // Loss = (current_price - credit_received)
+    // Loss % = (loss / credit_received) * 100
+    // For a loss, current_price > credit_received, so this will be positive
+    const actualLoss = trade.current_price - trade.credit_received
+    const lossPercent = (actualLoss / trade.credit_received) * 100
 
     const lossThreshold = exitStrategies.loss.value // This is the percentage (e.g., 250 for 250%)
 
-    if (lossPercent >= lossThreshold) {
+    // Only trigger if we have an actual loss (lossPercent > 0) and it exceeds threshold
+    if (lossPercent > 0 && lossPercent >= lossThreshold) {
       return {
         shouldExit: true,
-        reason: `Stop loss triggered: ${lossPercent.toFixed(0)}% of credit (threshold: ${lossThreshold}%)`,
+        reason: `Stop loss triggered: ${lossPercent.toFixed(0)}% loss (threshold: ${lossThreshold}%)`,
         type: 'loss'
       }
     }

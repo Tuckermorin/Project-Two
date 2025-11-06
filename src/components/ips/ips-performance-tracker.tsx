@@ -137,14 +137,14 @@ export function IPSPerformanceTracker() {
         // Only track losses (negative values) for worst
         if (realized < 0 && realized < store.worst) store.worst = realized
 
-        // Track first and last trade dates (using entry_date which is when trade became active)
-        const entryDate = trade.entry_date
-        if (entryDate) {
-          if (!store.firstTradeDate || entryDate < store.firstTradeDate) {
-            store.firstTradeDate = entryDate
+        // Track first and last trade dates (using closed_at for when trade was actually closed)
+        const closedDate = trade.closed_at
+        if (closedDate) {
+          if (!store.firstTradeDate || closedDate < store.firstTradeDate) {
+            store.firstTradeDate = closedDate
           }
-          if (!store.lastTradeDate || entryDate > store.lastTradeDate) {
-            store.lastTradeDate = entryDate
+          if (!store.lastTradeDate || closedDate > store.lastTradeDate) {
+            store.lastTradeDate = closedDate
           }
         }
 

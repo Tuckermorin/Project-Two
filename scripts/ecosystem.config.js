@@ -1,13 +1,15 @@
 // ecosystem.config.js
 // PM2 configuration file for TenXIV automated jobs
 
+const path = require('path');
+
 module.exports = {
   apps: [
     {
       name: 'tenxiv-scheduler',
       script: 'npx',
       args: 'tsx scripts/schedulers/start-all-schedulers.ts',
-      cwd: __dirname,
+      cwd: path.resolve(__dirname, '..'),
       instances: 1,
       autorestart: true,
       watch: false,

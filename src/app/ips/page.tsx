@@ -1,6 +1,7 @@
 "use client"
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,7 @@ import {
   Layers,
   AlertTriangle,
   Save,
+  TrendingUp,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -52,6 +54,7 @@ import { IPSDTEConfig } from "@/components/ips/ips-dte-config";
 import { IPSSummary } from "@/components/ips/ips-summary";
 import { TradeScoreDisplay } from "@/components/ips/trade-score-display";
 import { BacktestButton } from "@/components/ips/BacktestButton";
+import { IPSAnalysisSelector } from "@/components/ips/IPSAnalysisSelector";
 
 // Services & types
 import {
@@ -221,6 +224,8 @@ interface IPSFlowState {
 const supabase = createClient();
 
 export default function IPSPage() {
+  const router = useRouter();
+
   // State for the IPS flow
   const [state, setState] = useState<IPSFlowState>({
     step: "list",
@@ -252,6 +257,11 @@ export default function IPSPage() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [ipsList, setIpsList] = useState<any[]>([]);
+
+  // Analysis selector state
+  const [analysisSelector, setAnalysisSelector] = useState({
+    isOpen: false,
+  });
 
   // Fetch IPSs from database using API
   async function fetchIPS() {
@@ -1023,10 +1033,20 @@ const handleSaveIPS = async (ipsData: any) => {
             <h1 className="text-3xl font-bold" style={{ color: 'var(--text-primary)' }}>IPS Builder</h1>
             <p className="mt-2" style={{ color: 'var(--text-secondary)' }}>Manage your Investment Policy Statements and trading rules</p>
           </div>
-          <Button onClick={handleCreateNew} className="bg-blue-600 hover:bg-blue-700">
-            <PlusCircle className="h-4 w-4 mr-2" />
-            Create New IPS
-          </Button>
+          <div className="flex gap-3">
+            <Button
+              variant="outline"
+              onClick={() => setAnalysisSelector({ isOpen: true })}
+              className="border-purple-600 text-purple-600 hover:bg-purple-50"
+            >
+              <TrendingUp className="h-4 w-4 mr-2" />
+              Analyze IPSs
+            </Button>
+            <Button onClick={handleCreateNew} className="bg-blue-600 hover:bg-blue-700">
+              <PlusCircle className="h-4 w-4 mr-2" />
+              Create New IPS
+            </Button>
+          </div>
         </div>
 
         {/* Stats Cards */}
@@ -1146,12 +1166,23 @@ const handleSaveIPS = async (ipsData: any) => {
               <div className="flex gap-2 mt-5">
                 <Button variant="outline" size="sm" className="flex-1 font-medium" onClick={() => handleIPSAction(ips.id, "view")}>
                   <Eye className="w-4 h-4 mr-1" />
-                  View
+                  View Configuration
                 </Button>
                 <BacktestButton
                   ipsId={ips.id}
                   ipsName={ips.name}
                 />
+              </div>
+              <div className="mt-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="w-full font-medium border-purple-600 text-purple-600 hover:bg-purple-50"
+                  onClick={() => router.push(`/ips/analysis?ids=${ips.id}`)}
+                >
+                  <TrendingUp className="w-4 h-4 mr-1" />
+                  View Performance Analysis
+                </Button>
               </div>
             </CardContent>
 
@@ -1309,6 +1340,13 @@ const handleSaveIPS = async (ipsData: any) => {
           </Dialog>
         );
       })()}
+
+      {/* IPS Analysis Selector Modal */}
+      <IPSAnalysisSelector
+        isOpen={analysisSelector.isOpen}
+        onClose={() => setAnalysisSelector({ isOpen: false })}
+        ipsList={ipsList}
+      />
     </div>
   );
 }

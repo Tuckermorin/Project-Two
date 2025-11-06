@@ -430,7 +430,7 @@ export function IPSExitWatchConfig({
                   />
                 </div>
               </div>
-            <>
+
               <div className="space-y-3">
                 {watchCriteria.rules.map((rule, index) => (
                   <div key={rule.id} className="border rounded-lg p-4 space-y-3">

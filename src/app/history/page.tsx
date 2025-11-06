@@ -8,7 +8,6 @@ import { History, Calendar, BarChart3, RefreshCw, Loader2 } from 'lucide-react'
 import HistoricTradesDashboard from '@/components/dashboard/historic-trades-dashboard'
 import { TradeHistoryCalendar } from '@/components/history/TradeHistoryCalendar'
 import { TradeHistoryAnalytics } from '@/components/history/TradeHistoryAnalytics'
-import { PatternAnalysisPanel } from '@/components/history/PatternAnalysisPanel'
 
 export default function HistoryPage() {
   const [activeTab, setActiveTab] = useState<'list' | 'calendar' | 'analytics'>('list')
@@ -28,7 +27,7 @@ export default function HistoryPage() {
             Trade History
           </h1>
           <p className="text-muted-foreground mt-1">
-            Comprehensive analysis of your closed trades with AI-powered insights
+            View and analyze your trade history with detailed metrics and charts
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={handleRefresh}>
@@ -66,9 +65,6 @@ export default function HistoryPage() {
           <TradeHistoryAnalytics key={`analytics-${refreshKey}`} />
         </TabsContent>
       </Tabs>
-
-      {/* Pattern Analysis Panel - Always Visible */}
-      <PatternAnalysisPanel key={`patterns-${refreshKey}`} />
     </div>
   )
 }

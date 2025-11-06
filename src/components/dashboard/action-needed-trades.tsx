@@ -398,7 +398,7 @@ export function ActionNeededTradesPanel() {
                 <tbody>
                   {filteredTrades.map(trade => {
                     const meta = trade.closeMeta || {}
-                    const closeDate = meta.date ? new Date(meta.date).toLocaleDateString() : '—'
+                    const closeDate = meta.date ? formatLocalDate(meta.date) : '—'
                     const reasonLabel = closeMethods.find(m => m.key === meta.reason)?.label || meta.reason || 'Not set'
                     return (
                       <tr key={trade.id} className="hover:bg-muted/40">

@@ -1,0 +1,347 @@
+"use client"
+
+import React, { useState, useEffect, Suspense } from 'react'
+import { useSearchParams, useRouter } from 'next/navigation'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { Button } from '@/components/ui/button'
+import { Badge } from '@/components/ui/badge'
+import {
+  Loader2,
+  TrendingUp,
+  Settings,
+  History,
+  Lightbulb,
+  BarChart3,
+  ArrowLeft,
+  AlertCircle,
+} from 'lucide-react'
+import { toast } from 'sonner'
+
+interface IPSData {
+  id: string
+  name: string
+  description?: string
+  is_active: boolean
+  created_at: string
+  total_trades: number
+  win_rate: number
+  min_dte?: number
+  max_dte?: number
+  strategies: string[]
+  factors: any[]
+}
+
+function IPSAnalysisContent() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+  const [loading, setLoading] = useState(true)
+  const [ipsData, setIpsData] = useState<IPSData[]>([])
+  const [activeTab, setActiveTab] = useState('overview')
+
+  useEffect(() => {
+    const ids = searchParams.get('ids')
+    if (ids) {
+      loadIPSData(ids.split(','))
+    } else {
+      toast.error('No IPS selected for analysis')
+      router.push('/ips')
+    }
+  }, [searchParams])
+
+  const loadIPSData = async (ipsIds: string[]) => {
+    try {
+      setLoading(true)
+      const loadedIPS: IPSData[] = []
+
+      for (const id of ipsIds) {
+        // Fetch IPS configuration
+        const ipsRes = await fetch(`/api/ips/${id}`)
+        if (!ipsRes.ok) {
+          console.error(`Failed to fetch IPS ${id}:`, ipsRes.status)
+          continue
+        }
+
+        const ipsDataArray = await ipsRes.json()
+        console.log('IPS API response for', id, ':', ipsDataArray)
+
+        // The API returns an array from ips_with_factors view
+        if (!Array.isArray(ipsDataArray) || ipsDataArray.length === 0) {
+          console.error(`No IPS data found for ${id}`)
+          continue
+        }
+
+        const ipsRecord = ipsDataArray[0]
+
+        // Fetch trades for this IPS
+        const tradesRes = await fetch(`/api/trades?ips_id=${id}&status=closed`)
+        const tradesData = tradesRes.ok ? await tradesRes.json() : { data: [] }
+        const trades = tradesData.data || []
+
+        console.log(`Trades for IPS ${id}:`, trades.length)
+
+        // Calculate win rate
+        const wins = trades.filter((t: any) => {
+          const pl = t.realized_pl || t.realized_pnl || 0
+          return pl > 0
+        }).length
+        const winRate = trades.length > 0 ? (wins / trades.length) * 100 : 0
+
+        loadedIPS.push({
+          id: ipsRecord.ips_id || ipsRecord.id,
+          name: ipsRecord.ips_name || ipsRecord.name,
+          description: ipsRecord.description,
+          is_active: ipsRecord.is_active,
+          created_at: ipsRecord.created_at,
+          total_trades: trades.length,
+          win_rate: winRate,
+          min_dte: ipsRecord.min_dte,
+          max_dte: ipsRecord.max_dte,
+          strategies: ipsRecord.strategies || [],
+          factors: [], // Will be populated from the view if needed
+        })
+      }
+
+      setIpsData(loadedIPS)
+    } catch (error) {
+      console.error('Error loading IPS data:', error)
+      toast.error('Failed to load IPS data')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="container mx-auto py-8">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <div className="text-center">
+            <Loader2 className="h-12 w-12 animate-spin mx-auto mb-4 text-muted-foreground" />
+            <p className="text-muted-foreground">Loading IPS analysis data...</p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (ipsData.length === 0) {
+    return (
+      <div className="container mx-auto py-8">
+        <Card>
+          <CardContent className="py-12 text-center">
+            <AlertCircle className="h-12 w-12 mx-auto mb-4 text-muted-foreground opacity-50" />
+            <h3 className="text-lg font-semibold mb-2">No IPS Data Found</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Could not load data for the selected IPS configurations.
+            </p>
+            <Button onClick={() => router.push('/ips')}>
+              <ArrowLeft className="h-4 w-4 mr-2" />
+              Back to IPS Builder
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  // Check eligibility for analysis
+  const ineligibleIPS = ipsData.filter(ips => {
+    const daysDeployed = Math.floor((Date.now() - new Date(ips.created_at).getTime()) / (1000 * 60 * 60 * 24))
+    return ips.total_trades < 25 || daysDeployed < 14
+  })
+
+  if (ineligibleIPS.length > 0) {
+    return (
+      <div className="container mx-auto py-8">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <AlertCircle className="h-6 w-6 text-yellow-600" />
+              Insufficient Data for Analysis
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-4">
+              The following IPS configurations do not have enough data for meaningful analysis:
+            </p>
+            {ineligibleIPS.map(ips => {
+              const daysDeployed = Math.floor((Date.now() - new Date(ips.created_at).getTime()) / (1000 * 60 * 60 * 24))
+              return (
+                <div key={ips.id} className="mb-4 p-4 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                  <h4 className="font-semibold mb-2">{ips.name}</h4>
+                  <ul className="text-sm space-y-1">
+                    {ips.total_trades < 25 && (
+                      <li className="text-red-600">
+                        Only {ips.total_trades} trades (need 25+ closed trades)
+                      </li>
+                    )}
+                    {daysDeployed < 14 && (
+                      <li className="text-red-600">
+                        Only {daysDeployed} days deployed (need 14+ days)
+                      </li>
+                    )}
+                  </ul>
+                </div>
+              )
+            })}
+            <div className="mt-6">
+              <Button onClick={() => router.push('/ips')}>
+                <ArrowLeft className="h-4 w-4 mr-2" />
+                Back to IPS Builder
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )
+  }
+
+  const singleIPS = ipsData.length === 1
+
+  return (
+    <div className="container mx-auto py-8 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold flex items-center gap-3">
+            <TrendingUp className="h-8 w-8" />
+            {singleIPS ? `${ipsData[0].name} - Performance Analysis` : 'IPS Performance Analysis'}
+          </h1>
+          <p className="text-muted-foreground mt-1">
+            {singleIPS
+              ? 'Comprehensive AI-powered analysis of your Investment Policy Statement'
+              : `Comparing ${ipsData.length} Investment Policy Statements`}
+          </p>
+        </div>
+        <Button variant="outline" onClick={() => router.push('/ips')}>
+          <ArrowLeft className="h-4 w-4 mr-2" />
+          Back to IPS Builder
+        </Button>
+      </div>
+
+      {/* IPS Summary Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {ipsData.map(ips => (
+          <Card key={ips.id} className="border-2 border-purple-200">
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">{ips.name}</CardTitle>
+                {ips.is_active && (
+                  <Badge variant="default" className="text-xs">Active</Badge>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Total Trades:</span>
+                  <span className="font-semibold">{ips.total_trades}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Win Rate:</span>
+                  <span className="font-semibold text-green-600">{Math.round(ips.win_rate)}%</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Days to Expiration:</span>
+                  <span className="font-semibold">{ips.min_dte}-{ips.max_dte} days</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">Factors:</span>
+                  <span className="font-semibold">{ips.factors.length}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      {/* Main Analysis Tabs */}
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+        <TabsList className="grid w-full max-w-3xl grid-cols-4">
+          <TabsTrigger value="overview" className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4" />
+            Overview
+          </TabsTrigger>
+          <TabsTrigger value="configuration" className="flex items-center gap-2">
+            <Settings className="h-4 w-4" />
+            Configuration
+          </TabsTrigger>
+          <TabsTrigger value="trades" className="flex items-center gap-2">
+            <History className="h-4 w-4" />
+            Trade History
+          </TabsTrigger>
+          <TabsTrigger value="insights" className="flex items-center gap-2">
+            <Lightbulb className="h-4 w-4" />
+            AI Insights
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="overview" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Performance Overview</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">
+                Overview tab content will display key performance metrics and charts.
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="configuration" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>IPS Configuration Details</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">
+                Configuration tab will show detailed IPS settings in plain language.
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="trades" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Trade History</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">
+                Trade history tab will list all trades executed under this IPS.
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="insights" className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>AI-Powered Insights</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-muted-foreground">
+                AI insights tab will show comprehensive analysis and recommendations.
+              </p>
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+    </div>
+  )
+}
+
+export default function IPSAnalysisPage() {
+  return (
+    <Suspense fallback={
+      <div className="container mx-auto py-8">
+        <div className="flex items-center justify-center min-h-[400px]">
+          <Loader2 className="h-12 w-12 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    }>
+      <IPSAnalysisContent />
+    </Suspense>
+  )
+}

@@ -13,15 +13,26 @@ export async function GET(_: Request, ctx: { params: Promise<{ id: string }> }) 
 
     const { id } = await ctx.params;
 
-    // RLS automatically enforces user ownership
-    const { data, error } = await supabase
-      .from('ips_with_factors')
-      .select('*')
-      .eq('ips_id', id);
+    // Fetch IPS configuration with factors
+    const { data: ipsData, error: ipsError } = await supabase
+      .from('ips_configurations')
+      .select('*, ips_factors(*)')
+      .eq('id', id)
+      .eq('user_id', user.id)
+      .single();
 
-    if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 });
-    return new Response(JSON.stringify(data), { status: 200 });
+    if (ipsError) {
+      console.error('Error fetching IPS:', ipsError);
+      return new Response(JSON.stringify({ error: ipsError.message }), { status: 500 });
+    }
+
+    if (!ipsData) {
+      return new Response(JSON.stringify({ error: 'IPS not found' }), { status: 404 });
+    }
+
+    return new Response(JSON.stringify(ipsData), { status: 200 });
   } catch (e: any) {
+    console.error('Unexpected error in GET /api/ips/[id]:', e);
     return new Response(JSON.stringify({ error: e.message }), { status: 500 });
   }
 }

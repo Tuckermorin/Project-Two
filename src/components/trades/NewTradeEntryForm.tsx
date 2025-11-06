@@ -633,8 +633,9 @@ export function NewTradeEntryForm({
                 <div className="text-sm text-muted-foreground mb-2">Select an expiration date to view options</div>
                 <div className="flex flex-wrap gap-2">
                   {expirationDates.slice(0, 12).map((expiration) => {
-                    // Add timezone offset to display the correct date (options expire on Fridays)
-                    const date = new Date(expiration + 'T12:00:00');
+                    // Parse date in UTC to ensure correct display (options expire on Fridays)
+                    const [year, month, day] = expiration.split('-').map(Number);
+                    const date = new Date(Date.UTC(year, month - 1, day));
                     return (
                       <Button
                         key={expiration}
@@ -643,7 +644,7 @@ export function NewTradeEntryForm({
                         onClick={() => handleExpirationClick(expiration)}
                         className="text-xs"
                       >
-                        {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                        {date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })}
                       </Button>
                     );
                   })}

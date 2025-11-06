@@ -24,7 +24,16 @@
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT COUNT(*) as total_cached, MAX(created_at) as last_cached FROM trade_monitor_cache;\")",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"\\d historical_sentiment_cache\")",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT COUNT(*) as total_sentiment_records, MAX(created_at) as last_updated FROM historical_sentiment_cache;\")",
-      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT \n  COUNT(*) as total_trades,\n  COUNT(CASE WHEN ips_id IS NOT NULL THEN 1 END) as trades_with_ips,\n  COUNT(CASE WHEN ips_id IS NULL THEN 1 END) as trades_without_ips,\n  user_id\nFROM trades \nGROUP BY user_id;\")"
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT \n  COUNT(*) as total_trades,\n  COUNT(CASE WHEN ips_id IS NOT NULL THEN 1 END) as trades_with_ips,\n  COUNT(CASE WHEN ips_id IS NULL THEN 1 END) as trades_without_ips,\n  user_id\nFROM trades \nGROUP BY user_id;\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT id, name, exit_strategies FROM ips_configurations LIMIT 5;\")",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"\\d trades\")",
+      "Bash(mkdir:*)",
+      "Bash(mv:*)",
+      "Bash(cat:*)",
+      "Bash(npm run dev:*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT table_name FROM information_schema.tables WHERE table_name LIKE ''%ips%'' AND table_schema = ''public'';\")",
+      "Bash(perl:*)",
+      "Bash(curl:*)"
     ],
     "deny": [],
     "ask": []

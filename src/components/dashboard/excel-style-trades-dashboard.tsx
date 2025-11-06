@@ -143,6 +143,7 @@ interface Trade {
   notes?: string
   exitSignal?: ExitSignal | null
   watchAlerts?: WatchAlert[]
+  aiInsight?: string | null
   [key: string]: any // For dynamic IPS factor columns
 }
 
@@ -156,6 +157,7 @@ interface Column {
 // All available columns
 const allColumns: Column[] = [
   { key: 'status', label: 'Status', category: 'Basic Info' },
+  { key: 'aiInsight', label: 'AI Insight', category: 'Basic Info' },
   { key: 'name', label: 'Name', category: 'Basic Info' },
   { key: 'placed', label: 'Date Placed', category: 'Basic Info' },
   { key: 'currentPrice', label: 'Stock Price', category: 'Basic Info' },
@@ -435,29 +437,14 @@ export default function ExcelStyleTradesDashboard() {
           let status: 'GOOD' | 'WATCH' | 'EXIT' = 'GOOD'
           let finalExitSignal = exitSignal
 
-          if (currentPLPercent !== undefined && currentPLPercent >= 50) {
-            // Profit target hit (50% of max profit)
+          // ONLY use IPS exit signal for EXIT status (respect configured thresholds)
+          if (exitSignal?.shouldExit) {
             status = 'EXIT'
-            finalExitSignal = {
-              shouldExit: true,
-              type: 'profit' as const,
-              reason: `Profit target reached: ${currentPLPercent.toFixed(1)}% P/L (target: 50%)`,
-              triggeredBy: 'pl_percent_threshold'
-            }
-          } else if (currentPLPercent !== undefined && currentPLPercent <= -200) {
-            // Stop loss hit (loss >= 200% of credit)
-            status = 'EXIT'
-            finalExitSignal = {
-              shouldExit: true,
-              type: 'loss' as const,
-              reason: `Stop loss triggered: ${currentPLPercent.toFixed(1)}% loss (threshold: -200%)`,
-              triggeredBy: 'pl_percent_threshold'
-            }
-          } else if (exitSignal?.shouldExit) {
-            status = 'EXIT'
+            finalExitSignal = exitSignal
           } else if (percentToShort < 0) {
-            // Stock breached short strike
-            status = 'EXIT'
+            // Stock breached short strike - this is a WATCH alert, not an automatic EXIT
+            // Let the IPS exit strategy determine when to actually exit
+            status = 'WATCH'
           } else if (hasTriggeredWatchAlerts) {
             status = 'WATCH'
           } else if (currentPLPercent !== undefined && currentPLPercent >= 30) {
@@ -467,6 +454,19 @@ export default function ExcelStyleTradesDashboard() {
             if (allowAIOverrides) {
               status = 'WATCH'
             }
+          }
+
+          // Generate AI insight (non-binding recommendation)
+          let aiInsight: string | null = null
+          if (percentToShort < 0) {
+            aiInsight = 'Stock breached short strike - high assignment risk'
+          } else if (currentPLPercent !== undefined && currentPLPercent >= 40 && !exitSignal?.shouldExit) {
+            aiInsight = `Approaching profit target (${currentPLPercent.toFixed(0)}%) - consider early exit`
+          } else if (currentPLPercent !== undefined && currentPLPercent <= -150 && !exitSignal?.shouldExit) {
+            aiInsight = `Large unrealized loss (${currentPLPercent.toFixed(0)}%) - monitor closely`
+          } else if (hasTriggeredWatchAlerts) {
+            const alertCount = watchAlerts.filter(a => a.triggered).length
+            aiInsight = `${alertCount} watch alert${alertCount > 1 ? 's' : ''} triggered`
           }
 
           const obj: Trade = {
@@ -499,6 +499,7 @@ export default function ExcelStyleTradesDashboard() {
             plPercent: typeof r.pl_percent === 'number' ? Number(r.pl_percent) : undefined,
             exitSignal: finalExitSignal,
             watchAlerts,
+            aiInsight,
           }
           return obj
         })
@@ -862,9 +863,12 @@ export default function ExcelStyleTradesDashboard() {
   })
 
   const formatDate = (value: string) => {
-    const d = new Date(value)
+    // Parse dates in UTC to avoid timezone shifting (e.g., showing Thursday instead of Friday)
+    const [year, month, day] = value.split('-').map(Number)
+    if (!year || !month || !day) return value
+    const d = new Date(Date.UTC(year, month - 1, day))
     if (isNaN(d.getTime())) return value
-    return d.toLocaleDateString()
+    return d.toLocaleDateString('en-US', { timeZone: 'UTC' })
   }
 
   // Format value for display
@@ -874,6 +878,13 @@ export default function ExcelStyleTradesDashboard() {
     switch(column.key) {
       case 'name':
         return <span className="font-semibold">{value}</span>
+      case 'aiInsight':
+        if (!value) return <span className="text-gray-400 text-xs italic">-</span>
+        return (
+          <span className="text-xs text-blue-600 italic" title={value}>
+            {value.length > 30 ? value.substring(0, 30) + '...' : value}
+          </span>
+        )
       case 'creditReceived':
       case 'costToClose':
       case 'creditPaid':
@@ -922,22 +933,20 @@ export default function ExcelStyleTradesDashboard() {
         let displayText: string = tag
 
         if (exitSignal?.shouldExit) {
-          // Set display text based on exit type
+          // Simplified: just "EXIT" with green (profit) or red (loss) styling
+          displayText = 'EXIT'
           if (exitSignal.type === 'profit') {
-            displayText = 'EXIT (PROFIT)'
             badgeClass = 'status-badge good'
           } else if (exitSignal.type === 'loss') {
-            displayText = 'EXIT (LOSS)'
             badgeClass = 'status-badge exit'
           } else if (exitSignal.type === 'time') {
-            displayText = 'EXIT (TIME)'
             badgeClass = 'status-badge watch'
           } else {
-            displayText = 'EXIT'
             badgeClass = 'status-badge exit'
           }
         } else if (tag === 'EXIT') {
           // Exit (not from strategy - e.g., stock breached strike)
+          displayText = 'EXIT'
           badgeClass = 'status-badge exit'
         } else if (tag === 'GOOD') {
           // Good status
