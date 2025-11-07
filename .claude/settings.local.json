@@ -33,7 +33,8 @@
       "Bash(npm run dev:*)",
       "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT table_name FROM information_schema.tables WHERE table_name LIKE ''%ips%'' AND table_schema = ''public'';\")",
       "Bash(perl:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(PGPASSWORD=\"Cochabamba19342011!!\" \"/c/Program Files/PostgreSQL/17/bin/psql\" -h aws-0-us-west-1.pooler.supabase.com -p 5432 -U postgres.bannkxicnkhajjokzpwu -d postgres -c \"SELECT COUNT(*) as total_options FROM historical_options_data WHERE symbol = ''VRT'' AND snapshot_date >= ''2024-11-06'' AND snapshot_date <= ''2025-11-06'' AND delta IS NOT NULL;\")"
     ],
     "deny": [],
     "ask": []

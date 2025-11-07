@@ -304,6 +304,21 @@ export function BacktestButton({
       return;
     }
 
+    // Warn if backtesting too many symbols at once
+    const MAX_RECOMMENDED_SYMBOLS = 10;
+    if (validSymbols.length > MAX_RECOMMENDED_SYMBOLS) {
+      const proceed = confirm(
+        `You're about to backtest ${validSymbols.length} symbols, which may take a very long time (30+ minutes) and could timeout.\n\n` +
+        `We recommend backtesting ${MAX_RECOMMENDED_SYMBOLS} or fewer symbols at a time for best results.\n\n` +
+        `Do you want to proceed anyway?`
+      );
+      if (!proceed) {
+        setIsLoading(false);
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
     try {
       // Call API to start backtest
       const response = await fetch("/api/backtest/start", {
@@ -380,7 +395,34 @@ export function BacktestButton({
     try {
       const response = await fetch(`/api/backtest/${id}/results`);
       if (!response.ok) {
-        throw new Error("Failed to fetch results");
+        const errorData = await response.json();
+
+        // Handle specific error cases
+        if (response.status === 404) {
+          // No results found - check if backtest failed
+          const statusResponse = await fetch(`/api/backtest/${id}/status`);
+          if (statusResponse.ok) {
+            const statusData = await statusResponse.json();
+            setStatus(statusData);
+
+            if (statusData.status === "failed") {
+              alert(`Backtest failed: ${statusData.error || errorData.error || "Unknown error"}`);
+            } else {
+              alert(`Results not available: ${errorData.error || "The backtest may still be processing or encountered an error."}`);
+            }
+          } else {
+            alert(`Error: ${errorData.error || "Failed to fetch results"}`);
+          }
+        } else if (response.status === 400) {
+          // Backtest not completed yet
+          alert(`Backtest not completed: ${errorData.message || errorData.error || "Still running"}`);
+        } else {
+          alert(`Error fetching results: ${errorData.error || "Unknown error"}`);
+        }
+
+        setIsLoading(false);
+        setIsSubmitting(false);
+        return;
       }
 
       const resultsData = await response.json();
@@ -392,8 +434,11 @@ export function BacktestButton({
 
       // Automatically trigger AI analysis
       await triggerAIAnalysis(id);
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error fetching results:", error);
+      alert(`Error: ${error.message || "Failed to fetch results. Please try again."}`);
+      setIsLoading(false);
+      setIsSubmitting(false);
     }
   };
 
@@ -499,15 +544,29 @@ export function BacktestButton({
                     {history.map((run) => (
                       <Card
                         key={run.id}
-                        className="p-4 cursor-pointer hover:bg-gray-50"
+                        className={`p-4 ${
+                          run.status === "completed"
+                            ? "cursor-pointer hover:bg-gray-50"
+                            : "cursor-not-allowed opacity-60"
+                        }`}
                         onClick={() => {
-                          setRunId(run.id);
-                          setView("running");
-                          fetchResults(run.id);
+                          if (run.status === "completed") {
+                            setRunId(run.id);
+                            setView("running");
+                            fetchResults(run.id);
+                          } else if (run.status === "failed") {
+                            alert(
+                              `Backtest failed: ${
+                                run.error_message || "Unknown error"
+                              }`
+                            );
+                          } else {
+                            alert("Backtest is still running. Please wait...");
+                          }
                         }}
                       >
                         <div className="flex justify-between items-start">
-                          <div>
+                          <div className="flex-1">
                             <p className="font-medium">
                               {run.symbols?.join(", ") || "All symbols"}
                             </p>
@@ -515,8 +574,19 @@ export function BacktestButton({
                               {new Date(run.created_at).toLocaleDateString()} -{" "}
                               {run.start_date} to {run.end_date}
                             </p>
+                            {run.status === "failed" && run.error_message && (
+                              <p className="text-xs text-red-600 mt-1">
+                                Error: {run.error_message.substring(0, 100)}
+                                {run.error_message.length > 100 ? "..." : ""}
+                              </p>
+                            )}
+                            {run.status === "completed" && (
+                              <p className="text-xs text-green-600 mt-1">
+                                Click to view results
+                              </p>
+                            )}
                           </div>
-                          <div className="text-right">
+                          <div className="text-right ml-4">
                             <span
                               className={`text-sm px-2 py-1 rounded ${
                                 run.status === "completed"

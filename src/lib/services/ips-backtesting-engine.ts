@@ -265,37 +265,64 @@ export class IPSBacktestingEngine {
 
   /**
    * Backtest a single symbol
+   * Fetches ALL historical options in batches to avoid Supabase's 1000 row default limit
    */
   private async backtestSymbol(symbol: string): Promise<TradeMatch[]> {
     const matches: TradeMatch[] = [];
 
-    // Query historical_options_data for this symbol in date range
-    const { data: historicalOptions, error } = await this.supabase
-      .from("historical_options_data")
-      .select("*")
-      .eq("symbol", symbol)
-      .gte("snapshot_date", this.config.startDate.toISOString().split('T')[0])
-      .lte("snapshot_date", this.config.endDate.toISOString().split('T')[0])
-      .gte("dte", this.config.ipsConfig.min_dte)
-      .lte("dte", this.config.ipsConfig.max_dte)
-      .not("delta", "is", null)
-      .order("snapshot_date", { ascending: true });
+    // Fetch historical options in batches (Supabase has 1000 row default limit)
+    const BATCH_SIZE = 1000;
+    const MAX_TOTAL_OPTIONS = 50000; // Safety limit to prevent memory issues
+    let allHistoricalOptions: any[] = [];
+    let offset = 0;
+    let hasMore = true;
 
-    if (error) {
-      console.error(`[Backtest] Error fetching options for ${symbol}:`, error);
-      return matches;
+    console.log(`[Backtest] Fetching historical options for ${symbol}...`);
+
+    while (hasMore && allHistoricalOptions.length < MAX_TOTAL_OPTIONS) {
+      const { data: batch, error } = await this.supabase
+        .from("historical_options_data")
+        .select("*")
+        .eq("symbol", symbol)
+        .gte("snapshot_date", this.config.startDate.toISOString().split('T')[0])
+        .lte("snapshot_date", this.config.endDate.toISOString().split('T')[0])
+        .gte("dte", this.config.ipsConfig.min_dte)
+        .lte("dte", this.config.ipsConfig.max_dte)
+        .not("delta", "is", null)
+        .order("snapshot_date", { ascending: true })
+        .range(offset, offset + BATCH_SIZE - 1);
+
+      if (error) {
+        console.error(`[Backtest] Error fetching options for ${symbol}:`, error);
+        break;
+      }
+
+      if (!batch || batch.length === 0) {
+        hasMore = false;
+        break;
+      }
+
+      allHistoricalOptions.push(...batch);
+      offset += BATCH_SIZE;
+
+      // Check if we got fewer rows than requested (indicates last batch)
+      if (batch.length < BATCH_SIZE) {
+        hasMore = false;
+      }
+
+      console.log(`[Backtest] Fetched ${allHistoricalOptions.length} options so far for ${symbol}...`);
     }
 
-    if (!historicalOptions || historicalOptions.length === 0) {
+    if (allHistoricalOptions.length === 0) {
       console.log(`[Backtest] No historical data for ${symbol}`);
       return matches;
     }
 
-    console.log(`[Backtest] Found ${historicalOptions.length} historical options for ${symbol}`);
+    console.log(`[Backtest] Found ${allHistoricalOptions.length} total historical options for ${symbol}${allHistoricalOptions.length >= MAX_TOTAL_OPTIONS ? ' (LIMITED)' : ''}`);
 
     // Group by snapshot_date to simulate "daily option chains"
     const optionsByDate = new Map<string, any[]>();
-    for (const opt of historicalOptions) {
+    for (const opt of allHistoricalOptions) {
       const dateKey = opt.snapshot_date;
       if (!optionsByDate.has(dateKey)) {
         optionsByDate.set(dateKey, []);
@@ -941,19 +968,21 @@ export class IPSBacktestingEngine {
 
       // For credit spreads: max risk = spread width - credit received
       const spreadWidth = 5; // Assumed $5 spread
-      const creditReceived = trade.premium || 0;
+      const creditReceived = (trade.premium || 1); // Use option premium
       const maxRiskPerContract = (spreadWidth - creditReceived) * 100; // Per contract in dollars
 
       // How many contracts can we trade with our risk amount?
-      const numContracts = maxRiskPerContract > 0
-        ? Math.floor(riskAmount / maxRiskPerContract)
+      // Cap at 1 contract minimum, and prevent negative/zero max risk
+      const numContracts = (maxRiskPerContract > 0 && riskAmount > 0)
+        ? Math.max(1, Math.floor(riskAmount / maxRiskPerContract))
         : 1;
 
       // Actual P&L for this position
-      const actualPnl = (trade.realizedPnl || 0) * numContracts;
+      // NOTE: realizedPnl is already in dollars, just scale by position size
+      const actualPnl = (trade.realizedPnl || 0) * Math.min(numContracts, 10); // Cap at 10 contracts to prevent runaway losses
 
-      // Update portfolio
-      currentPortfolio += actualPnl;
+      // Update portfolio (prevent going infinitely negative)
+      currentPortfolio = Math.max(-portfolioSize * 2, currentPortfolio + actualPnl); // Can't lose more than 200% of starting capital
 
       // Track portfolio metrics on this trade
       trade.portfolioValueBefore = portfolioValueBefore;
@@ -982,13 +1011,21 @@ export class IPSBacktestingEngine {
       endingPortfolio = currentPortfolio;
       totalReturn = ((endingPortfolio - portfolioSize) / portfolioSize) * 100;
 
-      // Calculate CAGR
+      // Calculate CAGR (handle negative portfolio values)
       const startDate = new Date(this.config.startDate);
       const endDate = new Date(this.config.endDate);
       const years = (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24 * 365.25);
-      cagr = years > 0
-        ? (Math.pow(endingPortfolio / portfolioSize, 1 / years) - 1) * 100
-        : 0;
+
+      // Only calculate CAGR if portfolio is positive and years > 0
+      if (years > 0 && endingPortfolio > 0 && portfolioSize > 0) {
+        cagr = (Math.pow(endingPortfolio / portfolioSize, 1 / years) - 1) * 100;
+      } else {
+        cagr = 0;
+      }
+
+      // Ensure values are finite
+      if (!isFinite(totalReturn)) totalReturn = 0;
+      if (!isFinite(cagr)) cagr = 0;
 
       console.log(`[Backtest Portfolio] Starting: $${portfolioSize.toFixed(2)}, Ending: $${endingPortfolio.toFixed(2)}`);
       console.log(`[Backtest Portfolio] Total Return: ${totalReturn.toFixed(2)}%, CAGR: ${cagr.toFixed(2)}%`);
@@ -998,7 +1035,7 @@ export class IPSBacktestingEngine {
     const totalPnl = closedTrades.reduce((sum, t) => sum + (t.realizedPnl || 0), 0);
     const avgPnl = closedTrades.length > 0 ? totalPnl / closedTrades.length : 0;
 
-    const rois = closedTrades.map(t => t.realizedRoi || 0).sort((a, b) => a - b);
+    const rois = closedTrades.map(t => t.realizedRoi || 0).filter(roi => !isNaN(roi) && isFinite(roi)).sort((a, b) => a - b);
     const medianRoi = rois.length > 0 ? rois[Math.floor(rois.length / 2)] : 0;
     const avgRoi = rois.length > 0 ? rois.reduce((a, b) => a + b, 0) / rois.length : 0;
 
@@ -1031,6 +1068,9 @@ export class IPSBacktestingEngine {
       };
     }
 
+    // Ensure all values are finite and valid for database
+    const ensureFinite = (val: number) => (isNaN(val) || !isFinite(val)) ? 0 : val;
+
     return {
       runId: this.runId!,
       ipsId: this.config.ipsId,
@@ -1038,15 +1078,15 @@ export class IPSBacktestingEngine {
       winningTrades: winningTrades.length,
       losingTrades: losingTrades.length,
       winRate: closedTrades.length > 0 ? (winningTrades.length / closedTrades.length) * 100 : 0,
-      totalPnl,
-      avgPnl,
-      medianPnl,
-      maxWin: Math.max(...pnls, 0),
-      maxLoss: Math.min(...pnls, 0),
-      avgRoi,
-      medianRoi,
-      bestRoi: Math.max(...rois, 0),
-      worstRoi: Math.min(...rois, 0),
+      totalPnl: ensureFinite(totalPnl),
+      avgPnl: ensureFinite(avgPnl),
+      medianPnl: ensureFinite(medianPnl),
+      maxWin: pnls.length > 0 ? ensureFinite(Math.max(...pnls, 0)) : 0,
+      maxLoss: pnls.length > 0 ? ensureFinite(Math.min(...pnls, 0)) : 0,
+      avgRoi: ensureFinite(avgRoi),
+      medianRoi: ensureFinite(medianRoi),
+      bestRoi: rois.length > 0 ? ensureFinite(Math.max(...rois, 0)) : 0,
+      worstRoi: rois.length > 0 ? ensureFinite(Math.min(...rois, 0)) : 0,
       sharpeRatio: this.calculateSharpeRatio(rois),
       sortinoRatio: this.calculateSortinoRatio(rois),
       maxDrawdown: this.calculateMaxDrawdown(closedTrades),
@@ -1057,11 +1097,11 @@ export class IPSBacktestingEngine {
       factorCorrelation: {},
       factorImportance: {},
       // Portfolio metrics
-      startingPortfolio: portfolioSize,
-      endingPortfolio: endingPortfolio,
-      totalReturn: totalReturn,
-      cagr: cagr,
-      portfolioMaxDrawdown: maxPortfolioDrawdown,
+      startingPortfolio: ensureFinite(portfolioSize),
+      endingPortfolio: ensureFinite(endingPortfolio),
+      totalReturn: ensureFinite(totalReturn),
+      cagr: ensureFinite(cagr),
+      portfolioMaxDrawdown: ensureFinite(maxPortfolioDrawdown),
       equityCurve: equityCurve,
       trades,
     };
@@ -1108,9 +1148,12 @@ export class IPSBacktestingEngine {
 
   /**
    * Save trade matches to database
+   * Batches inserts to avoid timeout on large datasets
    */
   private async saveTradeMatches(matches: TradeMatch[]): Promise<void> {
     if (matches.length === 0) return;
+
+    console.log(`[Backtest] Saving ${matches.length} trade matches in batches...`);
 
     const records = matches.map(m => ({
       run_id: this.runId,
@@ -1143,14 +1186,23 @@ export class IPSBacktestingEngine {
       capital_allocated: m.capitalAllocated,
     }));
 
-    const { error } = await this.supabase
-      .from("ips_backtest_trade_matches")
-      .insert(records);
+    // Batch insert to avoid timeout - 500 records at a time
+    const BATCH_SIZE = 500;
+    for (let i = 0; i < records.length; i += BATCH_SIZE) {
+      const batch = records.slice(i, i + BATCH_SIZE);
+      console.log(`[Backtest] Inserting batch ${Math.floor(i / BATCH_SIZE) + 1}/${Math.ceil(records.length / BATCH_SIZE)} (${batch.length} records)...`);
 
-    if (error) {
-      console.error("[Backtest] Error saving trade matches:", error);
-      throw error;
+      const { error } = await this.supabase
+        .from("ips_backtest_trade_matches")
+        .insert(batch);
+
+      if (error) {
+        console.error("[Backtest] Error saving trade matches batch:", error);
+        throw error;
+      }
     }
+
+    console.log(`[Backtest] ✓ All ${matches.length} trade matches saved successfully`);
   }
 
   /**
