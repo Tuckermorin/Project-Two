@@ -27,11 +27,13 @@ export async function openRun(props: {
   runId: string;
   mode: "backtest" | "paper" | "live";
   symbols: string[];
+  userId: string;
 }) {
   await supabase.from("agent_runs").insert({
     run_id: props.runId,
     mode: props.mode,
     watchlist: props.symbols,
+    user_id: props.userId,
   });
 }
 
@@ -87,9 +89,10 @@ export async function persistScore(runId: string, score: any) {
   });
 }
 
-export async function persistCandidate(runId: string, c: any) {
+export async function persistCandidate(runId: string, c: any, userId: string) {
   await supabase.from("trade_candidates").insert({
     run_id: runId,
+    user_id: userId,
     ...c,
     // Explicitly include IPS scoring fields to ensure they're saved
     ips_score: c.ips_score ?? null,

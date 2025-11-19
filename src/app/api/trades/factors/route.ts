@@ -100,13 +100,40 @@ export async function GET(request: NextRequest) {
     const marketDataService = getMarketDataService();
     const stockData = await marketDataService.getUnifiedStockData(symbol, true);
 
-    // Fetch technical indicators in parallel
+    // Fetch technical indicators with rate limiting
+    // Alpha Vantage free tier: 5 calls/minute, so we'll batch into groups
     const avClient = getAlphaVantageClient();
-    const [sma200Data, sma50Data, momData] = await Promise.all([
-      avClient.getSMA(symbol, 'daily', 200, 'close').catch(() => null),
-      avClient.getSMA(symbol, 'daily', 50, 'close').catch(() => null),
-      avClient.getMOM(symbol, 'daily', 10, 'close').catch(() => null),
+
+    console.log(`[Factors API] Fetching technical indicators for ${symbol} with rate limiting...`);
+
+    // Batch 1: Most important indicators (parallel within batch, max 3 at once)
+    const [sma200Data, sma50Data, bbandsData] = await Promise.all([
+      avClient.getSMA(symbol, 'daily', 200, 'close').catch((e) => { console.error('SMA200 failed:', e); return null; }),
+      avClient.getSMA(symbol, 'daily', 50, 'close').catch((e) => { console.error('SMA50 failed:', e); return null; }),
+      avClient.getBBANDS(symbol, 20, 'daily', 'close').catch((e) => { console.error('BBANDS failed:', e); return null; }),
     ]);
+
+    // Small delay between batches (500ms)
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Batch 2: Momentum indicators
+    const [mom10Data, mom20Data, mom5Data] = await Promise.all([
+      avClient.getMOM(symbol, 'daily', 10, 'close').catch((e) => { console.error('MOM10 failed:', e); return null; }),
+      avClient.getMOM(symbol, 'daily', 20, 'close').catch((e) => { console.error('MOM20 failed:', e); return null; }),
+      avClient.getMOM(symbol, 'daily', 5, 'close').catch((e) => { console.error('MOM5 failed:', e); return null; }),
+    ]);
+
+    // Small delay between batches
+    await new Promise(resolve => setTimeout(resolve, 500));
+
+    // Batch 3: Other indicators
+    const [stochRSIData, willrData, insiderData] = await Promise.all([
+      avClient.getSTOCHRSI(symbol, 14, 'daily', 'close').catch((e) => { console.error('STOCHRSI failed:', e); return null; }),
+      avClient.getWILLR(symbol, 14, 'daily').catch((e) => { console.error('WILLR failed:', e); return null; }),
+      avClient.getInsiderTransactions(symbol, 50).catch((e) => { console.error('Insider data failed:', e); return null; }),
+    ]);
+
+    console.log(`[Factors API] Technical indicators fetched successfully`);
 
     // Fetch IV Rank and IV Percentile from vol_regime_daily table
     let ivData = null;
@@ -251,12 +278,14 @@ export async function GET(request: NextRequest) {
     for (const ipsFactor of apiFactors) {
       const factorName = ipsFactor.factor_name;
       const isOptionsFactor = optionFactorNames.has(factorName);
-      
+
+      console.log(`[Factor Processing] Processing factor: "${factorName}"`);
+
       try {
         let value: number | undefined;
         let confidence = 0.95;
         const factorSource = isOptionsFactor ? 'alpha_vantage_options' : 'alpha_vantage';
-        
+
         switch (factorName) {
           case 'P/E Ratio':
             // Calculate P/E if not directly available
@@ -373,14 +402,6 @@ export async function GET(request: NextRequest) {
             }
             break;
           }
-          case 'Distance from 52W High': {
-            const high = stockData.week52High;
-            const currentPrice = stockData.currentPrice;
-            if (high && currentPrice && high > 0) {
-              value = ((high - currentPrice) / high) * 100;
-            }
-            break;
-          }
           case '200 Day Moving Average': {
             const sma200 = sma200Data;
             const currentPrice = stockData.currentPrice;
@@ -398,7 +419,71 @@ export async function GET(request: NextRequest) {
             break;
           }
           case 'Momentum': {
-            value = momData !== null && momData !== undefined ? momData : undefined;
+            value = mom10Data !== null && mom10Data !== undefined ? mom10Data : undefined;
+            break;
+          }
+          case 'Price Momentum 20D': {
+            value = mom20Data !== null && mom20Data !== undefined ? mom20Data : undefined;
+            break;
+          }
+          case 'Price Momentum 5D': {
+            value = mom5Data !== null && mom5Data !== undefined ? mom5Data : undefined;
+            break;
+          }
+          case 'Stochastic RSI': {
+            // StochRSI returns { fastK, fastD, date }, use fastK
+            value = (stochRSIData && typeof stochRSIData.fastK === 'number') ? stochRSIData.fastK : undefined;
+            break;
+          }
+          case 'Williams %R': {
+            // WillR returns { value, date }
+            value = (willrData && typeof willrData.value === 'number') ? willrData.value : undefined;
+            break;
+          }
+          case 'Distance from BB Upper': {
+            const currentPrice = stockData.currentPrice;
+            const upperBand = bbandsData?.upper;
+            if (currentPrice && upperBand && upperBand > 0) {
+              // Calculate as percentage distance
+              value = ((upperBand - currentPrice) / upperBand) * 100;
+            }
+            break;
+          }
+          case 'Distance from 52W High': {
+            const high = stockData.week52High;
+            const currentPrice = stockData.currentPrice;
+            if (high && currentPrice && high > 0) {
+              value = ((high - currentPrice) / high) * 100;
+            }
+            break;
+          }
+          case 'Volume vs Average': {
+            const currentVolume = stockData.volume;
+            const avgVolume = stockData.fundamentals?.avgVolume || (stockData as any).avgVolume;
+            if (currentVolume && avgVolume && avgVolume > 0) {
+              value = currentVolume / avgVolume;
+            }
+            break;
+          }
+          case 'Put/Call Ratio': {
+            // This requires options market data aggregation - may need to be calculated from options chain
+            // For now, mark as unavailable
+            value = undefined;
+            break;
+          }
+          case 'Insider Buying Activity': {
+            // insiderData returns { acquisition_count, disposal_count, buy_ratio, ... }
+            if (insiderData && typeof insiderData === 'object') {
+              const { acquisition_count = 0, disposal_count = 0 } = insiderData as any;
+              // Return as percentage: 100 = all buying, 0 = all selling, 50 = neutral
+              const total = acquisition_count + disposal_count;
+              value = total > 0 ? (acquisition_count / total) * 100 : 50;
+            }
+            break;
+          }
+          case 'Institutional Ownership %': {
+            // This data should be in fundamentals if available
+            value = stockData.fundamentals?.institutionalOwnership || (stockData as any).institutionalOwnership;
             break;
           }
           case 'Market Cap Category': {
@@ -453,10 +538,12 @@ export async function GET(request: NextRequest) {
             break;
           }
           default:
-            console.warn(`Unmapped factor: ${factorName}`);
+            console.warn(`[Factor Processing] ❌ Unmapped factor: "${factorName}"`);
             failedFactors.push(factorName);
             continue;
         }
+
+        console.log(`[Factor Processing] Factor "${factorName}" calculated value:`, value);
 
         if (value !== undefined && value !== null && !isNaN(value)) {
           // Return factor value (no need to save to database for display purposes)

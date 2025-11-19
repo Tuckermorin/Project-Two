@@ -138,7 +138,8 @@ export async function runAgentJob(jobId: string) {
     const result = await runAgentV3({
       symbols: job.symbols,
       ipsId: job.ips_id,
-      mode: job.mode as 'paper' | 'live' | 'backtest'
+      mode: job.mode as 'paper' | 'live' | 'backtest',
+      userId: job.user_id
     });
 
     // Step 8: Complete

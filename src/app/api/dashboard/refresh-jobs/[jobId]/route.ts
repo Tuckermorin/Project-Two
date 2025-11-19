@@ -35,6 +35,41 @@ export async function GET(
       );
     }
 
+    // Auto-recovery: Mark jobs that have been running for more than 10 minutes as failed
+    if (job.status === 'running' && job.started_at) {
+      const startTime = new Date(job.started_at).getTime();
+      const now = Date.now();
+      const runningTimeMinutes = (now - startTime) / (1000 * 60);
+
+      if (runningTimeMinutes > 10) {
+        console.log(`[Dashboard Refresh Job Status] Job ${jobId} has been running for ${runningTimeMinutes.toFixed(1)} minutes, marking as failed`);
+
+        // Mark as failed
+        const { error: updateError } = await supabase
+          .from('dashboard_refresh_jobs')
+          .update({
+            status: 'failed',
+            completed_at: new Date().toISOString(),
+            error_message: 'Job timed out after 10 minutes',
+            error_details: {
+              recovery_reason: 'Automatic timeout recovery',
+              running_time_minutes: runningTimeMinutes,
+              recovered_at: new Date().toISOString()
+            }
+          })
+          .eq('id', jobId);
+
+        if (updateError) {
+          console.error(`[Dashboard Refresh Job Status] Failed to auto-recover job ${jobId}:`, updateError);
+        } else {
+          // Update the job object to reflect the change
+          job.status = 'failed';
+          job.completed_at = new Date().toISOString();
+          job.error_message = 'Job timed out after 10 minutes';
+        }
+      }
+    }
+
     // Calculate duration
     let duration_seconds: number | null = null;
     let estimated_seconds_remaining: number | null = null;

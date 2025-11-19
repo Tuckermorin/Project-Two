@@ -79,10 +79,14 @@ export async function executeRefreshLogic(supabase: any, userId: string) {
     try {
       console.log(`[Refresh] Processing ${symbolTrades.length} trades for ${symbol}`);
 
-      // Fetch current stock price (once per symbol)
+      // Fetch current stock price (once per symbol) with timeout
       let currentPrice: number | undefined;
       try {
-        const quote = await avClient.getQuote(symbol);
+        const quotePromise = avClient.getQuote(symbol);
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('Quote fetch timeout')), 10000)
+        );
+        const quote = await Promise.race([quotePromise, timeoutPromise]) as any;
         currentPrice = parseFloat(quote['05. price'] ?? '0');
         if (!isFinite(currentPrice) || currentPrice <= 0) {
           currentPrice = undefined;
@@ -112,7 +116,12 @@ export async function executeRefreshLogic(supabase: any, userId: string) {
               const isPutSpread = contractType?.toLowerCase().includes('put');
               const optionType: 'put' | 'call' = isPutSpread ? 'put' : 'call';
 
-              const allContracts = await avClient.getRealtimeOptions(symbol, { requireGreeks: true });
+              // Add timeout to options fetch (30 seconds max)
+              const optionsPromise = avClient.getRealtimeOptions(symbol, { requireGreeks: true });
+              const timeoutPromise = new Promise((_, reject) =>
+                setTimeout(() => reject(new Error('Options fetch timeout')), 30000)
+              );
+              const allContracts = await Promise.race([optionsPromise, timeoutPromise]) as any;
 
               const shortLegData = allContracts.find(c =>
                 Math.abs((c.strike ?? 0) - shortStrike) < 0.01 &&

@@ -344,7 +344,12 @@ class IPSDataService {
       description: ipsData.description || '',
       is_active: ipsData.is_active ?? true,
       strategies: ipsData.strategies || [],
-      factors: factors
+      factors: factors,
+      min_dte: ipsData.min_dte,
+      max_dte: ipsData.max_dte,
+      ai_weight: ipsData.ai_weight ?? 20,
+      exit_strategies: ipsData.exit_strategies,
+      watch_criteria: ipsData.watch_criteria
     };
 
     console.log('Request body for API:', requestBody);

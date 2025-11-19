@@ -75,11 +75,29 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Agent Jobs API] Created job ${job.id} for user ${user.id}`);
 
-    // Trigger the worker (we'll implement this later)
-    // For now, the worker will poll for pending jobs
-    triggerWorker(job.id).catch(err =>
-      console.error('Failed to trigger worker:', err)
-    );
+    // Trigger the worker to process the job directly (no fetch, run inline)
+    // This ensures the job actually gets processed instead of relying on fire-and-forget fetch
+    try {
+      const { runAgentJob } = await import('@/lib/agent/job-runner');
+
+      // Process the job in the background (don't await)
+      runAgentJob(job.id).catch(err => {
+        console.error(`[Agent Jobs API] Job ${job.id} failed:`, err.message);
+      });
+
+      console.log(`[Agent Jobs API] Job ${job.id} processing started`);
+    } catch (triggerError) {
+      console.error('[Agent Jobs API] Could not start job processing:', triggerError);
+      // Mark job as failed if we can't even start it
+      await supabase
+        .from('agent_jobs')
+        .update({
+          status: 'failed',
+          error_message: 'Failed to start job processing',
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', job.id);
+    }
 
     return NextResponse.json({
       success: true,
@@ -153,26 +171,5 @@ export async function GET(request: NextRequest) {
       },
       { status: 500 }
     );
-  }
-}
-
-/**
- * Trigger the background worker to process the job
- * This is a placeholder - actual implementation depends on your deployment
- */
-async function triggerWorker(jobId: string) {
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
-
-  // Option 1: If using a polling worker, do nothing (worker will pick it up)
-  // Option 2: If using webhooks/serverless, trigger the worker endpoint
-  try {
-    await fetch(`${baseUrl}/api/agent/worker/process`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jobId })
-    });
-  } catch (error) {
-    // Worker endpoint might not exist yet, that's okay
-    console.log('[Agent Jobs API] Worker endpoint not available, job will be picked up by polling');
   }
 }

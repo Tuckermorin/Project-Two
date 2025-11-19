@@ -21,6 +21,7 @@ import { evaluateTradesWithAI } from "./ai-enhanced-evaluation-step";
 // State interface
 interface AgentState {
   runId: string;
+  userId: string;
   mode: "backtest" | "paper" | "live";
   symbols: string[]; // Initial watchlist
   survivingSymbols: string[]; // Symbols that pass each filter
@@ -2485,7 +2486,7 @@ async function finalizeOutput(state: AgentState): Promise<Partial<AgentState>> {
         reasoning_decisions: state.reasoningDecisions,
         sentiment_divergence: candidate.sentiment_divergence,
       }
-    });
+    }, state.userId);
 
     // Log summary
     console.log(`[FinalizeOutput] ${candidate.symbol} ${candidate.strategy}:`);
@@ -2611,6 +2612,7 @@ export async function runAgentV3(props: {
   symbols: string[];
   mode: "backtest" | "paper" | "live";
   ipsId?: string;
+  userId: string;
 }) {
   const runId = uuidv4();
   const asof = new Date().toISOString();
@@ -2623,10 +2625,11 @@ export async function runAgentV3(props: {
   fs.writeFileSync('agent-run-marker.txt', `Run started at ${new Date().toISOString()}\nVersion: EPSILON_FIX_50_STRIKES\n`, 'utf8');
 
   try {
-    await db.openRun({ runId, mode: props.mode, symbols: props.symbols });
+    await db.openRun({ runId, mode: props.mode, symbols: props.symbols, userId: props.userId });
 
     const initialState: AgentState = {
       runId,
+      userId: props.userId,
       mode: props.mode,
       symbols: props.symbols,
       survivingSymbols: [],

@@ -382,6 +382,32 @@ export function NewTradeEntryForm({
     refreshApiValues(upperSymbol, context);
   };
 
+  const handleCallCreditSpreadSelect = (shortCall: any, longCall: any) => {
+    // Calculate credit as the difference between short and long mid prices
+    const shortMid = (shortCall.bid + shortCall.ask) / 2;
+    const longMid = (longCall.bid + longCall.ask) / 2;
+    const credit = (shortMid - longMid).toFixed(2);
+    setFormData((p) => ({
+      ...p,
+      expirationDate: shortCall.expiration_date,
+      shortCallStrike: shortCall.strike,
+      longCallStrike: longCall.strike,
+      creditReceived: parseFloat(credit),
+    }));
+    setTextValues((prev) => ({
+      ...prev,
+      shortCallStrike: String(shortCall.strike),
+      longCallStrike: String(longCall.strike),
+      creditReceived: credit,
+    }));
+
+    // Trigger API factor refresh
+    const context = buildOptionsContext();
+    const upperSymbol = formData.symbol.toUpperCase();
+    lastApiRequestRef.current = { symbol: upperSymbol, contextSignature: context ? JSON.stringify(context) : null };
+    refreshApiValues(upperSymbol, context);
+  };
+
   const handleScore = () => {
     try {
       const payload = {
@@ -541,9 +567,6 @@ export function NewTradeEntryForm({
                   return (
                     <>
                       {renderC({ id: "numberOfContracts", label: "Contracts", placeholder: "1" })}
-                      {renderN({ id: "shortCallStrike", label: "Short Call Strike", placeholder: "155.00" })}
-                      {renderN({ id: "longCallStrike", label: "Long Call Strike", placeholder: "160.00" })}
-                      {renderN({ id: "creditReceived", label: "Net Credit (per spread)", placeholder: "1.10" })}
                     </>
                   );
                 case "long-call":
@@ -618,7 +641,7 @@ export function NewTradeEntryForm({
         </Card>
       )}
 
-      {formData.symbol && formData.contractType === 'put-credit-spread' && (
+      {formData.symbol && (formData.contractType === 'put-credit-spread' || formData.contractType === 'call-credit-spread') && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Options Chain</CardTitle>
@@ -657,7 +680,10 @@ export function NewTradeEntryForm({
                       <div className="text-sm text-muted-foreground">No options available for this expiration</div>
                     )}
                     {!loadingOptions && optionsChain.length > 0 && (() => {
-                      const puts = optionsChain.filter((opt: any) => opt.option_type === 'put').sort((a: any, b: any) => b.strike - a.strike);
+                      const isPutSpread = formData.contractType === 'put-credit-spread';
+                      const options = optionsChain.filter((opt: any) =>
+                        opt.option_type === (isPutSpread ? 'put' : 'call')
+                      ).sort((a: any, b: any) => isPutSpread ? (b.strike - a.strike) : (a.strike - b.strike));
                       const currentPrice = marketSnap?.price || 0;
 
                       // Get API factors that can be displayed in the options chain
@@ -670,7 +696,11 @@ export function NewTradeEntryForm({
 
                       return (
                         <div className="space-y-3">
-                          <div className="text-sm font-medium">Put Options (click two puts to create a credit spread)</div>
+                          <div className="text-sm font-medium">
+                            {isPutSpread
+                              ? 'Put Options (click two puts to create a credit spread)'
+                              : 'Call Options (click two calls to create a credit spread)'}
+                          </div>
                           <div className="max-h-96 overflow-y-auto">
                             <table className="w-full text-xs">
                               <thead className="sticky top-0 bg-background border-b">
@@ -692,69 +722,88 @@ export function NewTradeEntryForm({
                                 </tr>
                               </thead>
                               <tbody>
-                                {puts.map((put: any) => {
-                                  const isITM = put.strike > currentPrice;
-                                  const isSelected = formData.shortPutStrike === put.strike || formData.longPutStrike === put.strike;
+                                {options.map((option: any) => {
+                                  const isITM = isPutSpread ? (option.strike > currentPrice) : (option.strike < currentPrice);
+                                  const isSelected = isPutSpread
+                                    ? (formData.shortPutStrike === option.strike || formData.longPutStrike === option.strike)
+                                    : (formData.shortCallStrike === option.strike || formData.longCallStrike === option.strike);
 
                                   const getFactorValue = (factor: IPSFactor) => {
                                     const key = factor.key.toLowerCase();
-                                    if (key.includes('delta')) return put.greeks?.delta?.toFixed(3) || '-';
-                                    if (key.includes('gamma')) return put.greeks?.gamma?.toFixed(4) || '-';
-                                    if (key.includes('theta')) return put.greeks?.theta?.toFixed(3) || '-';
-                                    if (key.includes('vega')) return put.greeks?.vega?.toFixed(3) || '-';
-                                    if (key.includes('rho')) return put.greeks?.rho?.toFixed(3) || '-';
+                                    if (key.includes('delta')) return option.greeks?.delta?.toFixed(3) || '-';
+                                    if (key.includes('gamma')) return option.greeks?.gamma?.toFixed(4) || '-';
+                                    if (key.includes('theta')) return option.greeks?.theta?.toFixed(3) || '-';
+                                    if (key.includes('vega')) return option.greeks?.vega?.toFixed(3) || '-';
+                                    if (key.includes('rho')) return option.greeks?.rho?.toFixed(3) || '-';
                                     if (key.includes('iv') || key.includes('implied')) {
-                                      return put.greeks?.mid_iv ? `${(put.greeks.mid_iv * 100).toFixed(1)}%` : '-';
+                                      return option.greeks?.mid_iv ? `${(option.greeks.mid_iv * 100).toFixed(1)}%` : '-';
                                     }
                                     if (key.includes('open_interest') || key.includes('openinterest')) {
-                                      return put.open_interest || 0;
+                                      return option.open_interest || 0;
                                     }
                                     return '-';
                                   };
 
                                   return (
                                     <tr
-                                      key={put.symbol}
+                                      key={option.symbol}
                                       className={`cursor-pointer hover:bg-muted/40 border-b ${isSelected ? 'bg-blue-100 dark:bg-blue-900/20' : ''} ${isITM ? 'bg-yellow-50 dark:bg-yellow-900/10' : ''}`}
                                       onClick={() => {
-                                        // If clicking the same option that's already selected, deselect it
-                                        if (formData.shortPutStrike === put.strike && !formData.longPutStrike) {
-                                          // Deselect short put
-                                          setFormData((p) => ({ ...p, shortPutStrike: undefined }));
-                                          setTextValues((prev) => ({ ...prev, shortPutStrike: '' }));
-                                        } else if (formData.longPutStrike === put.strike) {
-                                          // Deselect long put
-                                          setFormData((p) => ({ ...p, longPutStrike: undefined, creditReceived: undefined }));
-                                          setTextValues((prev) => ({ ...prev, longPutStrike: '', creditReceived: '' }));
-                                        } else if (!formData.shortPutStrike) {
-                                          // First selection - set as short put
-                                          setFormData((p) => ({ ...p, shortPutStrike: put.strike }));
-                                          setTextValues((prev) => ({ ...prev, shortPutStrike: String(put.strike) }));
-                                        } else if (!formData.longPutStrike && put.strike < formData.shortPutStrike) {
-                                          // Second selection - set as long put (must be lower strike)
-                                          handlePutCreditSpreadSelect(
-                                            puts.find((p: any) => p.strike === formData.shortPutStrike),
-                                            put
-                                          );
+                                        if (isPutSpread) {
+                                          // Put credit spread logic
+                                          if (formData.shortPutStrike === option.strike && !formData.longPutStrike) {
+                                            setFormData((p) => ({ ...p, shortPutStrike: undefined }));
+                                            setTextValues((prev) => ({ ...prev, shortPutStrike: '' }));
+                                          } else if (formData.longPutStrike === option.strike) {
+                                            setFormData((p) => ({ ...p, longPutStrike: undefined, creditReceived: undefined }));
+                                            setTextValues((prev) => ({ ...prev, longPutStrike: '', creditReceived: '' }));
+                                          } else if (!formData.shortPutStrike) {
+                                            setFormData((p) => ({ ...p, shortPutStrike: option.strike }));
+                                            setTextValues((prev) => ({ ...prev, shortPutStrike: String(option.strike) }));
+                                          } else if (!formData.longPutStrike && option.strike < formData.shortPutStrike) {
+                                            handlePutCreditSpreadSelect(
+                                              options.find((p: any) => p.strike === formData.shortPutStrike),
+                                              option
+                                            );
+                                          } else {
+                                            setFormData((p) => ({ ...p, shortPutStrike: option.strike, longPutStrike: undefined, creditReceived: undefined }));
+                                            setTextValues((prev) => ({ ...prev, shortPutStrike: String(option.strike), longPutStrike: '', creditReceived: '' }));
+                                          }
                                         } else {
-                                          // Reset and start over
-                                          setFormData((p) => ({ ...p, shortPutStrike: put.strike, longPutStrike: undefined, creditReceived: undefined }));
-                                          setTextValues((prev) => ({ ...prev, shortPutStrike: String(put.strike), longPutStrike: '', creditReceived: '' }));
+                                          // Call credit spread logic
+                                          if (formData.shortCallStrike === option.strike && !formData.longCallStrike) {
+                                            setFormData((p) => ({ ...p, shortCallStrike: undefined }));
+                                            setTextValues((prev) => ({ ...prev, shortCallStrike: '' }));
+                                          } else if (formData.longCallStrike === option.strike) {
+                                            setFormData((p) => ({ ...p, longCallStrike: undefined, creditReceived: undefined }));
+                                            setTextValues((prev) => ({ ...prev, longCallStrike: '', creditReceived: '' }));
+                                          } else if (!formData.shortCallStrike) {
+                                            setFormData((p) => ({ ...p, shortCallStrike: option.strike }));
+                                            setTextValues((prev) => ({ ...prev, shortCallStrike: String(option.strike) }));
+                                          } else if (!formData.longCallStrike && option.strike > formData.shortCallStrike) {
+                                            handleCallCreditSpreadSelect(
+                                              options.find((c: any) => c.strike === formData.shortCallStrike),
+                                              option
+                                            );
+                                          } else {
+                                            setFormData((p) => ({ ...p, shortCallStrike: option.strike, longCallStrike: undefined, creditReceived: undefined }));
+                                            setTextValues((prev) => ({ ...prev, shortCallStrike: String(option.strike), longCallStrike: '', creditReceived: '' }));
+                                          }
                                         }
                                       }}
                                     >
-                                      <td className="p-2 font-medium">${put.strike.toFixed(2)}</td>
-                                      <td className="p-2 text-right">${put.bid?.toFixed(2) || '-'}</td>
-                                      <td className="p-2 text-right">${put.ask?.toFixed(2) || '-'}</td>
-                                      <td className="p-2 text-right">${((put.bid + put.ask) / 2).toFixed(2)}</td>
+                                      <td className="p-2 font-medium">${option.strike.toFixed(2)}</td>
+                                      <td className="p-2 text-right">${option.bid?.toFixed(2) || '-'}</td>
+                                      <td className="p-2 text-right">${option.ask?.toFixed(2) || '-'}</td>
+                                      <td className="p-2 text-right">${((option.bid + option.ask) / 2).toFixed(2)}</td>
                                       {displayableApiFactors.map((factor) => (
                                         <td key={factor.key} className="p-2 text-right">{getFactorValue(factor)}</td>
                                       ))}
                                       {displayableApiFactors.length === 0 && (
                                         <>
-                                          <td className="p-2 text-right">{put.greeks?.mid_iv ? `${(put.greeks.mid_iv * 100).toFixed(1)}%` : '-'}</td>
-                                          <td className="p-2 text-right">{put.open_interest || 0}</td>
-                                          <td className="p-2 text-right">{put.greeks?.delta?.toFixed(3) || '-'}</td>
+                                          <td className="p-2 text-right">{option.greeks?.mid_iv ? `${(option.greeks.mid_iv * 100).toFixed(1)}%` : '-'}</td>
+                                          <td className="p-2 text-right">{option.open_interest || 0}</td>
+                                          <td className="p-2 text-right">{option.greeks?.delta?.toFixed(3) || '-'}</td>
                                         </>
                                       )}
                                     </tr>
@@ -763,60 +812,113 @@ export function NewTradeEntryForm({
                               </tbody>
                             </table>
                           </div>
-                          {formData.shortPutStrike && !formData.longPutStrike && (
+                          {/* Selection status messages */}
+                          {isPutSpread && formData.shortPutStrike && !formData.longPutStrike && (
                             <div className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
                               Short put selected at ${formData.shortPutStrike}. Now select a lower strike for the long put.
                             </div>
                           )}
-                          {formData.shortPutStrike && formData.longPutStrike && (() => {
-                            const shortPut = puts.find((p: any) => p.strike === formData.shortPutStrike);
-                            const longPut = puts.find((p: any) => p.strike === formData.longPutStrike);
+                          {!isPutSpread && formData.shortCallStrike && !formData.longCallStrike && (
+                            <div className="text-xs text-muted-foreground bg-blue-50 dark:bg-blue-900/20 p-2 rounded">
+                              Short call selected at ${formData.shortCallStrike}. Now select a higher strike for the long call.
+                            </div>
+                          )}
+
+                          {/* Spread summary - Put Credit Spread */}
+                          {isPutSpread && formData.shortPutStrike && formData.longPutStrike && (() => {
+                            const shortOpt = options.find((p: any) => p.strike === formData.shortPutStrike);
+                            const longOpt = options.find((p: any) => p.strike === formData.longPutStrike);
 
                             return (
                               <div className="text-xs bg-green-50 dark:bg-green-900/20 p-3 rounded space-y-3">
                                 <div className="font-medium text-sm">Put Credit Spread Selected</div>
 
                                 <div className="grid grid-cols-2 gap-4">
-                                  {/* Short Put Details */}
                                   <div className="space-y-1">
                                     <div className="font-medium text-green-700 dark:text-green-300">Short Put: ${formData.shortPutStrike}</div>
                                     <div className="space-y-0.5 text-[10px]">
-                                      <div>Bid: ${shortPut?.bid?.toFixed(2) || '-'} / Ask: ${shortPut?.ask?.toFixed(2) || '-'}</div>
-                                      <div>Mid: ${shortPut ? ((shortPut.bid + shortPut.ask) / 2).toFixed(2) : '-'}</div>
-                                      {shortPut?.greeks?.mid_iv && <div>IV: {(shortPut.greeks.mid_iv * 100).toFixed(1)}%</div>}
-                                      {shortPut?.greeks?.delta && <div>Delta: {shortPut.greeks.delta.toFixed(3)}</div>}
-                                      {shortPut?.greeks?.gamma && <div>Gamma: {shortPut.greeks.gamma.toFixed(4)}</div>}
-                                      {shortPut?.greeks?.theta && <div>Theta: {shortPut.greeks.theta.toFixed(3)}</div>}
-                                      {shortPut?.greeks?.vega && <div>Vega: {shortPut.greeks.vega.toFixed(3)}</div>}
-                                      {shortPut?.greeks?.rho && <div>Rho: {shortPut.greeks.rho.toFixed(3)}</div>}
-                                      {shortPut?.open_interest !== undefined && <div>OI: {shortPut.open_interest}</div>}
+                                      <div>Bid: ${shortOpt?.bid?.toFixed(2) || '-'} / Ask: ${shortOpt?.ask?.toFixed(2) || '-'}</div>
+                                      <div>Mid: ${shortOpt ? ((shortOpt.bid + shortOpt.ask) / 2).toFixed(2) : '-'}</div>
+                                      {shortOpt?.greeks?.mid_iv && <div>IV: {(shortOpt.greeks.mid_iv * 100).toFixed(1)}%</div>}
+                                      {shortOpt?.greeks?.delta && <div>Delta: {shortOpt.greeks.delta.toFixed(3)}</div>}
+                                      {shortOpt?.greeks?.gamma && <div>Gamma: {shortOpt.greeks.gamma.toFixed(4)}</div>}
+                                      {shortOpt?.greeks?.theta && <div>Theta: {shortOpt.greeks.theta.toFixed(3)}</div>}
+                                      {shortOpt?.greeks?.vega && <div>Vega: {shortOpt.greeks.vega.toFixed(3)}</div>}
+                                      {shortOpt?.open_interest !== undefined && <div>OI: {shortOpt.open_interest}</div>}
                                     </div>
                                   </div>
 
-                                  {/* Long Put Details */}
                                   <div className="space-y-1">
                                     <div className="font-medium text-red-700 dark:text-red-300">Long Put: ${formData.longPutStrike}</div>
                                     <div className="space-y-0.5 text-[10px]">
-                                      <div>Bid: ${longPut?.bid?.toFixed(2) || '-'} / Ask: ${longPut?.ask?.toFixed(2) || '-'}</div>
-                                      <div>Mid: ${longPut ? ((longPut.bid + longPut.ask) / 2).toFixed(2) : '-'}</div>
-                                      {longPut?.greeks?.mid_iv && <div>IV: {(longPut.greeks.mid_iv * 100).toFixed(1)}%</div>}
-                                      {longPut?.greeks?.delta && <div>Delta: {longPut.greeks.delta.toFixed(3)}</div>}
-                                      {longPut?.greeks?.gamma && <div>Gamma: {longPut.greeks.gamma.toFixed(4)}</div>}
-                                      {longPut?.greeks?.theta && <div>Theta: {longPut.greeks.theta.toFixed(3)}</div>}
-                                      {longPut?.greeks?.vega && <div>Vega: {longPut.greeks.vega.toFixed(3)}</div>}
-                                      {longPut?.greeks?.rho && <div>Rho: {longPut.greeks.rho.toFixed(3)}</div>}
-                                      {longPut?.open_interest !== undefined && <div>OI: {longPut.open_interest}</div>}
+                                      <div>Bid: ${longOpt?.bid?.toFixed(2) || '-'} / Ask: ${longOpt?.ask?.toFixed(2) || '-'}</div>
+                                      <div>Mid: ${longOpt ? ((longOpt.bid + longOpt.ask) / 2).toFixed(2) : '-'}</div>
+                                      {longOpt?.greeks?.mid_iv && <div>IV: {(longOpt.greeks.mid_iv * 100).toFixed(1)}%</div>}
+                                      {longOpt?.greeks?.delta && <div>Delta: {longOpt.greeks.delta.toFixed(3)}</div>}
+                                      {longOpt?.greeks?.gamma && <div>Gamma: {longOpt.greeks.gamma.toFixed(4)}</div>}
+                                      {longOpt?.greeks?.theta && <div>Theta: {longOpt.greeks.theta.toFixed(3)}</div>}
+                                      {longOpt?.greeks?.vega && <div>Vega: {longOpt.greeks.vega.toFixed(3)}</div>}
+                                      {longOpt?.open_interest !== undefined && <div>OI: {longOpt.open_interest}</div>}
                                     </div>
                                   </div>
                                 </div>
 
-                                {/* Spread Summary */}
                                 <div className="pt-2 border-t border-green-200 dark:border-green-800 space-y-0.5">
                                   <div className="font-medium">Spread Summary:</div>
                                   <div>Width: ${(formData.shortPutStrike - formData.longPutStrike).toFixed(2)}</div>
                                   <div>Net Credit: ${formData.creditReceived?.toFixed(2)}</div>
                                   <div>Max Profit: ${formData.creditReceived?.toFixed(2)} (per spread)</div>
                                   <div>Max Loss: ${((formData.shortPutStrike - formData.longPutStrike) - (formData.creditReceived || 0)).toFixed(2)} (per spread)</div>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {/* Spread summary - Call Credit Spread */}
+                          {!isPutSpread && formData.shortCallStrike && formData.longCallStrike && (() => {
+                            const shortOpt = options.find((c: any) => c.strike === formData.shortCallStrike);
+                            const longOpt = options.find((c: any) => c.strike === formData.longCallStrike);
+
+                            return (
+                              <div className="text-xs bg-green-50 dark:bg-green-900/20 p-3 rounded space-y-3">
+                                <div className="font-medium text-sm">Call Credit Spread Selected</div>
+
+                                <div className="grid grid-cols-2 gap-4">
+                                  <div className="space-y-1">
+                                    <div className="font-medium text-green-700 dark:text-green-300">Short Call: ${formData.shortCallStrike}</div>
+                                    <div className="space-y-0.5 text-[10px]">
+                                      <div>Bid: ${shortOpt?.bid?.toFixed(2) || '-'} / Ask: ${shortOpt?.ask?.toFixed(2) || '-'}</div>
+                                      <div>Mid: ${shortOpt ? ((shortOpt.bid + shortOpt.ask) / 2).toFixed(2) : '-'}</div>
+                                      {shortOpt?.greeks?.mid_iv && <div>IV: {(shortOpt.greeks.mid_iv * 100).toFixed(1)}%</div>}
+                                      {shortOpt?.greeks?.delta && <div>Delta: {shortOpt.greeks.delta.toFixed(3)}</div>}
+                                      {shortOpt?.greeks?.gamma && <div>Gamma: {shortOpt.greeks.gamma.toFixed(4)}</div>}
+                                      {shortOpt?.greeks?.theta && <div>Theta: {shortOpt.greeks.theta.toFixed(3)}</div>}
+                                      {shortOpt?.greeks?.vega && <div>Vega: {shortOpt.greeks.vega.toFixed(3)}</div>}
+                                      {shortOpt?.open_interest !== undefined && <div>OI: {shortOpt.open_interest}</div>}
+                                    </div>
+                                  </div>
+
+                                  <div className="space-y-1">
+                                    <div className="font-medium text-red-700 dark:text-red-300">Long Call: ${formData.longCallStrike}</div>
+                                    <div className="space-y-0.5 text-[10px]">
+                                      <div>Bid: ${longOpt?.bid?.toFixed(2) || '-'} / Ask: ${longOpt?.ask?.toFixed(2) || '-'}</div>
+                                      <div>Mid: ${longOpt ? ((longOpt.bid + longOpt.ask) / 2).toFixed(2) : '-'}</div>
+                                      {longOpt?.greeks?.mid_iv && <div>IV: {(longOpt.greeks.mid_iv * 100).toFixed(1)}%</div>}
+                                      {longOpt?.greeks?.delta && <div>Delta: {longOpt.greeks.delta.toFixed(3)}</div>}
+                                      {longOpt?.greeks?.gamma && <div>Gamma: {longOpt.greeks.gamma.toFixed(4)}</div>}
+                                      {longOpt?.greeks?.theta && <div>Theta: {longOpt.greeks.theta.toFixed(3)}</div>}
+                                      {longOpt?.greeks?.vega && <div>Vega: {longOpt.greeks.vega.toFixed(3)}</div>}
+                                      {longOpt?.open_interest !== undefined && <div>OI: {longOpt.open_interest}</div>}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="pt-2 border-t border-green-200 dark:border-green-800 space-y-0.5">
+                                  <div className="font-medium">Spread Summary:</div>
+                                  <div>Width: ${(formData.longCallStrike - formData.shortCallStrike).toFixed(2)}</div>
+                                  <div>Net Credit: ${formData.creditReceived?.toFixed(2)}</div>
+                                  <div>Max Profit: ${formData.creditReceived?.toFixed(2)} (per spread)</div>
+                                  <div>Max Loss: ${((formData.longCallStrike - formData.shortCallStrike) - (formData.creditReceived || 0)).toFixed(2)} (per spread)</div>
                                 </div>
                               </div>
                             );

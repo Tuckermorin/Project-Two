@@ -43,22 +43,28 @@ export async function POST(request: NextRequest) {
 
     console.log(`[Dashboard Refresh Jobs API] Created job ${job.id} for user ${user.id}`);
 
-    // Trigger the worker to process the job
+    // Trigger the worker to process the job directly (no fetch, run inline)
+    // This ensures the job actually gets processed instead of relying on fire-and-forget fetch
     try {
-      const baseUrl = process.env.VERCEL_URL
-        ? `https://${process.env.VERCEL_URL}`
-        : process.env.NEXT_PUBLIC_APP_URL || 'http://localhost:3000';
+      const { runDashboardRefreshJob } = await import('@/lib/dashboard/refresh-job-runner');
 
-      // Fire and forget - don't wait for response
-      fetch(`${baseUrl}/api/dashboard/refresh-jobs/worker/process`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ jobId: job.id })
-      }).catch(err => {
-        console.warn('[Dashboard Refresh Jobs API] Worker trigger failed (job will be picked up by polling):', err.message);
+      // Process the job in the background (don't await)
+      runDashboardRefreshJob(job.id).catch(err => {
+        console.error(`[Dashboard Refresh Jobs API] Job ${job.id} failed:`, err.message);
       });
+
+      console.log(`[Dashboard Refresh Jobs API] Job ${job.id} processing started`);
     } catch (triggerError) {
-      console.warn('[Dashboard Refresh Jobs API] Could not trigger worker, job will be picked up by polling');
+      console.error('[Dashboard Refresh Jobs API] Could not start job processing:', triggerError);
+      // Mark job as failed if we can't even start it
+      await supabase
+        .from('dashboard_refresh_jobs')
+        .update({
+          status: 'failed',
+          error_message: 'Failed to start job processing',
+          completed_at: new Date().toISOString()
+        })
+        .eq('id', job.id);
     }
 
     return NextResponse.json({

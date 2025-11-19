@@ -210,10 +210,14 @@ export class AlphaVantageClient {
     }
   }
 
-  private async makeRequest<T>(params: Record<string, string>): Promise<T> {
+  private async sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  private async makeRequest<T>(params: Record<string, string>, retries = 3): Promise<T> {
     const url = new URL('/query', this.baseUrl);
     url.searchParams.set('apikey', this.config.apiKey);
-    
+
     Object.entries(params).forEach(([key, value]) => {
       url.searchParams.set(key, value);
     });
@@ -221,39 +225,71 @@ export class AlphaVantageClient {
     const entitlement = process.env.ALPHA_VANTAGE_ENTITLEMENT || 'realtime';
     if (entitlement) url.searchParams.set('entitlement', entitlement);
 
-    try {
-      const response = await fetch(url.toString());
-      
-      if (!response.ok) {
-        throw new AlphaVantageError(
-          `HTTP error! status: ${response.status}`,
-          response.status
-        );
-      }
+    let lastError: Error | null = null;
 
-      const data = await response.json();
-      
-      // Check for API error responses
-      if (data['Error Message']) {
-        throw new AlphaVantageError(data['Error Message']);
-      }
-      
-      if (data['Note']) {
-        throw new AlphaVantageError(
-          'API rate limit exceeded. Please try again later.',
-          429
-        );
-      }
+    for (let attempt = 0; attempt <= retries; attempt++) {
+      try {
+        const response = await fetch(url.toString());
 
-      return data;
-    } catch (error) {
-      if (error instanceof AlphaVantageError) {
-        throw error;
+        // Handle 503 with retry
+        if (response.status === 503) {
+          if (attempt < retries) {
+            const backoffMs = Math.min(1000 * Math.pow(2, attempt), 8000); // Max 8 seconds
+            console.warn(`AlphaVantage 503 error, retrying in ${backoffMs}ms (attempt ${attempt + 1}/${retries})`);
+            await this.sleep(backoffMs);
+            continue;
+          }
+          throw new AlphaVantageError(
+            `Service temporarily unavailable after ${retries} retries`,
+            503
+          );
+        }
+
+        if (!response.ok) {
+          throw new AlphaVantageError(
+            `HTTP error! status: ${response.status}`,
+            response.status
+          );
+        }
+
+        const data = await response.json();
+
+        // Check for API error responses
+        if (data['Error Message']) {
+          throw new AlphaVantageError(data['Error Message']);
+        }
+
+        if (data['Note']) {
+          throw new AlphaVantageError(
+            'API rate limit exceeded. Please try again later.',
+            429
+          );
+        }
+
+        return data;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error('Unknown error');
+
+        if (error instanceof AlphaVantageError) {
+          // Don't retry on non-503 errors
+          if (error.statusCode !== 503) {
+            throw error;
+          }
+        } else {
+          // Network errors - retry
+          if (attempt < retries) {
+            const backoffMs = Math.min(1000 * Math.pow(2, attempt), 8000);
+            console.warn(`Network error, retrying in ${backoffMs}ms (attempt ${attempt + 1}/${retries})`);
+            await this.sleep(backoffMs);
+            continue;
+          }
+        }
       }
-      throw new AlphaVantageError(
-        `Network error: ${error instanceof Error ? error.message : 'Unknown error'}`
-      );
     }
+
+    throw new AlphaVantageError(
+      `Request failed after ${retries} retries: ${lastError?.message || 'Unknown error'}`
+    );
   }
   private parseNumber(value: any): number | null {
     if (value === null || value === undefined) return null;
@@ -630,24 +666,6 @@ export class AlphaVantageClient {
     const first = Object.keys(block)[0];
     if (!first) return null;
     return { date: first, values: block[first] };
-  }
-
-  async getSMA(symbol: string, timePeriod = 50, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
-    const data = await this.makeRequest<any>({
-      function: 'SMA', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
-    });
-    const latest = this.extractLatestFromTA(data, 'Technical Analysis: SMA');
-    const v = latest?.values?.SMA != null ? Number(latest.values.SMA) : null;
-    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
-  }
-
-  async getRSI(symbol: string, timePeriod = 14, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {
-    const data = await this.makeRequest<any>({
-      function: 'RSI', symbol: symbol.toUpperCase(), interval, time_period: String(timePeriod), series_type: seriesType
-    });
-    const latest = this.extractLatestFromTA(data, 'Technical Analysis: RSI');
-    const v = latest?.values?.RSI != null ? Number(latest.values.RSI) : null;
-    return { value: Number.isFinite(v) ? v : null, date: latest?.date || null };
   }
 
   async getMACD(symbol: string, interval: 'daily' | 'weekly' | 'monthly' = 'daily', seriesType: 'close' | 'open' | 'high' | 'low' = 'close') {

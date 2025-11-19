@@ -62,6 +62,39 @@ async function updateJobProgress(
 export async function runDashboardRefreshJob(jobId: string) {
   console.log(`[Dashboard Refresh Job] Starting job ${jobId}`);
 
+  // Create a timeout promise (4 minutes - before the 5min maxDuration hits)
+  const timeoutMs = 4 * 60 * 1000;
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => reject(new Error('Job execution timeout after 4 minutes')), timeoutMs);
+  });
+
+  try {
+    // Race the job execution against the timeout
+    await Promise.race([
+      executeJobLogic(jobId),
+      timeoutPromise
+    ]);
+  } catch (error: any) {
+    console.error(`[Dashboard Refresh Job] Job ${jobId} failed:`, error);
+
+    await updateJobProgress(jobId, {
+      status: 'failed',
+      completed_at: new Date().toISOString(),
+      error_message: error.message || 'Unknown error',
+      error_details: {
+        stack: error.stack,
+        name: error.name
+      }
+    });
+
+    throw error;
+  }
+}
+
+/**
+ * Execute the actual job logic (separated for timeout handling)
+ */
+async function executeJobLogic(jobId: string) {
   try {
     // Get job details using service role (bypasses RLS)
     const { createClient } = await import('@supabase/supabase-js');
@@ -186,18 +219,7 @@ export async function runDashboardRefreshJob(jobId: string) {
     console.log(`[Dashboard Refresh Job] Job ${jobId} completed successfully`);
 
   } catch (error: any) {
-    console.error(`[Dashboard Refresh Job] Job ${jobId} failed:`, error);
-
-    await updateJobProgress(jobId, {
-      status: 'failed',
-      completed_at: new Date().toISOString(),
-      error_message: error.message || 'Unknown error',
-      error_details: {
-        stack: error.stack,
-        name: error.name
-      }
-    });
-
+    // Re-throw error to be caught by outer handler
     throw error;
   }
 }

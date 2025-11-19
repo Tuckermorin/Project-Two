@@ -137,7 +137,16 @@ class MarketDataService {
  */
     async getUnifiedStockData(symbol: string, includeFundamentals = true): Promise<UnifiedStockData> {
     console.log(`Getting unified stock data for ${symbol}`);
-    
+
+    // Check quote cache first (1 minute TTL for real-time quotes)
+    const quoteCacheKey = `quote_${symbol}`;
+    const cachedQuote = this.getFromCache<any>(quoteCacheKey);
+
+    if (cachedQuote && (Date.now() - cachedQuote.timestamp.getTime() < 60 * 1000)) {
+      console.log(`Using cached quote for ${symbol}`);
+      return cachedQuote.data;
+    }
+
     try {
         // Use Alpha Vantage quote for current price data
         const gq = await this.alphaVantage.getQuote(symbol);
@@ -209,7 +218,7 @@ class MarketDataService {
         }
         }
 
-        return {
+        const result = {
         symbol: quote.symbol || symbol,
         currentPrice: quote.last || 0,
         previousClose: quote.prevclose || 0,
@@ -226,9 +235,19 @@ class MarketDataService {
         fundamentals
         };
 
+        // Cache the result (1 minute TTL)
+        this.setCache(quoteCacheKey, { data: result, timestamp: new Date() });
+
+        return result;
+
     } catch (error) {
-        console.error(`Failed to get unified stock data for ${symbol}:`, error);
-        
+        // Only log non-503 errors in detail (503s are already logged with retry info)
+        if (error instanceof Error && error.message.includes('503')) {
+          console.warn(`AlphaVantage temporarily unavailable for ${symbol}, returning empty data`);
+        } else {
+          console.error(`Failed to get unified stock data for ${symbol}:`, error);
+        }
+
         return {
         symbol,
         currentPrice: 0,
