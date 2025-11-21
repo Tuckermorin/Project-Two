@@ -179,14 +179,14 @@ async function preFilterGeneral(state: AgentState): Promise<Partial<AgentState>>
 
       // Fetch technical indicators in parallel
       const [sma200Data, sma50Data, momentumData] = await Promise.all([
-        queue.add(() => pRetry(() => avClient.getSMA(symbol, 200, 'daily', 'close'), { retries: 2 })),
-        queue.add(() => pRetry(() => avClient.getSMA(symbol, 50, 'daily', 'close'), { retries: 2 })),
+        queue.add(() => pRetry(() => avClient.getSMA(symbol, 'daily', 200, 'close'), { retries: 2 })),
+        queue.add(() => pRetry(() => avClient.getSMA(symbol, 'daily', 50, 'close'), { retries: 2 })),
         queue.add(() => pRetry(() => avClient.getMOM(symbol, 'daily', 10, 'close'), { retries: 2 })),
       ]);
 
       // Extract values from SMA/MOM responses
-      const sma200 = sma200Data?.value || null;
-      const sma50 = sma50Data?.value || null;
+      const sma200 = sma200Data ?? null;
+      const sma50 = sma50Data ?? null;
       const momentum = momentumData || null;
 
       // Get pre-calculated IV data from batch fetch

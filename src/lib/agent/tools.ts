@@ -466,8 +466,8 @@ export class GetSMATool extends StructuredTool {
       const avClient = getAlphaVantageClient();
       const data = await avClient.getSMA(
         input.symbol,
-        input.timePeriod || 50,
         input.interval || "daily",
+        input.timePeriod || 50,
         "close"
       );
 

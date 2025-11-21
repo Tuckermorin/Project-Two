@@ -62,8 +62,8 @@ export async function POST(request: NextRequest) {
     const overview = await avClient.getCompanyOverview(symbol);
 
     console.log(`[Audit] Fetching technical indicators...`);
-    const sma50Promise = avClient.getSMA(symbol, 50);
-    const sma200Promise = avClient.getSMA(symbol, 200);
+    const sma50Promise = avClient.getSMA(symbol, 'daily', 50);
+    const sma200Promise = avClient.getSMA(symbol, 'daily', 200);
     const momentumPromise = avClient.getMOM(symbol, 10);
 
     console.log(`[Audit] Fetching news sentiment...`);
