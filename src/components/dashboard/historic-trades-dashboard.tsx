@@ -268,14 +268,82 @@ export default function HistoricTradesDashboard() {
   const hasActiveIPS = false
   const activeIPSFactors: string[] = []
 
+  const [currentPage, setCurrentPage] = useState(1)
+  const [totalTrades, setTotalTrades] = useState(0)
+  const [allTradesForStats, setAllTradesForStats] = useState<HistoricTrade[]>([])
+  const TRADES_PER_PAGE = 25
+
   const loadTrades = useCallback(async () => {
     try {
       setLoading(true)
       setError(null)
-      const res = await fetch(`/api/trades?status=closed`, { cache: 'no-store' })
+
+      // Calculate offset for pagination
+      const offset = (currentPage - 1) * TRADES_PER_PAGE
+
+      const res = await fetch(`/api/trades?status=closed&limit=${TRADES_PER_PAGE}&offset=${offset}`, { cache: 'no-store' })
       const json = await res.json()
       if (!res.ok) throw new Error(json?.error || 'Failed to load closed trades')
       const rows = (json?.data || []) as any[]
+
+      // Also fetch ALL trades for statistics (only on first page)
+      if (currentPage === 1) {
+        const allTradesRes = await fetch(`/api/trades?status=closed&limit=1000`, { cache: 'no-store' })
+        const allTradesJson = await allTradesRes.json()
+        const allRows = (allTradesJson?.data || []) as any[]
+        setTotalTrades(allRows.length)
+
+        // Map all trades for statistics calculation
+        let closeMap: Record<string, any> = {}
+        try { const raw = localStorage.getItem('tenxiv:trade-closures'); closeMap = raw ? JSON.parse(raw) : {} } catch {}
+
+        const toTitle = (s:string)=> s.replace(/-/g,' ').replace(/\b\w/g,m=>m.toUpperCase())
+        const allMapped: HistoricTrade[] = allRows.map((r:any)=>{
+          const closureArr = Array.isArray(r.trade_closures) ? r.trade_closures : (r.trade_closures ? [r.trade_closures] : [])
+          const closure = closureArr[0] || null
+          const details = closure || closeMap[r.id] || {}
+          const credit = Number(r.credit_received ?? 0) || 0
+          const closeCost = typeof details.cost_to_close_per_spread === 'number' ? details.cost_to_close_per_spread : (typeof details.costToClose === 'number' ? details.costToClose : undefined)
+          const contracts = Number(r.number_of_contracts ?? details.contractsClosed ?? 0) || 0
+          const actualPL = typeof details.realized_pl === 'number' ? details.realized_pl : (typeof details.plDollar === 'number' ? details.plDollar : (closeCost!=null ? (credit - closeCost) * contracts * 100 : 0))
+          const actualPLPercent = typeof details.realized_pl_percent === 'number' ? details.realized_pl_percent : (typeof details.plPercent === 'number' ? details.plPercent : (credit ? ((credit - (closeCost ?? 0))/credit)*100 : 0))
+          return {
+            id: r.id,
+            name: r.name || r.symbol,
+            placed: r.entry_date || r.created_at || '',
+            closedDate: details.close_date || details.date || r.closed_at || r.updated_at || r.created_at,
+            closedPrice: closeCost ?? 0,
+            contractType: toTitle(String(r.contract_type || '')),
+            contracts,
+            shortStrike: Number(r.short_strike ?? 0) || 0,
+            longStrike: Number(r.long_strike ?? 0) || 0,
+            creditReceived: credit,
+            premiumAtClose: closeCost ?? 0,
+            actualPL,
+            actualPLPercent,
+            maxGain: Number(r.max_gain ?? 0) || 0,
+            maxLoss: Number(r.max_loss ?? 0) || 0,
+            deltaShortLeg: Number(r.delta_short_leg ?? 0) || 0,
+            deltaAtClose: 0,
+            theta: Number(r.theta ?? 0) || 0,
+            thetaAtClose: 0,
+            vega: Number(r.vega ?? 0) || 0,
+            vegaAtClose: 0,
+            gamma: 0,
+            gammaAtClose: 0,
+            rho: 0,
+            rhoAtClose: 0,
+            ivAtEntry: Number(r.iv_at_entry ?? 0) || 0,
+            ivAtClose: 0,
+            sector: r.sector || '-',
+            closingReason: details.close_method || details.reason || 'Closed',
+            ipsScore: typeof r.ips_score === 'number' ? Number(r.ips_score) : undefined,
+            ipsName: details.ips_name || r.ips_name || r.ips_configurations?.name || null,
+          } as HistoricTrade
+        })
+        setAllTradesForStats(allMapped)
+      }
+
       let closeMap: Record<string, any> = {}
       try { const raw = localStorage.getItem('tenxiv:trade-closures'); closeMap = raw ? JSON.parse(raw) : {} } catch {}
 
@@ -332,11 +400,16 @@ export default function HistoricTradesDashboard() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [currentPage])
 
   useEffect(() => {
     loadTrades()
   }, [loadTrades])
+
+  // Reset to page 1 when changing filters
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [filterText, reasonFilter, ipsFilter])
 
   useEffect(() => {
     const handler = () => loadTrades()
@@ -442,9 +515,11 @@ export default function HistoricTradesDashboard() {
     }
   }
 
-  // Calculate summary statistics
+  // Calculate summary statistics from ALL trades (not just current page)
   const stats = React.useMemo(() => {
-    if (trades.length === 0) {
+    const statsSource = allTradesForStats.length > 0 ? allTradesForStats : trades
+
+    if (statsSource.length === 0) {
       return {
         totalTrades: 0,
         winRate: 0,
@@ -455,20 +530,20 @@ export default function HistoricTradesDashboard() {
       }
     }
 
-    const wins = trades.filter(t => t.actualPL > 0)
-    const losses = trades.filter(t => t.actualPL < 0)
+    const wins = statsSource.filter(t => t.actualPL > 0)
+    const losses = statsSource.filter(t => t.actualPL < 0)
     const totalWins = wins.reduce((sum, t) => sum + t.actualPL, 0)
     const totalLosses = Math.abs(losses.reduce((sum, t) => sum + t.actualPL, 0))
 
     return {
-      totalTrades: trades.length,
-      winRate: (wins.length / trades.length) * 100,
-      totalPL: trades.reduce((sum, t) => sum + t.actualPL, 0),
+      totalTrades: statsSource.length,
+      winRate: (wins.length / statsSource.length) * 100,
+      totalPL: statsSource.reduce((sum, t) => sum + t.actualPL, 0),
       avgWin: wins.length > 0 ? totalWins / wins.length : 0,
       avgLoss: losses.length > 0 ? totalLosses / losses.length : 0,
       profitFactor: totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0
     }
-  }, [trades])
+  }, [allTradesForStats, trades])
 
   // Process trades (filter and sort)
   const processedTrades = React.useMemo(() => {
@@ -806,7 +881,7 @@ export default function HistoricTradesDashboard() {
         <div>
           <CardTitle>Trade History</CardTitle>
           <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-            {processedTrades.length} closed {processedTrades.length === 1 ? 'trade' : 'trades'}
+            {totalTrades > 0 ? `${totalTrades} total closed ${totalTrades === 1 ? 'trade' : 'trades'}` : `${processedTrades.length} closed ${processedTrades.length === 1 ? 'trade' : 'trades'}`}
           </p>
         </div>
 
@@ -1013,6 +1088,36 @@ export default function HistoricTradesDashboard() {
             </tbody>
           </table>
         </div>
+
+        {/* Pagination Controls */}
+        {totalTrades > TRADES_PER_PAGE && (
+          <div className="mt-6 flex items-center justify-between border-t pt-4">
+            <div className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+              Showing {((currentPage - 1) * TRADES_PER_PAGE) + 1} to {Math.min(currentPage * TRADES_PER_PAGE, totalTrades)} of {totalTrades} trades
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1 || loading}
+              >
+                Previous
+              </Button>
+              <div className="flex items-center gap-2 px-3" style={{ color: 'var(--text-secondary)' }}>
+                Page {currentPage} of {Math.ceil(totalTrades / TRADES_PER_PAGE)}
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => p + 1)}
+                disabled={currentPage >= Math.ceil(totalTrades / TRADES_PER_PAGE) || loading}
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </CardContent>
     </Card>
     <Dialog

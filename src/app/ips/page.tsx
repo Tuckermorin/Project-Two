@@ -533,9 +533,6 @@ export default function IPSPage() {
 
   const handleEditIPS = async (ipsId: string) => {
     const ips = allIPSs.find((i) => i.id === ipsId);
-    console.log('[handleEditIPS] Found IPS:', ips);
-    console.log('[handleEditIPS] exit_strategies:', ips?.exit_strategies);
-    console.log('[handleEditIPS] watch_criteria:', ips?.watch_criteria);
     if (!ips) return;
 
     const { data: factors, error } = await supabase

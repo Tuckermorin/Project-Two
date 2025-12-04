@@ -192,14 +192,12 @@ export async function GET(request: NextRequest) {
     const offset = searchParams.get('offset') ? parseInt(searchParams.get('offset')!, 10) : 0;
     const userId = user.id;
 
-    console.log('[Trades API GET] Fetching trades for userId:', userId, 'status:', status, 'limit:', limit, 'offset:', offset);
-
     // RLS automatically filters by user_id
     let query = supabase
       .from('trades')
       .select(`
         *,
-        ips_configurations!ips_id(name, description),
+        ips_configurations!ips_id(name, description, exit_strategies, watch_criteria),
         trade_factors(
           factor_name,
           factor_value,

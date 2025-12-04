@@ -219,7 +219,9 @@ export function evaluateExitStrategy(
   },
   exitStrategies?: ExitStrategies
 ): ExitSignal | null {
-  if (!exitStrategies) return null
+  if (!exitStrategies) {
+    return null
+  }
 
   // Check profit target
   if (exitStrategies.profit?.enabled && trade.credit_received && trade.current_price) {

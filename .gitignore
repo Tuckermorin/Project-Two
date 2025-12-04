@@ -55,3 +55,15 @@ out
 # temporary/marker files
 agent-run-marker.txt
 analysis-log.txt
+
+# logs
+/logs
+logs/
+*.log
+
+# Claude Code specific
+.claude/
+.claude
+
+# Build info
+tsconfig.tsbuildinfo

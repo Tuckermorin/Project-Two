@@ -221,8 +221,8 @@ export class AlphaVantageClient {
     Object.entries(params).forEach(([key, value]) => {
       url.searchParams.set(key, value);
     });
-    // Prefer realtime data if enabled on the account
-    const entitlement = process.env.ALPHA_VANTAGE_ENTITLEMENT || 'realtime';
+    // Only add entitlement if explicitly set (some premium tiers don't need it)
+    const entitlement = process.env.ALPHA_VANTAGE_ENTITLEMENT;
     if (entitlement) url.searchParams.set('entitlement', entitlement);
 
     let lastError: Error | null = null;
@@ -402,7 +402,19 @@ export class AlphaVantageClient {
       symbol: symbol.toUpperCase()
     });
 
-    return response['Global Quote'];
+    // Log the full response for debugging
+    console.log(`Alpha Vantage response for ${symbol}:`, JSON.stringify(response, null, 2));
+
+    const globalQuote = response['Global Quote'];
+
+    if (!globalQuote || Object.keys(globalQuote).length === 0) {
+      throw new AlphaVantageError(
+        `No quote data returned for ${symbol}. Response: ${JSON.stringify(response)}`,
+        404
+      );
+    }
+
+    return globalQuote;
   }
 
   /**

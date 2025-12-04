@@ -150,6 +150,11 @@ class MarketDataService {
     try {
         // Use Alpha Vantage quote for current price data
         const gq = await this.alphaVantage.getQuote(symbol);
+
+        if (!gq) {
+          throw new Error(`getQuote returned null/undefined for ${symbol}`);
+        }
+
         const last = parseFloat(gq['05. price'] ?? '0');
         const prev = parseFloat(gq['08. previous close'] ?? '0');
         const vol = parseFloat(gq['06. volume'] ?? '0');

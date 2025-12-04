@@ -362,21 +362,47 @@ export default function ExcelStyleTradesDashboard() {
           } catch {}
         }
 
-        // Fetch IPS configurations with exit strategies
+        // Build IPS map from trades API response (already includes exit_strategies and watch_criteria)
+        // or fallback to separate IPS API call if needed
         let ipsMap: Record<string, any> = {}
-        try {
-          const ipsRes = await fetch('/api/ips')
-          const ipsJson = await ipsRes.json()
-          console.log('[Dashboard] Loaded IPS configurations:', ipsJson)
-          if (ipsRes.ok && Array.isArray(ipsJson)) {
-            ipsJson.forEach((ips: any) => {
-              ipsMap[ips.id] = ips
-              console.log(`[Dashboard] IPS ${ips.name} exit_strategies:`, ips.exit_strategies)
-            })
+
+        // First, extract IPS data from the trades response (preferred method)
+        rows.forEach((r: any) => {
+          if (r.ips_id && r.ips_configurations) {
+            // Supabase returns the joined data directly as an object (not an array)
+            const ipsConfig = r.ips_configurations
+
+            ipsMap[r.ips_id] = {
+              id: r.ips_id,
+              name: ipsConfig.name,
+              description: ipsConfig.description,
+              exit_strategies: ipsConfig.exit_strategies,
+              watch_criteria: ipsConfig.watch_criteria
+            }
           }
-        } catch (e) {
-          console.error('Failed to load IPS configurations:', e)
+        })
+
+        // If any trades have IPS IDs but no nested data, fetch from IPS API
+        const missingIpsIds = rows
+          .filter((r: any) => r.ips_id && !ipsMap[r.ips_id])
+          .map((r: any) => r.ips_id)
+
+        if (missingIpsIds.length > 0) {
+          try {
+            const ipsRes = await fetch('/api/ips')
+            const ipsJson = await ipsRes.json()
+            if (ipsRes.ok && Array.isArray(ipsJson)) {
+              ipsJson.forEach((ips: any) => {
+                if (missingIpsIds.includes(ips.id)) {
+                  ipsMap[ips.id] = ips
+                }
+              })
+            }
+          } catch (e) {
+            console.error('Failed to load IPS configurations:', e)
+          }
         }
+
         const normalized: Trade[] = rows.map((r:any) => {
           const current = (quoteMap[r.symbol] ?? Number(r.current_price ?? 0)) || 0
           const short = Number(r.short_strike ?? r.strike_price_short ?? 0) || 0
@@ -386,6 +412,10 @@ export default function ExcelStyleTradesDashboard() {
 
           // Evaluate IPS if exists
           const ips = r.ips_id ? ipsMap[r.ips_id] : null
+
+          if (ips) {
+            console.log(`[Dashboard] Trade ${r.symbol} using IPS ${ips.name}, exit_strategies:`, ips.exit_strategies)
+          }
 
           // For credit spreads, use the spread price (current_spread_price) for exit evaluation
           // This is the actual cost to close the spread, not the underlying stock price
@@ -417,7 +447,19 @@ export default function ExcelStyleTradesDashboard() {
             max_gain: Number(r.max_gain ?? 0),
             max_loss: Number(r.max_loss ?? 0),
           }
+
+          console.log(`[Dashboard] ${r.symbol} evaluation data:`, {
+            spreadPrice,
+            creditReceived: tradeForEval.credit_received,
+            hasIps: !!ips,
+            exitStrategies: ips?.exit_strategies
+          })
+
           const exitSignal = ips?.exit_strategies ? evaluateExitStrategy(tradeForEval, ips.exit_strategies) : null
+
+          if (exitSignal) {
+            console.log(`[Dashboard] ${r.symbol} exit signal:`, exitSignal)
+          }
 
           // Calculate current P/L from spread price (spreadPrice already declared above)
           const creditReceived = Number(r.credit_received ?? 0) || 0
@@ -585,16 +627,12 @@ export default function ExcelStyleTradesDashboard() {
 
       // First, backfill any missing IPS scores
       try {
-        console.log('[Refresh] Checking for missing IPS scores...')
         const backfillRes = await fetch('/api/trades/backfill-ips', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           cache: 'no-store'
         })
-        const backfillData = await backfillRes.json()
-        if (backfillRes.ok && backfillData.summary?.updated > 0) {
-          console.log(`[Refresh] Backfilled ${backfillData.summary.updated} IPS scores`)
-        }
+        await backfillRes.json()
       } catch (backfillError) {
         console.error('[Refresh] IPS backfill failed (non-critical):', backfillError)
         // Don't fail the whole refresh if backfill fails
@@ -603,7 +641,6 @@ export default function ExcelStyleTradesDashboard() {
       // Submit background job for refresh
       const jobId = await submitRefreshJob()
       setRefreshJobId(jobId)
-      console.log(`[Refresh] Started background refresh job: ${jobId}`)
 
       // Job will be polled by the useEffect hook above
       // User can now navigate away - job runs in background!
